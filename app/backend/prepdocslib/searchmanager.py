@@ -39,6 +39,8 @@ from azure.search.documents.indexes.models import (
     VectorSearchProfile,
     VectorSearchVectorizer,
     WebKnowledgeSource,
+    WebKnowledgeSourceParameters,
+    WebKnowledgeSourceDomains,
 )
 
 from .blobmanager import BlobManager
@@ -512,8 +514,37 @@ class SearchManager:
 
                 if self.use_web_source:
                     logger.info("Adding web knowledge source to the knowledge base")
+                    # Parse allowed domains from environment variable
+                    web_parameters = None
+                    web_source_allowed_domains_str = "https://www.lawgowhere.sg/"
+                    if web_source_allowed_domains_str:
+                        allowed_domains_list = []
+                        for domain in web_source_allowed_domains_str.split(","):
+                            domain = domain.strip()
+                            if not domain:
+                                continue
+                            # Handle wildcard subdomain pattern (e.g., *.example.com)
+                            if domain.startswith("*."):
+                                # For wildcard patterns, strip the * and include subpages
+                                allowed_domains_list.append({"address": domain[2:], "include_subpages": True})
+                            else:
+                                # For exact domains, include subpages by default
+                                allowed_domains_list.append({"address": domain, "include_subpages": True})
+                        
+                        if allowed_domains_list:
+                            web_parameters = WebKnowledgeSourceParameters(
+                                domains=WebKnowledgeSourceDomains(
+                                    allowed_domains=allowed_domains_list
+                                )
+                            )
+                            logger.info(
+                                "Web knowledge source configured with %d allowed domain(s)",
+                                len(allowed_domains_list)
+                            )
+                    
                     web_knowledge_source = WebKnowledgeSource(
-                        name="web"
+                        name="web",
+                        web_parameters=web_parameters
                         # We do not specify a description here, since the default description is quite detailed already
                     )
                     await search_index_client.create_or_update_knowledge_source(knowledge_source=web_knowledge_source)

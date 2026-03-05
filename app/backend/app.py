@@ -203,6 +203,32 @@ async def format_as_ndjson(r: AsyncGenerator[dict, None]) -> AsyncGenerator[str,
         yield json.dumps(error_dict(error))
 
 
+def _is_small_talk_message(messages: list[dict[str, Any]]) -> bool:
+    """Heuristic: detect very short small-talk like 'hi', 'hello', 'thanks' to fast-path without RAG."""
+    if not messages:
+        return False
+    last = messages[-1]
+    content = last.get("content")
+    if not isinstance(content, str):
+        return False
+    text = content.strip().lower()
+    if not text:
+        return False
+    # Limit to very short, clearly non-legal greetings/thanks
+    if len(text) > 40:
+        return False
+    small_talk_phrases = [
+        "hi",
+        "hello",
+        "hey",
+        "thank you",
+        "thanks",
+        "hi there",
+        "hello there",
+    ]
+    return any(text == phrase or text.startswith(phrase + " ") for phrase in small_talk_phrases)
+
+
 @bp.route("/chat", methods=["POST"])
 @authenticated
 async def chat(auth_claims: dict[str, Any]):
@@ -222,8 +248,37 @@ async def chat(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+
+        messages: list[dict[str, Any]] = request_json.get("messages", [])
+
+        # Fast path: handle very short small-talk locally without calling RAG / LLM stack.
+        if _is_small_talk_message(messages):
+            reply = (
+                "Hi, I am the Legal Chatbot for volunteers. "
+                "Please briefly describe the applicant's situation so I can provide Part A (general info) "
+                "and Part B (questions to ask the applicant)."
+            )
+            empty_data_points = DataPoints(
+                text=[],
+                images=[],
+                citations=[],
+                citation_activity_details=None,
+                external_results_metadata=None,
+            )
+            quick_response = {
+                "message": {"content": reply, "role": "assistant"},
+                "delta": {"content": reply, "role": "assistant"},
+                "context": {
+                    "data_points": empty_data_points,
+                    "followup_questions": None,
+                    "thoughts": [],
+                },
+                "session_state": session_state,
+            }
+            return jsonify(quick_response)
+
         result = await approach.run(
-            request_json["messages"],
+            messages,
             context=context,
             session_state=session_state,
         )
@@ -251,8 +306,42 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+
+        messages: list[dict[str, Any]] = request_json.get("messages", [])
+
+        # Fast path for small-talk in streaming mode: return a single quick assistant message.
+        if _is_small_talk_message(messages):
+            reply = (
+                "Hi, I am the Legal Chatbot for volunteers. "
+                "Please briefly describe the applicant's situation so I can provide Part A (general info) "
+                "and Part B (questions to ask the applicant)."
+            )
+            empty_data_points = DataPoints(
+                text=[],
+                images=[],
+                citations=[],
+                citation_activity_details=None,
+                external_results_metadata=None,
+            )
+
+            async def small_talk_stream() -> AsyncGenerator[dict, None]:
+                yield {
+                    "delta": {"role": "assistant", "content": reply},
+                    "context": {
+                        "data_points": empty_data_points,
+                        "followup_questions": None,
+                        "thoughts": [],
+                    },
+                    "session_state": session_state,
+                }
+
+            response = await make_response(format_as_ndjson(small_talk_stream()))
+            response.timeout = None  # type: ignore
+            response.mimetype = "application/json-lines"
+            return response
+
         result = await approach.run_stream(
-            request_json["messages"],
+            messages,
             context=context,
             session_state=session_state,
         )

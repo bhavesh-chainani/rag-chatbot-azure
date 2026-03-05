@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Inloggen",
     "logout": "Uitloggen",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Ontwikkelaarinstellingen",
 
-    "chatEmptyStateTitle": "Chat met je gegevens",
-    "chatEmptyStateSubtitle": "Stel een vraag of probeer een voorbeeld",
+    "chatEmptyStateTitle": "Legal Chatbot voor vrijwilligers",
+    "chatEmptyStateSubtitle": "Voer de situatie van de aanvrager in of probeer een voorbeeld",
     "defaultExamples": {
-        "1": "Wat zit er in mijn Northwind Health Plus-pakket dat niet in het standaardpakket zit?",
-        "2": "Wat gebeurt er tijdens een functioneringsgesprek?",
-        "3": "Wat doet een Product Manager?",
-        "placeholder": "Typ een nieuwe vraag (bijv. dekt mijn pakket jaarlijkse oogonderzoeken?)"
+        "1": "Aanvrager: Mijn werkgever heeft 3 maanden geen salaris betaald. Wat kan ik doen?",
+        "2": "De aanvrager is onterecht ontslagen. Wat kan hij/zij doen?",
+        "3": "De aanvrager is freelancer, opdrachtgever betaalt niet. Kan hij/zij naar TADM?",
+        "placeholder": "Typ de situatie van de aanvrager (bijv. gewond op werk, werkgever betaalt geen medische kosten)"
     },
-    "askTitle": "Stel je vraag aan de data",
+    "askTitle": "Situatie aanvrager invoeren",
     "multimodalExamples": {
-        "1": "Vergelijk de impact van rentetarieven en het BBP op financiële markten.",
-        "2": "Wat is de verwachte trend voor de S&P 500-index voor de komende vijf jaar? Vergelijk dit met de eerdere prestaties van de S&P 500",
-        "3": "Kun je enige correlatie vinden tussen olieprijzen en markttrends?",
-        "placeholder": "Voorbeeld: dekt mijn pakket jaarlijkse oogonderzoeken?"
+        "1": "Aanvrager: Mijn werkgever heeft 3 maanden niet betaald.",
+        "2": "De aanvrager is vorige week zonder reden ontslagen.",
+        "3": "De aanvrager is freelancer; opdrachtgever heeft het werk niet betaald.",
+        "placeholder": "Voorbeeld: Gewond op werk, werkgever weigert medische kosten te betalen"
     },
     "generatingAnswer": "Antwoord genereren",
     "citationWithColon": "Citaat:",
-    "followupQuestions": "Vervolgvragen:",
+    "followupQuestions": "Vragen om aan de aanvrager te stellen:",
 
     "tooltips": {
         "submitQuestion": "Vraag indienen",

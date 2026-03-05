@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Log ind",
     "logout": "Log ud",
@@ -32,24 +32,24 @@
         "fileDeleted": "Fil slettet"
     },
     "developerSettings": "Udviklerindstillinger",
-    "chatEmptyStateTitle": "Chat med dine data",
-    "chatEmptyStateSubtitle": "Spørg om hvad som helst eller prøv et eksempel",
+    "chatEmptyStateTitle": "Legal Chatbot for frivillige",
+    "chatEmptyStateSubtitle": "Indtast ansøgerens situation eller prøv et eksempel",
     "defaultExamples": {
-        "1": "Hvad er inkluderet i min Northwind Health Plus plan, som ikke er i standardplanen?",
-        "2": "Hvordan foregår en medarbejderevaluering?",
-        "3": "Hvad laver en produktchef?",
-        "placeholder": "Skriv et nyt spørgsmål (f.eks. dækker min plan årlige øjenundersøgelser?)"
+        "1": "Ansøger: Min arbejdsgiver har ikke betalt min løn i 3 måneder. Hvad kan jeg gøre?",
+        "2": "Ansøgeren er blevet uretmæssigt fyret. Hvad kan de gøre?",
+        "3": "Ansøgeren er freelancer, kunden betaler ikke. Kan de gå til TADM?",
+        "placeholder": "Skriv ansøgerens situation (f.eks. skadet på arbejde, arbejdsgiver betaler ikke lægeudgifter)"
     },
-    "askTitle": "Spørg til dine data",
+    "askTitle": "Indtast ansøgerens situation",
     "multimodalExamples": {
-        "1": "Sammenlign effekten af renter og BNP på finansmarkederne.",
-        "2": "Hvad er den forventede tendens for S&P 500 indekset over de næste fem år? Sammenlign det med tidligere S&P 500 præstation.",
-        "3": "Kan du identificere nogen korrelation mellem oliepriser og aktiemarkedets tendenser?",
-        "placeholder": "Eksempel: Dækker min plan årlige øjenundersøgelser?"
+        "1": "Ansøger: Min arbejdsgiver har ikke betalt i 3 måneder.",
+        "2": "Ansøgeren blev fyret uden grund i sidste uge.",
+        "3": "Ansøgeren er freelancer; kunden har ikke betalt for udført arbejde.",
+        "placeholder": "Eksempel: Skadet på arbejde, arbejdsgiver nægter at betale lægeudgifter"
     },
     "generatingAnswer": "Genererer svar",
     "citationWithColon": "Kilder:",
-    "followupQuestions": "Opfølgende spørgsmål:",
+    "followupQuestions": "Spørgsmål til at stille ansøgeren:",
     "tooltips": {
         "submitQuestion": "Send spørgsmål",
         "stopStreaming": "Stop streaming",

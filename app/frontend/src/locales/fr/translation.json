@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Connexion",
     "logout": "Déconnexion",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Paramètres développeur",
 
-    "chatEmptyStateTitle": "Discutez avec vos données",
-    "chatEmptyStateSubtitle": "Demandez n'importe quoi ou essayez un exemple",
+    "chatEmptyStateTitle": "Legal Chatbot pour les bénévoles",
+    "chatEmptyStateSubtitle": "Saisissez la situation du demandeur ou essayez un exemple",
     "defaultExamples": {
-        "1": "Qu'est-ce qui est inclus dans mon plan Northwind Health Plus qui n'est pas dans le standard?",
-        "2": "Qu'arrive-t-il lors d'un examen de performance?",
-        "3": "Qu'est-ce qu'un Product Manager fait?",
-        "placeholder": "Tapez une nouvelle question (par exemple, mon plan couvre-t-il les examens oculaires annuels?)"
+        "1": "Le demandeur : Mon employeur ne m'a pas payé depuis 3 mois. Que puis-je faire?",
+        "2": "Le demandeur a été licencié injustement. Que peut-il faire?",
+        "3": "Le demandeur est freelance, le client ne paie pas. Peut-il aller au TADM?",
+        "placeholder": "Saisissez la situation du demandeur (ex. blessé au travail, employeur refuse de payer les soins)"
     },
-    "askTitle": "Demandez à vos données",
+    "askTitle": "Saisir la situation du demandeur",
     "multimodalExamples": {
-        "1": "Comparez l'impact des taux d'intérêt et du PIB sur les marchés financiers.",
-        "2": "Quelle est la tendance prévue pour l'indice S&P 500 au cours des cinq prochaines années? Comparez-le aux performances passées de l'S&P 500",
-        "3": "Pouvez-vous identifier une corrélation entre les prix du pétrole et les tendances du marché boursier?",
-        "placeholder": "Exemple: Mon plan couvre-t-il les examens oculaires annuels?"
+        "1": "Le demandeur : Mon employeur ne m'a pas payé depuis 3 mois.",
+        "2": "Le demandeur a été licencié sans raison la semaine dernière.",
+        "3": "Le demandeur est freelance ; le client n'a pas payé le travail effectué.",
+        "placeholder": "Exemple : Blessé au travail, l'employeur refuse de payer les frais médicaux"
     },
     "generatingAnswer": "Génération de la réponse",
     "citationWithColon": "Citation:",
-    "followupQuestions": "Questions de suivi:",
+    "followupQuestions": "Questions à poser au demandeur :",
 
     "tooltips": {
         "submitQuestion": "Soumettre une question",

@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Entrar",
     "logout": "Sair",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Configurações do desenvolvedor",
 
-    "chatEmptyStateTitle": "Converse com seus dados",
-    "chatEmptyStateSubtitle": "Pergunte qualquer coisa ou tente um exemplo",
+    "chatEmptyStateTitle": "Legal Chatbot para voluntários",
+    "chatEmptyStateSubtitle": "Digite a situação do solicitante ou tente um exemplo",
     "defaultExamples": {
-        "1": "O que está incluído no meu plano Northwind Health Plus que não está no padrão?",
-        "2": "O que acontece em uma avaliação de desempenho?",
-        "3": "O que faz um Gerente de Produto?",
-        "placeholder": "Digite uma nova pergunta (por exemplo: Meu plano cobre exames oftalmológicos anuais?)"
+        "1": "Solicitante: Meu empregador não pagou meu salário há 3 meses. O que posso fazer?",
+        "2": "O solicitante foi demitido injustamente. O que ele pode fazer?",
+        "3": "O solicitante é freelancer e o cliente não paga. Pode ir ao TADM?",
+        "placeholder": "Digite a situação do solicitante (ex.: ferido no trabalho, empregador não paga despesas médicas)"
     },
-    "askTitle": "Pergunte aos seus dados",
+    "askTitle": "Inserir situação do solicitante",
     "multimodalExamples": {
-        "1": "Compare o impacto das taxas de juros e do PIB nos mercados financeiros.",
-        "2": "Qual é a tendência esperada para o índice S&P 500 nos próximos cinco anos? Compare com o desempenho passado do S&P 500",
-        "3": "Você pode identificar alguma correlação entre os preços do petróleo e as tendências do mercado de ações?",
-        "placeholder": "Exemplo: Meu plano cobre exames oftalmológicos anuais?"
+        "1": "Solicitante: Meu empregador não pagou há 3 meses.",
+        "2": "O solicitante foi demitido sem motivo na semana passada.",
+        "3": "O solicitante é freelancer; o cliente não pagou o trabalho realizado.",
+        "placeholder": "Exemplo: Ferido no trabalho, empregador se recusa a pagar despesas médicas"
     },
     "generatingAnswer": "Gerando resposta",
     "citationWithColon": "Citação:",
-    "followupQuestions": "Acompanhar as respostas:",
+    "followupQuestions": "Perguntas para fazer ao solicitante:",
 
     "tooltips": {
         "submitQuestion": "Enviar pergunta",

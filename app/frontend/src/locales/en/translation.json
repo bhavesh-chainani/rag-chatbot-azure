@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Login",
     "logout": "Logout",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Developer settings",
 
-    "chatEmptyStateTitle": "Chat with your data",
-    "chatEmptyStateSubtitle": "Ask anything or try an example",
+    "chatEmptyStateTitle": "Legal Chatbot Assistant",
+    "chatEmptyStateSubtitle": "Enter the applicant's situation or try an example",
     "defaultExamples": {
-        "1": "What is included in my Northwind Health Plus plan that is not in standard?",
-        "2": "What happens in a performance review?",
-        "3": "What does a Product Manager do?",
-        "placeholder": "Type a new question (e.g. does my plan cover annual eye exams?)"
+        "1": "Applicant says: My employer hasn't paid my salary for 3 months. What can I do?",
+        "2": "Applicant was fired unfairly. What can they do?",
+        "3": "Applicant is a freelancer and the client will not pay. Can they go to TADM?",
+        "placeholder": "Type the applicant's situation (e.g. injured at work, employer won't pay medical bills)"
     },
-    "askTitle": "Ask your data",
+    "askTitle": "Enter applicant's situation",
     "multimodalExamples": {
-        "1": "Compare the impact of interest rates and GDP in financial markets.",
-        "2": "What is the expected trend for the S&P 500 index over the next five years? Compare it to the past S&P 500 performance",
-        "3": "Can you identify any correlation between oil prices and stock market trends?",
-        "placeholder": "Example: Does my plan cover annual eye exams?"
+        "1": "Applicant says: My employer hasn't paid my salary for 3 months.",
+        "2": "Applicant was dismissed without reason last week.",
+        "3": "Applicant is a freelancer; client has not paid for completed work.",
+        "placeholder": "Example: Applicant injured at work, employer refuses to pay medical bills"
     },
     "generatingAnswer": "Generating answer",
     "citationWithColon": "Citation:",
-    "followupQuestions": "Follow-up questions:",
+    "followupQuestions": "Questions to ask the applicant:",
 
     "tooltips": {
         "submitQuestion": "Submit question",

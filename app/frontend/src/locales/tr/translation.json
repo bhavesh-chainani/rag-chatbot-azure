@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Arama",
-    "headerTitle": "Azure OpenAI + AI Arama",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Sohbet",
     "login": "Giriş yap",
     "logout": "Çıkış yap",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Geliştirici ayarları",
 
-    "chatEmptyStateTitle": "Verilerinizle sohbet edin",
-    "chatEmptyStateSubtitle": "Bir soru sorun veya bir örnek deneyin",
+    "chatEmptyStateTitle": "Gönüllüler için Legal Chatbot",
+    "chatEmptyStateSubtitle": "Başvuranın durumunu girin veya bir örnek deneyin",
     "defaultExamples": {
-        "1": "Northwind Health Plus planımda standart planda olmayan neler var?",
-        "2": "Performans değerlendirmesinde ne olur?",
-        "3": "Bir Ürün Yöneticisi ne yapar?",
-        "placeholder": "Yeni bir soru yazın (ör. planım yıllık göz muayenelerini kapsıyor mu?)"
+        "1": "Başvuran: İşverenim 3 aydır maaşımı ödemedi. Ne yapabilirim?",
+        "2": "Başvuran haksız yere işten çıkarıldı. Ne yapabilir?",
+        "3": "Başvuran serbest çalışan, müşteri ödeme yapmıyor. TADM'ye gidebilir mi?",
+        "placeholder": "Başvuranın durumunu yazın (örn. işte yaralandı, işveren tıbbi masrafları ödemiyor)"
     },
-    "askTitle": "Verilerinize sorun",
+    "askTitle": "Başvuranın durumunu girin",
     "multimodalExamples": {
-        "1": "Faiz oranları ve GSYİH'nin finansal piyasalar üzerindeki etkisini karşılaştırın.",
-        "2": "Önümüzdeki beş yıl için S&P 500 endeksinin beklenen trendi nedir? Geçmiş S&P 500 performansı ile karşılaştırın",
-        "3": "Petrol fiyatları ile borsa trendleri arasında herhangi bir korelasyon bulabilir misiniz?",
-        "placeholder": "Örnek: Planım yıllık göz muayenelerini kapsıyor mu?"
+        "1": "Başvuran: İşverenim 3 aydır ödeme yapmadı.",
+        "2": "Başvuran geçen hafta sebepsiz işten çıkarıldı.",
+        "3": "Başvuran serbest çalışan; müşteri yapılan işi ödemedi.",
+        "placeholder": "Örnek: İşte yaralandı, işveren tıbbi masrafları ödemeyi reddediyor"
     },
     "generatingAnswer": "Cevap oluşturuluyor",
     "citationWithColon": "Alıntı:",
-    "followupQuestions": "Takip soruları:",
+    "followupQuestions": "Başvurana sorulacak sorular:",
 
     "tooltips": {
         "submitQuestion": "Soruyu gönder",

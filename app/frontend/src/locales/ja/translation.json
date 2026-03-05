@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "チャット",
     "login": "ログイン",
     "logout": "ログアウト",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "高度な設定",
 
-    "chatEmptyStateTitle": "データを用いてチャットを行います",
-    "chatEmptyStateSubtitle": "ご自由にお問い合わせいただくか、もしくは下記のサンプルをお試しください",
+    "chatEmptyStateTitle": "ボランティア向け法律チャットボット",
+    "chatEmptyStateSubtitle": "申請者の状況を入力するか、例をお試しください",
     "defaultExamples": {
-        "1": "私が契約中の Northwind Health Plus の標準プランには何が含まれ、何が含まれないのですか？",
-        "2": "パフォーマンス・レビューで何を行いますか？",
-        "3": "プロダクトマネージャーの職務内容について教えてください。",
-        "placeholder": "新しい質問を入力してください (例：私の契約プランは年1回の眼科検診もカバーしていますか？)"
+        "1": "申請者：3ヶ月給料が支払われていません。どうすればよいですか？",
+        "2": "申請者は不当に解雇されました。何ができますか？",
+        "3": "申請者はフリーランスで、クライアントが支払いを拒否しています。TADMに相談できますか？",
+        "placeholder": "申請者の状況を入力（例：仕事中に負傷、雇用主が医療費を支払わない）"
     },
-    "askTitle": "データを利用した問い合わせ",
+    "askTitle": "申請者の状況を入力",
     "multimodalExamples": {
-        "1": "金融市場における金利とGDPの影響を比較してください。",
-        "2": "S&P 500指数の今後5年間のトレンドを予想してください、そして過去のS&P 500のパフォーマンスと比較してください。",
-        "3": "原油価格と株式市場の動向の間には相関関係があると思いますか？",
-        "placeholder": "例：私の契約プランは年1回の眼科検診もカバーしていますか？"
+        "1": "申請者：3ヶ月給料が支払われていません。",
+        "2": "申請者は先週理由なく解雇されました。",
+        "3": "申請者はフリーランス。完了した仕事の支払いがない。",
+        "placeholder": "例：仕事中に負傷、雇用主が医療費を支払うことを拒否"
     },
     "generatingAnswer": "回答を生成中",
     "citationWithColon": "引用：",
-    "followupQuestions": "フォローアップの質問：",
+    "followupQuestions": "申請者に聞く質問：",
 
     "tooltips":{
         "submitQuestion": "質問を送信",

@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Accedi",
     "logout": "Disconnetti",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Impostazioni sviluppatore",
 
-    "chatEmptyStateTitle": "Chatta con i tuoi dati",
-    "chatEmptyStateSubtitle": "Chiedi qualsiasi cosa o prova un esempio",
+    "chatEmptyStateTitle": "Legal Chatbot per i volontari",
+    "chatEmptyStateSubtitle": "Inserisci la situazione del richiedente o prova un esempio",
     "defaultExamples": {
-        "1": "Cosa è incluso nel mio piano Northwind Health Plus che non è nello standard?",
-        "2": "Cosa succede durante una valutazione delle prestazioni?",
-        "3": "Cosa fa un Product Manager?",
-        "placeholder": "Digita una nuova domanda (es. il mio piano copre gli esami oculistici annuali?)"
+        "1": "Richiedente: Il mio datore non mi paga da 3 mesi. Cosa posso fare?",
+        "2": "Il richiedente è stato licenziato ingiustamente. Cosa può fare?",
+        "3": "Il richiedente è freelance e il cliente non paga. Può rivolgersi al TADM?",
+        "placeholder": "Scrivi la situazione del richiedente (es. infortunio sul lavoro, datore non paga le spese mediche)"
     },
-    "askTitle": "Chiedi ai tuoi dati",
+    "askTitle": "Inserisci situazione del richiedente",
     "multimodalExamples": {
-        "1": "Confronta l'impatto dei tassi di interesse e del PIL sui mercati finanziari.",
-        "2": "Qual è la tendenza prevista per l'indice S&P 500 nei prossimi cinque anni? Confrontalo con le performance passate dell'S&P 500",
-        "3": "Puoi identificare una correlazione tra i prezzi del petrolio e le tendenze del mercato azionario?",
-        "placeholder": "Esempio: Il mio piano copre gli esami oculistici annuali?"
+        "1": "Richiedente: Il mio datore non mi paga da 3 mesi.",
+        "2": "Il richiedente è stato licenziato senza motivo la scorsa settimana.",
+        "3": "Il richiedente è freelance; il cliente non ha pagato il lavoro svolto.",
+        "placeholder": "Esempio: Infortunio sul lavoro, datore rifiuta di pagare le spese mediche"
     },
     "generatingAnswer": "Generazione della risposta",
     "citationWithColon": "Citazione:",
-    "followupQuestions": "Domande di follow-up:",
+    "followupQuestions": "Domande da porre al richiedente:",
 
     "tooltips": {
         "submitQuestion": "Invia una domanda",

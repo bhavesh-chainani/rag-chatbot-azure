@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "Legal Chatbot",
+    "headerTitle": "Legal Chatbot",
     "chat": "Chat",
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",
@@ -33,24 +33,24 @@
     },
     "developerSettings": "Configuración del desarrollador",
 
-    "chatEmptyStateTitle": "Chatea con tus datos",
-    "chatEmptyStateSubtitle": "Pregunta cualquier cosa o prueba un ejemplo",
+    "chatEmptyStateTitle": "Legal Chatbot para voluntarios",
+    "chatEmptyStateSubtitle": "Introduce la situación del solicitante o prueba un ejemplo",
     "defaultExamples": {
-        "1": "¿Qué está incluido en mi plan Northwind Health Plus que no está en el estándar?",
-        "2": "¿Qué sucede en una revisión de rendimiento?",
-        "3": "¿Qué hace un Gerente de producto?",
-        "placeholder": "Escribe una nueva pregunta (por ejemplo, ¿mi plan cubre exámenes anuales de la vista?)"
+        "1": "Solicitante: Mi empleador no me ha pagado el salario en 3 meses. ¿Qué puedo hacer?",
+        "2": "El solicitante fue despedido injustamente. ¿Qué puede hacer?",
+        "3": "El solicitante es autónomo y el cliente no paga. ¿Puede ir al TADM?",
+        "placeholder": "Escribe la situación del solicitante (ej. lesionado en el trabajo, el empleador no paga gastos médicos)"
     },
-    "askTitle": "Pregunta a tus datos",
+    "askTitle": "Introducir situación del solicitante",
     "multimodalExamples": {
-        "1": "Compara el impacto de las tasas de interés y el PIB en los mercados financieros.",
-        "2": "¿Cuál es la tendencia esperada para el índice S&P 500 en los próximos cinco años? Compáralo con el rendimiento pasado del S&P 500",
-        "3": "¿Puedes identificar alguna correlación entre los precios del petróleo y las tendencias del mercado de valores?",
-        "placeholder": "Ejemplo: ¿Mi plan cubre exámenes anuales de la vista?"
+        "1": "Solicitante: Mi empleador no me ha pagado en 3 meses.",
+        "2": "El solicitante fue despedido sin motivo la semana pasada.",
+        "3": "El solicitante es autónomo; el cliente no ha pagado el trabajo realizado.",
+        "placeholder": "Ejemplo: Lesionado en el trabajo, el empleador se niega a pagar gastos médicos"
     },
     "generatingAnswer": "Generando respuesta",
     "citationWithColon": "Cita:",
-    "followupQuestions": "Preguntas de seguimiento:",
+    "followupQuestions": "Preguntas para hacer al solicitante:",
 
     "tooltips": {
         "submitQuestion": "Enviar pregunta",

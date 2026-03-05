@@ -14,4 +14,6 @@
         0 2px 8px rgba(0, 0, 0, 0.06),
         0 0 1px rgba(0, 0, 0, 0.08);
     outline: transparent solid 0.0625em;
+    white-space: pre-wrap;
+    word-break: break-word;
 }

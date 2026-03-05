@@ -1,0 +1,181 @@
+[
+  {
+    "id": "EMP-01",
+    "topic": "Employment Law \u2014 Unpaid Salary",
+    "user_query": "My employer hasn\u2019t paid my salary for 3 months. What can I do?",
+    "variations": [
+      "Boss owes me salary. Where do I report?",
+      "How do I claim unpaid wages?",
+      "Company never paid me three months already",
+      "Who do I complain to if I don't get paid?"
+    ],
+    "part_a_general_info": "Under the Employment Act 1968 employers must pay salary within 7 days after the end of each salary period. If salary is unpaid you may file a claim with the Tripartite Alliance for Dispute Management (TADM). Claims must generally be filed within 1 year from the date salary was due or within 6 months of leaving employment. The Employment Claims Tribunals can hear claims up to $20,000 ($30,000 with union assistance). Mediation at TADM is mandatory before ECT.",
+    "triage_questions": [
+      "Are you still working for the employer or have you left?",
+      "When was the last salary payment you received?",
+      "How much salary is owed in total?",
+      "Are you a Singapore Citizen PR or work permit holder?",
+      "Have you already filed a claim with TADM?"
+    ],
+    "branching_logic": [
+      "If employee left check whether claim falls within 6 month limitation",
+      "If work permit holder inform about MOM regulations",
+      "If already filed with TADM branch to ECT pathway"
+    ],
+    "routing": [
+      "No TADM claim refer to TADM mediation",
+      "TADM failed refer to ECT",
+      "Work permit holder refer to MOM and escalate",
+      "Time barred escalate to PBSG staff"
+    ],
+    "guardrail": "Do not advise on contractual entitlements or draft demand letters"
+  },
+  {
+    "id": "EMP-02",
+    "topic": "Employment Law \u2014 Wrongful Dismissal",
+    "user_query": "I was fired unfairly. What can I do?",
+    "variations": [
+      "My boss sacked me for no reason",
+      "I got terminated without warning",
+      "Is it legal for my company to fire me like this",
+      "I was dismissed and think it is wrongful"
+    ],
+    "part_a_general_info": "Wrongful dismissal occurs when an employee is dismissed without just cause or excuse under the Employment Act 1968. Claims must be filed with TADM within 1 month of dismissal. If mediation fails the matter may proceed to the Employment Claims Tribunals.",
+    "triage_questions": [
+      "When were you dismissed?",
+      "Were you given a reason?",
+      "Were you given notice or salary in lieu?",
+      "Do you believe dismissal was discriminatory or to deprive benefits?",
+      "Have you filed with TADM already?"
+    ],
+    "branching_logic": [
+      "If dismissal occurred more than 1 month ago potentially time barred",
+      "If notice was given focus shifts to discrimination or retaliation",
+      "If discrimination suspected inform about TAFEP"
+    ],
+    "routing": [
+      "Within 1 month refer to TADM urgently",
+      "Discrimination element refer to TADM and TAFEP",
+      "TADM failed refer to ECT",
+      "Time barred escalate to PBSG staff"
+    ],
+    "guardrail": "Do not determine whether dismissal is justified"
+  },
+  {
+    "id": "EMP-03",
+    "topic": "Employment Law \u2014 Freelancer or Gig Worker",
+    "user_query": "I'm a freelancer and my client will not pay me. Can I go to TADM?",
+    "variations": [
+      "I do delivery and they owe me money",
+      "My contract work client has not paid",
+      "I am self employed can I claim salary",
+      "Platform company owes me payment"
+    ],
+    "part_a_general_info": "Freelancers under a contract for service are generally not covered by the Employment Act. They usually cannot file claims at TADM or ECT. Payment disputes may go to the Small Claims Tribunal up to $20,000 or Magistrates Court up to $60,000. Mediation and a letter of demand are recommended first.",
+    "triage_questions": [
+      "Describe the working arrangement",
+      "Do you have a written contract",
+      "Are you a platform worker or association member",
+      "How much money is owed"
+    ],
+    "branching_logic": [
+      "If relationship appears like employment escalate for misclassification",
+      "If platform worker refer to platform association",
+      "If amount less than or equal to $20k go to SCT otherwise Magistrates Court"
+    ],
+    "routing": [
+      "Freelancer less than or equal to $20k refer to Small Claims Tribunal",
+      "Freelancer above $20k refer to Magistrates or District Court",
+      "Possible employee misclassification escalate to PBSG staff",
+      "Platform worker refer to platform association"
+    ],
+    "guardrail": "Do not determine employee versus freelancer status"
+  },
+  {
+    "id": "EMP-04",
+    "topic": "Employment Law \u2014 Workplace Injury",
+    "user_query": "I was injured at work. My boss will not pay medical bills.",
+    "variations": [
+      "Got hurt at workplace employer refuses to pay",
+      "Work accident who pays",
+      "I fell at construction site what are my rights",
+      "Boss says injury is my fault and will not cover medical"
+    ],
+    "part_a_general_info": "Under the Work Injury Compensation Act employers must compensate employees for work injuries regardless of fault. Compensation covers medical expenses and medical leave wages. Claims are generally filed with the Ministry of Manpower.",
+    "triage_questions": [
+      "When and where did the injury occur",
+      "What injuries were suffered and was medical treatment received",
+      "Has employer filed an incident report with MOM",
+      "How long was medical leave",
+      "Are you a Singapore Citizen PR or foreign worker"
+    ],
+    "branching_logic": [
+      "If employer did not report incident worker may report to MOM directly",
+      "If foreign worker additional protections may apply",
+      "If serious injury worker may consider legal advice"
+    ],
+    "routing": [
+      "Standard claim refer to MOM WICA filing",
+      "Employer non cooperation advise worker to report to MOM",
+      "Foreign worker refer to Migrant Workers Centre",
+      "Serious injury escalate to PBSG staff"
+    ],
+    "guardrail": "Do not advise whether to pursue WICA or common law claims"
+  },
+  {
+    "id": "EMP-05",
+    "topic": "Employment Law \u2014 Non Payment of CPF",
+    "user_query": "My company did not pay my CPF",
+    "variations": [
+      "Employer not contributing CPF",
+      "Boss never top up CPF",
+      "How to check if CPF was paid",
+      "Company owes CPF contributions"
+    ],
+    "part_a_general_info": "Under the Central Provident Fund Act employers must contribute CPF for Singapore Citizens and Permanent Residents. Failure to do so is a criminal offence and complaints can be lodged with the CPF Board.",
+    "triage_questions": [
+      "How long has CPF not been contributed",
+      "Have you checked CPF statements",
+      "Are you a Singapore Citizen or PR",
+      "Are you still employed with the company"
+    ],
+    "branching_logic": [
+      "If not SC or PR CPF usually not required",
+      "If still employed advise caution as complaint may affect employment relationship"
+    ],
+    "routing": [
+      "Confirmed non payment refer to CPF Board",
+      "If not resident explain CPF not required",
+      "If employee left refer to CPF Board and possibly TADM"
+    ],
+    "guardrail": "Do not calculate CPF arrears"
+  },
+  {
+    "id": "EMP-06",
+    "topic": "Employment Law \u2014 Overtime Pay",
+    "user_query": "My boss refuses to pay me overtime",
+    "variations": [
+      "I worked extra hours but got no money",
+      "Is overtime pay mandatory",
+      "Company says no overtime for my role",
+      "Claiming money for working weekends or public holidays"
+    ],
+    "part_a_general_info": "Under Part IV of the Employment Act overtime pay applies mainly to workmen earning up to $4500 per month and non workmen earning up to $2600 per month. Covered employees must receive overtime at 1.5 times their hourly rate.",
+    "triage_questions": [
+      "What is your job role",
+      "What is your monthly salary",
+      "Does your contract mention overtime pay",
+      "Are you Singapore Citizen PR or work permit holder"
+    ],
+    "branching_logic": [
+      "If manager or salary above threshold statutory overtime may not apply",
+      "If work permit holder refer to MOM or TADM"
+    ],
+    "routing": [
+      "Covered under Part IV file claim with TADM",
+      "If not covered and contract silent refer to PBSG employment clinic",
+      "If contract includes overtime but unpaid file claim at TADM"
+    ],
+    "guardrail": "Do not calculate overtime owed or interpret ambiguous contract clauses"
+  }
+]

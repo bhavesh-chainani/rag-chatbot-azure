@@ -27,8 +27,20 @@ DEFAULT_OUT_OF_SCOPE_MESSAGE = (
 OBVIOUS_NON_QUERIES = frozenset(
     s.strip().lower()
     for s in (
-        "hello", "hi", "hey", "yo", "sup", "hola", "good morning", "good afternoon",
-        "good evening", "howdy", "greetings", "good day", "hi there", "hello there",
+        "hello",
+        "hi",
+        "hey",
+        "yo",
+        "sup",
+        "hola",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "howdy",
+        "greetings",
+        "good day",
+        "hi there",
+        "hello there",
     )
 )
 

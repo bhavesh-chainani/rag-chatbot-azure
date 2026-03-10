@@ -5,6 +5,7 @@
     "login": "Accedi",
     "logout": "Disconnetti",
     "clearChat": "Cancella chat",
+    "newChat": "Nuova chat",
     "history": {
         "chatHistory": "Cronologia chat",
         "openChatHistory": "Apri cronologia chat",

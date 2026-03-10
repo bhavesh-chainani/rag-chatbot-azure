@@ -5,6 +5,7 @@
     "login": "Giriş yap",
     "logout": "Çıkış yap",
     "clearChat": "Sohbeti temizle",
+    "newChat": "Yeni sohbet",
     "history": {
         "chatHistory": "Sohbet geçmişi",
         "openChatHistory": "Sohbet geçmişini aç",

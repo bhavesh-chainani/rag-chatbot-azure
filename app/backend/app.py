@@ -97,12 +97,6 @@ from core.authentication import AuthenticationHelper
 from core.sessionhelper import create_session_id
 from decorators import authenticated, authenticated_path
 from error import error_dict, error_response
-from query_router import (
-    is_obvious_non_query,
-    is_query_relevant,
-    out_of_scope_response,
-    out_of_scope_stream,
-)
 from prepdocs import (
     OpenAIHost,
     setup_embeddings_service,
@@ -115,6 +109,12 @@ from prepdocslib.blobmanager import AdlsBlobManager, BlobManager
 from prepdocslib.embeddings import ImageEmbeddings
 from prepdocslib.filestrategy import UploadUserFileStrategy
 from prepdocslib.listfilestrategy import File
+from query_router import (
+    is_obvious_non_query,
+    is_query_relevant,
+    out_of_scope_response,
+    out_of_scope_stream,
+)
 
 bp = Blueprint("routes", __name__, static_folder="static")
 # Fix Windows registry issue with mimetypes

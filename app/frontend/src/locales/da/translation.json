@@ -5,6 +5,7 @@
     "login": "Log ind",
     "logout": "Log ud",
     "clearChat": "Ryd chat",
+    "newChat": "Ny chat",
     "history": {
         "chatHistory": "Chathistorik",
         "openChatHistory": "Åbn chathistorik",

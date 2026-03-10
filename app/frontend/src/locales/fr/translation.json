@@ -5,6 +5,7 @@
     "login": "Connexion",
     "logout": "Déconnexion",
     "clearChat": "Effacer le chat",
+    "newChat": "Nouveau chat",
     "history": {
         "chatHistory": "Historique du chat",
         "openChatHistory": "Ouvrir l'historique du chat",

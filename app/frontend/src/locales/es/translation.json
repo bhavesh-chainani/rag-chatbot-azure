@@ -5,6 +5,7 @@
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",
     "clearChat": "Borrar chat",
+    "newChat": "Nuevo chat",
     "history": {
         "chatHistory": "Historial de chat",
         "openChatHistory": "Abrir historial de chat",

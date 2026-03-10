@@ -5,6 +5,7 @@
     "login": "ログイン",
     "logout": "ログアウト",
     "clearChat": "チャットをクリア",
+    "newChat": "新しいチャット",
     "history": {
         "chatHistory": "チャット履歴",
         "openChatHistory": "チャット履歴を開く",

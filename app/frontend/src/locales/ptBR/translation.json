@@ -5,6 +5,7 @@
     "login": "Entrar",
     "logout": "Sair",
     "clearChat": "Limpar chat",
+    "newChat": "Nova conversa",
     "history": {
         "chatHistory": "Histórico do chat",
         "openChatHistory": "Abrir o histórico do chat",

@@ -27,6 +27,7 @@ import { HistoryProviderOptions, useHistoryManager } from "../../components/Hist
 import { HistoryButton } from "../../components/HistoryButton";
 import { SettingsButton } from "../../components/SettingsButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
+import { NewChatButton } from "../../components/NewChatButton";
 import { UploadFile } from "../../components/UploadFile";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
@@ -64,6 +65,7 @@ const Chat = () => {
 
     const lastQuestionRef = useRef<string>("");
     const chatMessageStreamEnd = useRef<HTMLDivElement | null>(null);
+    const clearingForNewChatRef = useRef<boolean>(false);
 
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -341,9 +343,11 @@ const Chat = () => {
             setSpeechUrls([...speechUrls, null]);
         } catch (e) {
             if (e instanceof DOMException && e.name === "AbortError") {
-                // Stopped during loading - restore question to input
-                lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
-                setRestoredQuestion(question);
+                // Restore question only if user clicked Stop; not when they started a new chat
+                if (!clearingForNewChatRef.current) {
+                    lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
+                    setRestoredQuestion(question);
+                }
             } else {
                 setError(e);
             }
@@ -353,7 +357,36 @@ const Chat = () => {
         }
     };
 
-    const clearChat = () => {
+    const clearChat = async () => {
+        clearingForNewChatRef.current = true;
+        // Capture current conversation to save to history before clearing
+        const hasStreaming = streamedAnswers.length > 0;
+        const toSave: [user: string, response: ChatAppResponse][] = hasStreaming
+            ? [...streamedAnswers]
+            : [...answers];
+        const lastResponse = toSave.length > 0 ? toSave[toSave.length - 1][1] : null;
+        let sessionId: string | null =
+            lastResponse && typeof lastResponse.session_state === "string" && lastResponse.session_state !== ""
+                ? lastResponse.session_state
+                : null;
+        if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && !sessionId && historyProvider === HistoryProviderOptions.IndexedDB) {
+            sessionId = crypto.randomUUID();
+        }
+
+        // Abort in-flight request so the current chat can be saved and we start fresh
+        if (abortController) {
+            abortController.abort();
+        }
+
+        if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && sessionId) {
+            try {
+                const token = client ? await getToken(client) : undefined;
+                await historyManager.addItem(sessionId, toSave, token);
+            } catch (e) {
+                console.error("Failed to save chat to history:", e);
+            }
+        }
+
         lastQuestionRef.current = "";
         error && setError(undefined);
         setActiveCitation(undefined);
@@ -364,6 +397,9 @@ const Chat = () => {
         setIsLoading(false);
         setIsStreaming(false);
         setRestoredQuestion("");
+        setTimeout(() => {
+            clearingForNewChatRef.current = false;
+        }, 0);
     };
 
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "smooth" }), [isLoading]);
@@ -542,6 +578,7 @@ const Chat = () => {
                     )}
                 </div>
                 <div className={styles.commandsContainer}>
+                    <NewChatButton className={styles.commandButton} onClick={clearChat} disabled={isLoading} />
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                     {showUserUpload && <UploadFile className={styles.commandButton} disabled={!loggedIn} />}
                     <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} />

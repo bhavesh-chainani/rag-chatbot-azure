@@ -354,4 +354,11 @@ async def test_app_config_for_reasoning_override_effort(monkeypatch, minimal_env
 def test_app_enables_azure_monitor_when_connection_string_set(monkeypatch):
     mock_connection_string = "InstrumentationKey=12345678-1234-1234-1234-123456789012"
     monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", mock_connection_string)
+    # Avoid starting real Azure Monitor/OpenTelemetry (can hang in tests)
+    monkeypatch.setattr(app, "configure_azure_monitor", lambda **kwargs: None)
+    mock_instrumentor = type("MockInstrumentor", (), {"instrument": lambda self: None})()
+    monkeypatch.setattr(app, "AioHttpClientInstrumentor", lambda: mock_instrumentor)
+    monkeypatch.setattr(app, "HTTPXClientInstrumentor", lambda: mock_instrumentor)
+    monkeypatch.setattr(app, "OpenAIInstrumentor", lambda: mock_instrumentor)
+    monkeypatch.setattr(app, "OpenTelemetryMiddleware", lambda asgi_app: asgi_app)
     app.create_app()

@@ -374,6 +374,8 @@ param ragSendImageSources bool = true
 param useWebSource bool = false
 @description('Whether to enable SharePoint sources for agentic retrieval')
 param useSharePointSource bool = false
+@description('Whether to run the query relevance router before RAG (short-circuits irrelevant queries with an "I handle..." message)')
+param queryRouterEnabled bool = false
 
 param acaIdentityName string = deploymentTarget == 'containerapps' ? '${environmentName}-aca-identity' : ''
 param acaManagedEnvironmentName string = deploymentTarget == 'containerapps' ? '${environmentName}-aca-env' : ''
@@ -569,6 +571,7 @@ var appEnvVariables = {
   RAG_SEND_IMAGE_SOURCES: ragSendImageSources
   USE_WEB_SOURCE: useWebSource
   USE_SHAREPOINT_SOURCE: useSharePointSource
+  QUERY_ROUTER_ENABLED: string(queryRouterEnabled)
 }
 
 // App Service for the web application (Python Quart app with JS frontend)

@@ -9,6 +9,8 @@ export type ChatAppRequestOverrides = {
     semantic_ranker?: boolean;
     semantic_captions?: boolean;
     query_rewriting?: boolean;
+    /** When true, skip the query relevance router and always invoke RAG (for testing). */
+    skip_query_router?: boolean;
     reasoning_effort?: string;
     include_category?: string;
     exclude_category?: string;

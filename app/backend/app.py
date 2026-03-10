@@ -67,6 +67,11 @@ from config import (
     CONFIG_MULTIMODAL_ENABLED,
     CONFIG_OPENAI_CLIENT,
     CONFIG_QUERY_REWRITING_ENABLED,
+    CONFIG_QUERY_ROUTER_DEPLOYMENT,
+    CONFIG_QUERY_ROUTER_ENABLED,
+    CONFIG_QUERY_ROUTER_MODEL,
+    CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE,
+    CONFIG_QUERY_ROUTER_SCOPE_DESCRIPTION,
     CONFIG_RAG_SEARCH_IMAGE_EMBEDDINGS,
     CONFIG_RAG_SEARCH_TEXT_EMBEDDINGS,
     CONFIG_RAG_SEND_IMAGE_SOURCES,
@@ -92,6 +97,12 @@ from core.authentication import AuthenticationHelper
 from core.sessionhelper import create_session_id
 from decorators import authenticated, authenticated_path
 from error import error_dict, error_response
+from query_router import (
+    is_obvious_non_query,
+    is_query_relevant,
+    out_of_scope_response,
+    out_of_scope_stream,
+)
 from prepdocs import (
     OpenAIHost,
     setup_embeddings_service,
@@ -203,6 +214,16 @@ async def format_as_ndjson(r: AsyncGenerator[dict, None]) -> AsyncGenerator[str,
         yield json.dumps(error_dict(error))
 
 
+def get_last_user_message_text(messages: list[dict[str, Any]]) -> str | None:
+    """Extract the last user message as plain text for query routing; returns None if not a string (e.g. multimodal)."""
+    if not messages:
+        return None
+    content = messages[-1].get("content")
+    if isinstance(content, str):
+        return content
+    return None
+
+
 @bp.route("/chat", methods=["POST"])
 @authenticated
 async def chat(auth_claims: dict[str, Any]):
@@ -212,16 +233,41 @@ async def chat(auth_claims: dict[str, Any]):
     context = request_json.get("context", {})
     context["auth_claims"] = auth_claims
     try:
-        approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-
-        # If session state is provided, persists the session state,
-        # else creates a new session_id depending on the chat history options enabled.
         session_state = request_json.get("session_state")
         if session_state is None:
             session_state = create_session_id(
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+
+        # Query router: if enabled and not skipped, check relevance before invoking RAG.
+        if current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
+            "skip_query_router"
+        ):
+            last_text = get_last_user_message_text(request_json["messages"])
+            if last_text is not None:
+                # Fast path: obvious greetings / non-queries → out-of-scope without LLM call
+                if is_obvious_non_query(last_text):
+                    result = out_of_scope_response(
+                        message=current_app.config[CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE],
+                        session_state=session_state,
+                    )
+                    return jsonify(result)
+                relevant = await is_query_relevant(
+                    client=current_app.config[CONFIG_OPENAI_CLIENT],
+                    model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
+                    deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),
+                    user_message=last_text,
+                    scope_description=current_app.config[CONFIG_QUERY_ROUTER_SCOPE_DESCRIPTION],
+                )
+                if not relevant:
+                    result = out_of_scope_response(
+                        message=current_app.config[CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE],
+                        session_state=session_state,
+                    )
+                    return jsonify(result)
+
+        approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
         result = await approach.run(
             request_json["messages"],
             context=context,
@@ -241,16 +287,47 @@ async def chat_stream(auth_claims: dict[str, Any]):
     context = request_json.get("context", {})
     context["auth_claims"] = auth_claims
     try:
-        approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-
-        # If session state is provided, persists the session state,
-        # else creates a new session_id depending on the chat history options enabled.
         session_state = request_json.get("session_state")
         if session_state is None:
             session_state = create_session_id(
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+
+        # Query router: if enabled and not skipped, check relevance before invoking RAG.
+        if current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
+            "skip_query_router"
+        ):
+            last_text = get_last_user_message_text(request_json["messages"])
+            if last_text is not None:
+                # Fast path: obvious greetings / non-queries → out-of-scope without LLM call
+                if is_obvious_non_query(last_text):
+                    result = out_of_scope_stream(
+                        message=current_app.config[CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE],
+                        session_state=session_state,
+                    )
+                    response = await make_response(format_as_ndjson(result))
+                    response.timeout = None  # type: ignore
+                    response.mimetype = "application/json-lines"
+                    return response
+                relevant = await is_query_relevant(
+                    client=current_app.config[CONFIG_OPENAI_CLIENT],
+                    model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
+                    deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),
+                    user_message=last_text,
+                    scope_description=current_app.config[CONFIG_QUERY_ROUTER_SCOPE_DESCRIPTION],
+                )
+                if not relevant:
+                    result = out_of_scope_stream(
+                        message=current_app.config[CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE],
+                        session_state=session_state,
+                    )
+                    response = await make_response(format_as_ndjson(result))
+                    response.timeout = None  # type: ignore
+                    response.mimetype = "application/json-lines"
+                    return response
+
+        approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
         result = await approach.run_stream(
             request_json["messages"],
             context=context,
@@ -297,6 +374,7 @@ def config():
             "ragSendImageSources": current_app.config[CONFIG_RAG_SEND_IMAGE_SOURCES],
             "webSourceEnabled": current_app.config[CONFIG_WEB_SOURCE_ENABLED],
             "sharepointSourceEnabled": current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
+            "queryRouterEnabled": current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED, False),
         }
     )
 
@@ -466,6 +544,15 @@ async def setup_clients():
     USE_WEB_SOURCE = os.getenv("USE_WEB_SOURCE", "").lower() == "true"
     USE_SHAREPOINT_SOURCE = os.getenv("USE_SHAREPOINT_SOURCE", "").lower() == "true"
     AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT = os.getenv("AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT", "low")
+    QUERY_ROUTER_ENABLED = os.getenv("QUERY_ROUTER_ENABLED", "").lower() == "true"
+    QUERY_ROUTER_SCOPE_DESCRIPTION = os.getenv(
+        "QUERY_ROUTER_SCOPE_DESCRIPTION", "legal enquiries based on our knowledge base"
+    )
+    QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE = os.getenv(
+        "QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE",
+        "I handle legal enquiries based on our knowledge base. "
+        "Your question seems outside that scope. Please ask about legal matters I can look up for you.",
+    )
     USE_VECTORS = os.getenv("USE_VECTORS", "").lower() != "false"
 
     # WEBSITE_HOSTNAME is always set by App Service, RUNNING_IN_PRODUCTION is set in main.bicep
@@ -699,6 +786,12 @@ async def setup_clients():
     if AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT == "minimal" and current_app.config[CONFIG_WEB_SOURCE_ENABLED]:
         raise ValueError("Web source cannot be used with minimal retrieval reasoning effort")
     current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED] = USE_SHAREPOINT_SOURCE
+
+    current_app.config[CONFIG_QUERY_ROUTER_ENABLED] = QUERY_ROUTER_ENABLED
+    current_app.config[CONFIG_QUERY_ROUTER_SCOPE_DESCRIPTION] = QUERY_ROUTER_SCOPE_DESCRIPTION
+    current_app.config[CONFIG_QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE] = QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE
+    current_app.config[CONFIG_QUERY_ROUTER_MODEL] = OPENAI_CHATGPT_MODEL
+    current_app.config[CONFIG_QUERY_ROUTER_DEPLOYMENT] = AZURE_OPENAI_CHATGPT_DEPLOYMENT
 
     prompt_manager = PromptManager()
 

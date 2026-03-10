@@ -40,6 +40,7 @@ If necessary, edit this file to ensure it accurately reflects the current state 
       * app/backend/prepdocslib/textprocessor.py: Processes text chunks for cloud ingestion (merges figures, generates embeddings)
       * app/backend/prepdocslib/textsplitter.py: Splits text into chunks using different strategies
     * app/backend/app.py: The main entry point for the backend application.
+    * app/backend/query_router.py: Query relevance router; classifies whether the user question is in scope (e.g. legal enquiries) before invoking RAG, to reduce latency and avoid unnecessary search/LLM calls for irrelevant queries.
   * app/functions: Azure Functions used for cloud ingestion custom skills (document extraction, figure processing, text processing). Each function bundles a synchronized copy of `prepdocslib`; run `python scripts/copy_prepdocslib.py` to refresh the local copies if you modify the library.
   * app/frontend: Contains the React frontend code, built with TypeScript, built with vite.
     * app/frontend/src/api: Contains the API client code for communicating with the backend.
@@ -57,6 +58,19 @@ If necessary, edit this file to ensure it accurately reflects the current state 
     * app/frontend/src/pages: Contains the main pages of the application
 * infra: Contains the Bicep templates for provisioning Azure resources.
 * tests: Contains the test code, including e2e tests, app integration tests, and unit tests.
+
+## Query router (optional)
+
+When enabled, the app checks each user message for relevance to the bot’s scope (e.g. legal enquiries) before running retrieval and the chat approach. Irrelevant queries get a short “I handle …” style reply without hitting the RAG pipeline, which reduces latency and cost.
+
+* **Enable**: set `QUERY_ROUTER_ENABLED=true` in the environment (default: false). The deployed backend gets this from Bicep; run `azd env set QUERY_ROUTER_ENABLED true` then **provision and redeploy** so the container receives it.
+* **Verify**: call `GET /config` and confirm `queryRouterEnabled` is `true`; if `false`, the router is off and every query goes to RAG.
+* **Fast path**: obvious greetings (e.g. "hello", "hi", "hey") are always treated as out-of-scope without calling the LLM; see `query_router.OBVIOUS_NON_QUERIES` and `is_obvious_non_query()`.
+* **Scope text**: `QUERY_ROUTER_SCOPE_DESCRIPTION` (default: "legal enquiries based on our knowledge base") is used in the classifier prompt.
+* **Out-of-scope message**: `QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE` overrides the reply shown when the query is classified as out of scope.
+* **Bypass**: the frontend can send `overrides.skip_query_router: true` (e.g. from Developer Settings) to force RAG for that request.
+
+The router uses the same OpenAI chat model as the main app with a single short completion (low token count). On router failure the request is passed through to RAG (fail open).
 
 ## Adding new data
 

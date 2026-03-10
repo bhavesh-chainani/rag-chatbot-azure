@@ -86,7 +86,7 @@ async def test_redirect(client):
 
 @pytest.mark.asyncio
 async def test_favicon(client):
-    response = await client.get("/favicon.ico")
+    response = await client.get("/legalchat.ico")
     assert response.status_code == 200
     assert response.content_type.startswith("image")
     assert response.content_type.endswith("icon")

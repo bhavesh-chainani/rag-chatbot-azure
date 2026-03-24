@@ -33,12 +33,6 @@ python scripts/build_pbsg_golden_set_json.py
 
 Each file is one search document so **content** and embeddings stay scoped to a single entry id.
 
-Similarly, for diagram-heavy operational routing documents, ingest a normalized JSON version instead of raw PDF text so branch conditions are explicit. In this repository, `data/legal_help_triage_flowchart_2025_11_26.json` is generated from `data/2025.11.26 Legal Help Triaging Flow Chart.drawio (1).pdf` via:
-
-```shell
-python scripts/build_legal_help_flowchart_json.py
-```
-
 | Format | Manual indexing                      | Integrated Vectorization |
 | ------ | ------------------------------------ | ------------------------ |
 | PDF    | Yes (DI or local with PyPDF)         | Yes                      |

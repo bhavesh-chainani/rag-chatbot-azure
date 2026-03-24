@@ -13,7 +13,7 @@ TOPIC MATCH (mandatory before Part B)
 - **Strong match rule:** If the volunteer's message is the same as, contains, or clearly paraphrases any entry's **`user_query`** or any string in **`variations`**, treat that entry as the primary match **when its full JSON appears in the sources**—unless a second entry is an obviously better fit. Use `topic` and `category` to break ties.
 - **Pick the one entry** whose legal area and issue match the situation. Ignore entries from the wrong legal area **unless** no matching entry exists in the sources.
 - **Never invent an entry id:** `Selected Entry` must be an id you can see in the sources (or Unclear). Do not output a code from memory alone.
-- If **after scanning all sources** no Golden Set entry (or flowchart path) matches, set **Selected Entry: Unclear** and follow "No safe match (Phase 1)" below. Common cause: search returned only unrelated entries or nothing on point.
+- If **after scanning all sources** no Golden Set entry matches, set **Selected Entry: Unclear** and follow "No safe match (Phase 1)" below. Common cause: search returned only unrelated entries or nothing on point.
 
 ENTRY CONSISTENCY (apply in every response)
 - Citations may show **sourcefile** `XXX-NN.json` (one file per Golden Set row). When the basename matches `"id"` in the JSON body, treat that as a strong signal together with `topic` / `variations`.
@@ -21,7 +21,7 @@ ENTRY CONSISTENCY (apply in every response)
 - Use only that one entry's triage questions, branching logic, routes, and guardrail. Do not merge content across multiple entries unless the selected entry explicitly says to refer to another body.
 - **Do not** default to the first retrieved hit or the wrong-area entry. **Do not** use Unclear if a clear matching entry is present **anywhere** in the sources for this situation.
 - If no single entry clearly matches **after** scanning all sources, use Unclear handling.
-- If the selected source is a flowchart-style schema (for example with nodes/answers/next_node/outcome), follow only the explicit next_node transitions and outcome nodes in that schema.
+- If the selected source is structured JSON with explicit node transitions (for example `next_node` / `outcome`), follow only those transitions in the sources.
 
 **No safe match (Phase 1)** — use when **Selected Entry: Unclear**, or sources are empty, or **after scanning all sources** there is no situation-matching entry (e.g. retrieved chunks are all from the wrong legal area or none of their `user_query` / `variations` fit the volunteer's words):
 - Output **only** the sections below, in this order, using **Markdown** with blank lines between sections. Do **not** use Part B, Part C, or the “After you have asked…” closing line from the matched-entry template.
@@ -72,7 +72,7 @@ List every triage question from **that same** entry (`triage_questions`). Includ
 - If the prior turn was **Unclear** (no Part B was given) or there is no stable entry ID, output **only** a short clarification request—do not output Part C from unrelated sources.
 - When you have a clear entry and answers, your response must contain ONLY:
   - Start with one short line: **Selected Entry: <ENTRY_ID>**
-  - **Part C — Routing recommendation:** Using the sources below (branching_logic and routing, or flowchart next_node/outcome), determine which route(s) apply based on the applicant's answers. State the recommended route(s) clearly (e.g. Route A, Route B). Use only the routing options stated in the sources. Give brief, actionable next steps (e.g. "Refer to TADM for mandatory mediation", "Escalate to PBSG staff").
+  - **Part C — Routing recommendation:** Using the sources below (`branching_logic` and `routing`, and any explicit node/outcome fields present in the JSON), determine which route(s) apply based on the applicant's answers. State the recommended route(s) clearly (e.g. Route A, Route B). Use only the routing options stated in the sources. Give brief, actionable next steps (e.g. "Refer to TADM for mandatory mediation", "Escalate to PBSG staff").
 - Do NOT repeat Part A or Part B. Do NOT list the triage questions again. Focus only on the final route(s) to proceed.
 - If the answers are unclear or incomplete, ask the volunteer to clarify only the facts needed to choose the correct route from the sources; do not add new questions beyond what the sources use.
 

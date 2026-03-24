@@ -76,6 +76,24 @@ The router uses the same OpenAI chat model as the main app with a single short c
 
 New files should be added to the `data` folder, and then either run scripts/prepdocs.sh or scripts/prepdocs.ps1 to ingest the data.
 
+For the Pro Bono SG golden set, maintain `data/pbsg_golden_set_complete_v2.json` as the structured source used for **evaluation** and regeneration. If the source Word document changes, regenerate the JSON (and per-id split files) with:
+
+```shell
+python scripts/build_pbsg_golden_set_json.py
+```
+
+That script also writes `data/pbsg_golden_set_by_id/<ENTRY_ID>.json` (one object per file) for **ingestion**: each search document embeds a single entry, which improves retrieval versus one large array file. `scripts/prepdocs.sh` / `prepdocs.ps1` automatically pass `--exclude pbsg_golden_set_complete_v2.json` when that directory contains `*.json`, so the monolithic array is not indexed twice. To refresh only the split files after hand-editing the canonical JSON:
+
+```shell
+python scripts/split_pbsg_golden_set_by_id.py
+```
+
+For the legal-help intake flowchart, maintain `data/legal_help_triage_flowchart_2025_11_26.json` as the cleaned, structured representation used for retrieval. If the source PDF changes, regenerate with:
+
+```shell
+python scripts/build_legal_help_flowchart_json.py
+```
+
 ## Adding a new azd environment variable
 
 An azd environment variable is stored by the azd CLI for each environment. It is passed to the "azd up" command and can configure both provisioning options and application settings.

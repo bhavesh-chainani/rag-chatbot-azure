@@ -1,0 +1,32 @@
+{
+  "id": "BKR-01",
+  "category": "Bankruptcy & Insolvency",
+  "topic": "Bankruptcy \u2014 Filing for Bankruptcy",
+  "user_query": "I have debts of $50,000. Can I declare bankruptcy?",
+  "variations": [
+    "How to file for bankruptcy in Singapore?",
+    "Overwhelming debts, what are my options?",
+    "Can I go bankrupt to clear my debts?",
+    "Debt too high, considering bankruptcy"
+  ],
+  "part_a_general_info": "A debtor can apply for bankruptcy at the High Court if the total debt is at least $15,000. Before bankruptcy, the court may refer you to the Debt Repayment Scheme (DRS) if your debts are under $150,000. DRS is a structured repayment plan over up to 5 years. Bankruptcy has serious consequences: restrictions on travel, inability to be a company director, and potential impact on employment in certain professions. An HDB flat (where at least one owner is a Singapore citizen) is generally protected from seizure by the Official Assignee.",
+  "triage_questions": [
+    "Q1: What is the total amount of your debts?",
+    "Q2: Who are your creditors (banks, individuals, companies)?",
+    "Q3: Are any debts secured (e.g., mortgage, car loan)?",
+    "Q4: Have you received a Statutory Demand from any creditor?",
+    "Q5: Have you explored other options (debt consolidation, negotiation)?"
+  ],
+  "branching_logic": [
+    "If Q1 < $15,000 \u2192 Cannot file for bankruptcy. Other options.",
+    "If Q1 < $150,000 \u2192 DRS may apply.",
+    "If Q4 = yes, Statutory Demand received \u2192 21-day deadline to respond. Urgent."
+  ],
+  "routing": [
+    "Route A (Debt $15k\u2013$150k): DRS may be available. Refer to Official Assignee's office. Refer to PBSG clinic for assessment.",
+    "Route B (Debt >$150k): Bankruptcy may be an option. Refer to PBSG clinic for comprehensive debt assessment.",
+    "Route C (Statutory Demand received): Urgent: 21 days to pay or apply to set aside. Refer to PBSG clinic immediately.",
+    "Route D (Debt <$15k): Cannot file for bankruptcy. Explore negotiation, CMC mediation, or civil court defence."
+  ],
+  "guardrail": "Must NOT advise on whether to file for bankruptcy or negotiate with creditors."
+}

@@ -94,12 +94,30 @@ def test_sentencetextsplitter_split_pages():
     assert chunks[0].page_num == 0
     assert chunks[0].text == '{"test": "'
     assert len(chunks[0].text) <= max_object_length
-    assert chunks[1].page_num == 1
+    assert chunks[1].page_num == 0
     assert chunks[1].text == "Not a larg"
     assert len(chunks[1].text) <= max_object_length
-    assert chunks[2].page_num == 2
+    assert chunks[2].page_num == 0
     assert chunks[2].text == 'e page"}'
     assert len(chunks[2].text) <= max_object_length
+
+
+def test_simpletextsplitter_multi_pages_stay_separate():
+    """JSON array: one Page per object — chunks must not merge across pages."""
+    t = SimpleTextSplitter(max_object_length=1000)
+    chunks = list(
+        t.split_pages(
+            pages=[
+                Page(page_num=0, offset=0, text='{"id": "A"}'),
+                Page(page_num=1, offset=0, text='{"id": "B"}'),
+            ]
+        )
+    )
+    assert len(chunks) == 2
+    assert chunks[0].text == '{"id": "A"}'
+    assert chunks[0].page_num == 0
+    assert chunks[1].text == '{"id": "B"}'
+    assert chunks[1].page_num == 1
 
 
 def pytest_generate_tests(metafunc):

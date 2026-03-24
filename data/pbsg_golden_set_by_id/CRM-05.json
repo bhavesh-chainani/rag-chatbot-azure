@@ -1,0 +1,29 @@
+{
+  "id": "CRM-05",
+  "category": "Criminal Law",
+  "topic": "Criminal \u2014 Traffic Offences",
+  "user_query": "I received a letter from the traffic police about a speeding offence.",
+  "variations": [
+    "Traffic summons \u2014 what do I do?",
+    "Caught speeding, will I lose my licence?",
+    "How to pay a traffic fine?",
+    "Can I dispute a traffic offence?"
+  ],
+  "part_a_general_info": "For minor traffic offences, you may be offered a composition sum (fine). If you pay, no court action is taken. If you disagree with the offence, you can elect to go to court to dispute it. You will receive a court date. Serious traffic offences (e.g., drink driving, causing death by dangerous driving) are not compoundable and will proceed to court. Demerit points (DIPS) may be imposed in addition to fines. Accumulating 24 or more points within 24 months may result in licence suspension.",
+  "triage_questions": [
+    "Q1: What is the specific offence?",
+    "Q2: Were you offered a composition fine?",
+    "Q3: Do you wish to pay the fine or dispute the offence?",
+    "Q4: Do you have existing demerit points?"
+  ],
+  "branching_logic": [
+    "If Q1 = serious offence (drink driving, causing injury/death) \u2192 Not compoundable. Court proceedings.",
+    "If Q3 = wants to dispute \u2192 Needs to attend court. May want legal representation."
+  ],
+  "routing": [
+    "Route A (Minor offence, pay fine): Advise to pay composition fine. Inform about demerit points.",
+    "Route B (Wants to dispute): Advise to attend court. Refer to CLAS if eligible or private lawyer.",
+    "Route C (Serious traffic offence): Refer to CLAS/PDO for legal representation."
+  ],
+  "guardrail": "Must NOT advise on whether to pay or dispute the fine."
+}

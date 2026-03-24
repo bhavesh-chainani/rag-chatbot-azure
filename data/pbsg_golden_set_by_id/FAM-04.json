@@ -1,0 +1,30 @@
+{
+  "id": "FAM-04",
+  "category": "Family Law (Divorce & Related)",
+  "topic": "Family Law \u2014 Maintenance",
+  "user_query": "My husband is not paying maintenance for the children.",
+  "variations": [
+    "Ex-spouse stopped paying maintenance",
+    "How to enforce maintenance order?",
+    "Can I get maintenance from my wife?",
+    "How much maintenance can I claim?"
+  ],
+  "part_a_general_info": "Parents have a legal duty to maintain their children under the Women's Charter 1961. If there is an existing court order, you can apply to enforce it at the Family Justice Courts. If there is no existing order, you can apply for one at the FJC. The court considers factors including the financial needs of the child, the standard of living, and the means of each parent. Generally, only wives can claim maintenance from husbands. A husband can only claim maintenance from a wife if he is incapacitated and unable to earn a livelihood. Enforcement options include attachment of earnings, garnishee orders, or committal proceedings for contempt.",
+  "triage_questions": [
+    "Q1: Is there an existing maintenance order?",
+    "Q2: When did the other party stop paying?",
+    "Q3: How much is owed?",
+    "Q4: Do you know the other party's current employment or financial situation?"
+  ],
+  "branching_logic": [
+    "If Q1 = yes, existing order \u2192 Enforcement pathway.",
+    "If Q1 = no order \u2192 Application for new maintenance order.",
+    "If large arrears accumulated \u2192 May need enforcement + variation."
+  ],
+  "routing": [
+    "Route A (Enforce existing order): Refer to PBSG Family Law clinic for enforcement application at FJC.",
+    "Route B (No existing order): Refer to PBSG Family Law clinic to apply for maintenance order.",
+    "Route C (Husband seeking maintenance): Explain the incapacity requirement. Refer to PBSG clinic for assessment."
+  ],
+  "guardrail": "Must NOT calculate specific maintenance amounts or assess reasonableness of claims."
+}

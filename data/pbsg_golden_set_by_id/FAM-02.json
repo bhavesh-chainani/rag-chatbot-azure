@@ -1,0 +1,32 @@
+{
+  "id": "FAM-02",
+  "category": "Family Law (Divorce & Related)",
+  "topic": "Family Law \u2014 Domestic Violence / PPO",
+  "user_query": "My husband is violent. I want a divorce.",
+  "variations": [
+    "My spouse hit me. What can I do?",
+    "I'm being abused at home",
+    "How do I get protection from my husband?",
+    "Family violence \u2014 I need help"
+  ],
+  "part_a_general_info": "If you are in immediate danger, call the Police at 999. You can apply for a Personal Protection Order (PPO) at the Family Justice Courts. A Domestic Exclusion Order (DEO) can also prevent the abuser from entering the home. Unreasonable behaviour including violence is a ground for divorce. You may not need to wait 3 years if exceptional hardship can be shown. PPO and divorce are separate proceedings. You can pursue both concurrently. Support: AWARE, PAVE, National Anti-Violence Helpline (1800-777-0000).",
+  "triage_questions": [
+    "Q1: Are you currently in immediate danger?",
+    "Q2: What is the nature and frequency of the violence?",
+    "Q3: Do you have a safe place to stay? Are children safe?",
+    "Q4: Have you made a police report or sought medical attention?",
+    "Q5: Have you applied for a PPO before?"
+  ],
+  "branching_logic": [
+    "If Q1 = YES \u2192 Priority: Call 999. Do not proceed until safety established.",
+    "If Q3 = no safe place \u2192 Refer to crisis shelters first.",
+    "If Q5 = existing PPO breached \u2192 Inform breach is criminal offence, report to police."
+  ],
+  "routing": [
+    "Route A (Immediate danger): Call 999. Refer to crisis shelters. Legal referrals secondary.",
+    "Route B (No PPO yet): Refer to FJC for PPO. Refer to PBSG Family Law clinic. Refer to AWARE/PAVE.",
+    "Route C (PPO breached): Report breach to police. Commence divorce if not yet filed.",
+    "Route D (Violence + divorce): PPO concurrent with divorce. Violence may justify early filing (<3 years)."
+  ],
+  "guardrail": "Must NOT assess severity or credibility of allegations. Safety referrals and general information only."
+}

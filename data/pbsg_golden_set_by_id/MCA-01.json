@@ -1,0 +1,29 @@
+{
+  "id": "MCA-01",
+  "category": "Mental Capacity (LPA & Deputyship)",
+  "topic": "Mental Capacity \u2014 What is an LPA?",
+  "user_query": "What is an LPA?",
+  "variations": [
+    "How do I plan ahead if I lose mental capacity?",
+    "What is Lasting Power of Attorney?",
+    "I want someone to make decisions for me if I can't",
+    "LPA Singapore \u2014 how does it work?"
+  ],
+  "part_a_general_info": "A Lasting Power of Attorney (LPA) is a legal document where you appoint one or more 'Donees' to make decisions for you if you lose mental capacity in the future. An LPA can cover: (a) Personal Welfare (where to live, healthcare decisions, daily care), and/or (b) Property & Affairs (managing bank accounts, selling property, paying bills). You must have mental capacity at the time of making the LPA. It must be certified by a Certificate Issuer (accredited doctor, psychiatrist, or lawyer). You can appoint more than one Donee, acting jointly (must agree on everything) or jointly and severally (can act independently). An LPA can be revoked at any time while you still have mental capacity.",
+  "triage_questions": [
+    "Q1: Are you looking to make an LPA for yourself, or help someone else make one?",
+    "Q2: Does the person still have mental capacity?",
+    "Q3: What type of decisions do you want covered \u2014 personal welfare, property & affairs, or both?",
+    "Q4: Have you identified who you want as your Donee(s)?"
+  ],
+  "branching_logic": [
+    "If Q2 = person has already lost capacity \u2192 Cannot make LPA. Must apply for Deputyship instead (see MCA-02).",
+    "If Q1 = helping someone else \u2192 Ensure THAT person is the one giving instructions, not the applicant."
+  ],
+  "routing": [
+    "Route A (Making own LPA): Refer to Office of the Public Guardian (OPG) for LPA Form 1 (general) or Form 2 (customised). Certificate Issuer needed.",
+    "Route B (Person lost capacity): LPA too late. Refer to Deputyship pathway (MCA-02).",
+    "Route C (Needs help finding Certificate Issuer): Refer to OPG list of accredited Certificate Issuers."
+  ],
+  "guardrail": "Must NOT certify or witness any LPA. Must NOT advise on specific powers to include."
+}

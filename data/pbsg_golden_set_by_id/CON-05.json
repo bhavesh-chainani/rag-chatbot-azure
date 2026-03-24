@@ -1,0 +1,31 @@
+{
+  "id": "CON-05",
+  "category": "Consumer & Contracts",
+  "topic": "Consumer \u2014 Scam / Fraud Victim",
+  "user_query": "I am a victim of a scam. What do I do?",
+  "variations": [
+    "Got cheated online",
+    "Investment scam \u2014 lost my money",
+    "Credit card scam, what are my options?",
+    "Someone tricked me into transferring money"
+  ],
+  "part_a_general_info": "If you have been scammed, you should make a police report immediately. Time is critical as police may be able to freeze the funds. Contact your bank immediately if money was transferred from your bank account. Banks may be able to reverse or hold the transaction. For investment scams, check whether the entity is regulated by the Monetary Authority of Singapore (MAS). If they are not licensed, report to MAS as well. Contracts with unlicensed entities may be unenforceable, but recovery of funds through civil courts is possible if the scammer can be identified and located.",
+  "triage_questions": [
+    "Q1: When did the scam occur?",
+    "Q2: How much money was lost?",
+    "Q3: How was the money transferred (bank transfer, cash, cryptocurrency)?",
+    "Q4: Do you have details of the scammer (name, account number, contact)?",
+    "Q5: Have you made a police report and contacted your bank?"
+  ],
+  "branching_logic": [
+    "If Q3 = cryptocurrency \u2192 Recovery is very difficult. Police report still important.",
+    "If Q5 = no police report yet \u2192 Urge immediate police report and bank notification.",
+    "If Q4 = scammer details available \u2192 Police investigation more likely to succeed."
+  ],
+  "routing": [
+    "Route A (Recent scam, funds traceable): Police report immediately. Contact bank for possible freeze/reversal. Time-critical.",
+    "Route B (Investment scam): Police report. Report to MAS. If substantial loss, refer to PBSG clinic for civil recovery options.",
+    "Route C (Overseas scammer): Police report. Recovery prospects are limited for overseas scammers. Refer to PBSG staff for assessment."
+  ],
+  "guardrail": "Must NOT contact any financial institution, police, or platform on behalf of the applicant."
+}

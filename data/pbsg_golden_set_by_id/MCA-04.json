@@ -1,0 +1,30 @@
+{
+  "id": "MCA-04",
+  "category": "Mental Capacity (LPA & Deputyship)",
+  "topic": "Mental Capacity \u2014 Donee Selling Property",
+  "user_query": "Can the Donee sell my mother's HDB flat?",
+  "variations": [
+    "LPA donee selling property \u2014 is it allowed?",
+    "Can my brother sell the flat using the LPA?",
+    "HDB sale under Lasting Power of Attorney",
+    "Limits on what a donee can do"
+  ],
+  "part_a_general_info": "If the LPA grants powers over Property & Affairs and does not specifically restrict the sale of property, the Donee may sell the HDB flat on behalf of the person who lost capacity. However, the Donee has a fiduciary duty to act in the best interests of the person (the 'donor'). Any sale must be at fair market value and for the donor's benefit. If the LPA contains restrictions (e.g., 'Donee may not sell the property without court approval'), those restrictions must be followed. HDB has specific procedures for property transactions involving persons who have lost mental capacity. The Donee should contact HDB directly.",
+  "triage_questions": [
+    "Q1: Does the LPA specifically grant Property & Affairs powers?",
+    "Q2: Are there any restrictions in the LPA regarding property sale?",
+    "Q3: Why does the property need to be sold?",
+    "Q4: Do other family members agree?"
+  ],
+  "branching_logic": [
+    "If Q1 = LPA only covers Personal Welfare \u2192 Cannot sell property under this LPA. May need Deputyship for P&A.",
+    "If Q2 = restrictions exist \u2192 Must comply with restrictions. May need court approval.",
+    "If Q4 = family disputes \u2192 Escalate to PBSG staff."
+  ],
+  "routing": [
+    "Route A (LPA covers P&A, no restrictions): Advise Donee to contact HDB for specific procedures. Refer to PBSG clinic if assistance needed.",
+    "Route B (LPA has restrictions): Refer to PBSG clinic to assess whether court application is needed.",
+    "Route C (Family disputes): Escalate to PBSG staff. Dissenting family may apply to court to challenge the sale."
+  ],
+  "guardrail": "Must NOT advise on whether selling the property is in the donor's best interests."
+}

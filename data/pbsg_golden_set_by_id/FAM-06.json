@@ -1,0 +1,28 @@
+{
+  "id": "FAM-06",
+  "category": "Family Law (Divorce & Related)",
+  "topic": "Family Law \u2014 Annulment (Nullity)",
+  "user_query": "I want to cancel my marriage. It has only been 6 months.",
+  "variations": [
+    "How to annul marriage?",
+    "Marriage not consummated, want to split",
+    "I was forced into marriage, can I void it?",
+    "Difference between divorce and annulment?"
+  ],
+  "part_a_general_info": "An annulment (Writ of Nullity) declares a marriage void or voidable. Unlike divorce, you do not need to wait for 3 years. Common grounds include: non-consummation due to incapacity or refusal, marriage not validly registered, one party was already married (bigamy), or consent was obtained by duress or fraud. For voidable marriages (e.g., non-consummation), proceedings generally must start within 3 years of the marriage.",
+  "triage_questions": [
+    "Q1: How long have you been married?",
+    "Q2: Has the marriage been consummated?",
+    "Q3: Why do you want to annul (e.g., refusal of sex, fraud, duress)?",
+    "Q4: Is this a Civil or Muslim marriage?"
+  ],
+  "branching_logic": [
+    "If Q2 = Yes (consummated) \u2192 Annulment on non-consummation ground is impossible. Pivot to Divorce (FAM-01).",
+    "If Q1 > 3 years \u2192 Annulment may be time-barred for voidable marriages. Pivot to Divorce."
+  ],
+  "routing": [
+    "Route A (Non-consummation/Duress): Refer to private lawyer or PBSG Family Law Clinic. Annulment is a technical legal process.",
+    "Route B (Muslim marriage): Refer to Syariah Court."
+  ],
+  "guardrail": "Must NOT advise on the likelihood of proving 'refusal to consummate' or the strength of duress claims."
+}

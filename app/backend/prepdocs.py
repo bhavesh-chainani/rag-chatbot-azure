@@ -51,10 +51,15 @@ def setup_list_file_strategy(
     azure_credential: AsyncTokenCredential,
     local_files: str,
     enable_global_documents: bool = False,
+    exclude_basenames: Optional[frozenset[str]] = None,
 ):
     logger.info("Using local files: %s", local_files)
+    if exclude_basenames:
+        logger.info("Excluding basenames from ingestion: %s", sorted(exclude_basenames))
     list_file_strategy = LocalListFileStrategy(
-        path_pattern=local_files, enable_global_documents=enable_global_documents
+        path_pattern=local_files,
+        enable_global_documents=enable_global_documents,
+        exclude_basenames=exclude_basenames,
     )
     return list_file_strategy
 
@@ -144,6 +149,13 @@ if __name__ == "__main__":  # pragma: no cover
         "--documentintelligencekey",
         required=False,
         help="Optional. Use this Azure Document Intelligence account key instead of the current user identity to login (use az login to set current user for Azure)",
+    )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="FILENAME",
+        help="Skip files with this basename (repeatable). Example: --exclude pbsg_golden_set_complete_v2.json",
     )
 
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
@@ -243,10 +255,15 @@ if __name__ == "__main__":  # pragma: no cover
         storage_key=clean_key_if_exists(args.storagekey),
         image_storage_container=os.environ.get("AZURE_IMAGESTORAGE_CONTAINER"),  # Pass the image container
     )
+    exclude_basenames: Optional[frozenset[str]] = None
+    if args.exclude:
+        exclude_basenames = frozenset(args.exclude)
+
     list_file_strategy = setup_list_file_strategy(
         azure_credential=azd_credential,
         local_files=args.files,
         enable_global_documents=enable_global_documents,
+        exclude_basenames=exclude_basenames,
     )
 
     emb_model_dimensions = 1536

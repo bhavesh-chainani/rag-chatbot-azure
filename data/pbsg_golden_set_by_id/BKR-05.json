@@ -1,0 +1,29 @@
+{
+  "id": "BKR-05",
+  "category": "Bankruptcy & Insolvency",
+  "topic": "Bankruptcy \u2014 Debt Repayment Scheme (DRS)",
+  "user_query": "Can I apply for the Debt Repayment Scheme instead of bankruptcy?",
+  "variations": [
+    "What is DRS?",
+    "Avoid bankruptcy paying by instalments",
+    "Debt under $100k, help",
+    "Official Assignee repayment plan"
+  ],
+  "part_a_general_info": "The Debt Repayment Scheme (DRS) is a pre-bankruptcy scheme administered by the Official Assignee. It allows you to pay off debts over a fixed period (up to 5 years) without becoming bankrupt. Eligibility: Debts must not exceed $150,000, you must be gainfully employed, and you must not have been bankrupt or on DRS in the last 5 years. Important: You cannot apply for DRS directly. You must file a bankruptcy application, and if you are eligible, the court will refer you to the Official Assignee for DRS assessment.",
+  "triage_questions": [
+    "Q1: What is your total debt amount?",
+    "Q2: Are you currently working and earning a regular income?",
+    "Q3: Have you filed a bankruptcy application yet?",
+    "Q4: Have you been bankrupt or on DRS in the past 5 years?"
+  ],
+  "branching_logic": [
+    "If Q1 > $150,000 \u2192 Not eligible for DRS. Proceed to Bankruptcy (BKR-01).",
+    "If Q2 = Unemployed \u2192 Unlikely to qualify for DRS.",
+    "If Q4 = Yes (prior bankruptcy/DRS within 5 years) \u2192 Not eligible for DRS."
+  ],
+  "routing": [
+    "Route A (Likely eligible for DRS): File bankruptcy application at High Court. The court will auto-refer to OA for DRS eligibility assessment.",
+    "Route B (Not eligible for DRS): Refer to Credit Counselling Singapore for voluntary debt management plans, or proceed with bankruptcy."
+  ],
+  "guardrail": "Must NOT guarantee DRS approval or advise on specific repayment amounts."
+}

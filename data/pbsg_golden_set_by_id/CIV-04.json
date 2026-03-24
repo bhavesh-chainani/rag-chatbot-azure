@@ -1,0 +1,31 @@
+{
+  "id": "CIV-04",
+  "category": "Other Civil / Procedural",
+  "topic": "Civil \u2014 Data Protection (PDPA)",
+  "user_query": "My personal data was leaked by a company.",
+  "variations": [
+    "Data breach \u2014 what can I do?",
+    "Company misused my personal information",
+    "PDPA complaint Singapore",
+    "Someone shared my data without consent"
+  ],
+  "part_a_general_info": "The Personal Data Protection Act (PDPA) 2012 requires organisations to protect personal data and use it only for the purposes for which consent was given. You can lodge a complaint with the Personal Data Protection Commission (PDPC). The PDPC can investigate and impose fines on organisations that breach the PDPA. If you suffered financial loss due to a data breach, you may also have a civil claim for damages against the organisation. The PDPA applies to organisations, not individuals. For data misuse by individuals, other remedies may apply (e.g., POHA for doxxing).",
+  "triage_questions": [
+    "Q1: What personal data was involved?",
+    "Q2: Which organisation is responsible?",
+    "Q3: How did you discover the breach?",
+    "Q4: Have you suffered any financial loss?",
+    "Q5: Have you contacted the organisation's Data Protection Officer?"
+  ],
+  "branching_logic": [
+    "If Q4 = financial loss \u2192 May have civil claim in addition to PDPC complaint.",
+    "If Q5 = organisation unresponsive \u2192 Proceed directly to PDPC complaint.",
+    "If data misuse by individual, not organisation \u2192 PDPA may not apply. Consider POHA."
+  ],
+  "routing": [
+    "Route A (Organisation breach, no financial loss): Lodge complaint with PDPC. Provide all evidence of the breach.",
+    "Route B (Organisation breach, financial loss): Lodge PDPC complaint and consider civil claim. Refer to PBSG clinic.",
+    "Route C (Individual misuse): PDPA may not apply. Consider POHA (doxxing) or civil claim. Refer to PBSG clinic."
+  ],
+  "guardrail": "Must NOT lodge any complaint or contact any organisation on the applicant's behalf."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "EST-05",
+  "category": "Wills, Probate & Estate",
+  "topic": "Estate \u2014 CPF and HDB on Death",
+  "user_query": "What happens to our HDB flat if my husband dies?",
+  "variations": [
+    "Husband died, what about CPF?",
+    "Who gets the flat when one owner dies?",
+    "Can I include CPF in my will?",
+    "Joint tenancy vs tenancy in common \u2014 death"
+  ],
+  "part_a_general_info": "For HDB flats held as joint tenancy, the flat automatically passes to the surviving owner by the 'right of survivorship'. It does not form part of the estate. For flats held as tenancy-in-common, the deceased's share goes to their estate and is distributed according to the will or intestacy laws. CPF savings are NOT covered by a will. CPF monies are distributed according to the CPF nomination. If no nomination was made, CPF monies are distributed under intestacy laws or Muslim law. Insurance policies with nominated beneficiaries are also distributed directly to the nominee, not through the estate.",
+  "triage_questions": [
+    "Q1: How is the HDB flat held \u2014 joint tenancy or tenancy-in-common?",
+    "Q2: Did the deceased make a CPF nomination?",
+    "Q3: Are there other assets (bank accounts, insurance) with nominations?",
+    "Q4: Was the deceased a Muslim?"
+  ],
+  "branching_logic": [
+    "If Q1 = don't know \u2192 Advise to check with HDB.",
+    "If Q2 = no CPF nomination \u2192 CPF distributed under intestacy or Muslim law.",
+    "If Q4 = Muslim \u2192 Different distribution rules apply."
+  ],
+  "routing": [
+    "Route A (Joint tenancy, CPF nominated): Inform that flat passes automatically and CPF goes to nominee. May still need to notify HDB and CPF Board.",
+    "Route B (Tenancy-in-common or no nomination): Will need to administer the estate. Refer to PBSG clinic or Public Trustee.",
+    "Route C (Muslim deceased): Refer to MUIS for faraid certificate."
+  ],
+  "guardrail": "Must NOT advise on specific ownership arrangements or draft any transfer documents."
+}

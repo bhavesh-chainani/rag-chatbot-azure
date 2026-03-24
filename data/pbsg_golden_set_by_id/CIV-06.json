@@ -1,0 +1,29 @@
+{
+  "id": "CIV-06",
+  "category": "Other Civil / Procedural",
+  "topic": "Civil \u2014 Defamation",
+  "user_query": "Someone wrote lies about me on Facebook. I want to sue for defamation.",
+  "variations": [
+    "Slander and libel laws Singapore",
+    "Neighbour badmouthing me to everyone",
+    "Online harassment and lies",
+    "Can I claim damages for ruined reputation?"
+  ],
+  "part_a_general_info": "Defamation involves the publication of a false statement that harms your reputation. It is a civil cause of action. Defamation suits are filed in the District Court or High Court and are generally expensive. Legal aid from LAB is NOT available for defamation cases. Alternative: If the act involves harassment, insults, or doxxing, a POHA Protection Order (via the PHC) may be cheaper and faster than a defamation suit. To succeed, you must prove: the statement was published to a third party, it referred to you, and it was defamatory. Truth is a complete defence for the publisher.",
+  "triage_questions": [
+    "Q1: Where was the statement made (online, verbal, chat group)?",
+    "Q2: Do you know who the person is?",
+    "Q3: Are you seeking money (damages) or just want the behaviour to stop?",
+    "Q4: Do you have the funds to hire a private lawyer?"
+  ],
+  "branching_logic": [
+    "If Q3 = 'just want it to stop' \u2192 Pivot to POHA (Harassment) pathway which is cheaper and more accessible.",
+    "If Q3 = 'want damages' \u2192 Warn about high legal costs and lack of legal aid."
+  ],
+  "routing": [
+    "Route A (Want it to stop / harassment): File for Protection Order at PHC under POHA. Refer to PBSG clinic for assistance.",
+    "Route B (Sue for damages): Refer to private litigation lawyers. LAB does not cover defamation.",
+    "Route C (Prefer mediation): Refer to Community Mediation Centre (CMC)."
+  ],
+  "guardrail": "Must NOT assess whether the statement qualifies as 'defamatory' under law."
+}

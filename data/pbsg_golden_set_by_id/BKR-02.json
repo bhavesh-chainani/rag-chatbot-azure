@@ -1,0 +1,29 @@
+{
+  "id": "BKR-02",
+  "category": "Bankruptcy & Insolvency",
+  "topic": "Bankruptcy \u2014 Statutory Demand",
+  "user_query": "I received a Statutory Demand. What do I do?",
+  "variations": [
+    "Creditor sent me bankruptcy warning",
+    "Got letter saying I will be made bankrupt",
+    "What is a Statutory Demand?",
+    "How to respond to Statutory Demand?"
+  ],
+  "part_a_general_info": "A Statutory Demand is a formal notice from a creditor demanding payment of a debt of at least $15,000. It is the first step towards a bankruptcy application. You have 21 days from the date of service to either pay the debt, come to an agreement with the creditor, or apply to the court to set aside the Statutory Demand. If you do not respond within 21 days, the creditor can proceed to file a bankruptcy application against you. Grounds to set aside a Statutory Demand include: the debt is disputed on substantial grounds, you have a valid counterclaim, or there is a procedural defect.",
+  "triage_questions": [
+    "Q1: When did you receive the Statutory Demand?",
+    "Q2: How much is the debt claimed?",
+    "Q3: Do you dispute the debt? On what grounds?",
+    "Q4: Have you contacted the creditor to negotiate?"
+  ],
+  "branching_logic": [
+    "If Q1 = more than 21 days ago \u2192 Deadline may have passed. Urgent escalation.",
+    "If Q3 = debt disputed \u2192 May be able to set aside. Needs legal assessment."
+  ],
+  "routing": [
+    "Route A (Within 21 days, debt not disputed): Advise to negotiate with creditor or arrange payment. Refer to PBSG clinic for debt advice.",
+    "Route B (Within 21 days, debt disputed): Urgent: refer to PBSG clinic to assess grounds to set aside the Statutory Demand.",
+    "Route C (Past 21 days): Creditor may file bankruptcy application. Urgent referral to PBSG clinic."
+  ],
+  "guardrail": "Must NOT negotiate with creditors or file any court application."
+}

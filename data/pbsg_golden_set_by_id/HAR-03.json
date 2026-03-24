@@ -1,0 +1,30 @@
+{
+  "id": "HAR-03",
+  "category": "Personal Protection & Harassment (POHA)",
+  "topic": "Harassment \u2014 Doxxing",
+  "user_query": "Someone posted my photos and personal details online without consent.",
+  "variations": [
+    "My private info was shared online",
+    "Ex posted my photos to shame me",
+    "Doxxing \u2014 what can I do?",
+    "Someone put my NRIC details on social media"
+  ],
+  "part_a_general_info": "Doxxing is prohibited under POHA 2014. It is an offence to publish someone's personal information (identity, contact details, photos) with intent to cause harassment, alarm, or distress. You can apply for a Protection Order at the PHC to stop the doxxing and require removal of the content. You should also make a police report. Doxxing is a criminal offence. If the content involves intimate images shared without consent, this may also be an offence under the Penal Code (voyeurism/intimate images provisions).",
+  "triage_questions": [
+    "Q1: What personal information was published?",
+    "Q2: Do you know who published it?",
+    "Q3: On which platform was it published?",
+    "Q4: Does the content include intimate images?",
+    "Q5: Have you made a police report?"
+  ],
+  "branching_logic": [
+    "If Q4 = intimate images \u2192 Additional Penal Code offences may apply. Escalate urgently.",
+    "If Q2 = unknown person \u2192 Police investigation needed for identification."
+  ],
+  "routing": [
+    "Route A (Known perpetrator): Refer to PHC for Protection Order with content removal. Make police report.",
+    "Route B (Intimate images): Urgent escalation. Refer to police (Penal Code offence). PHC for takedown order. Refer to AWARE for support.",
+    "Route C (Unknown perpetrator): Make police report first. Police can investigate and identify. PHC application once identified."
+  ],
+  "guardrail": "Must NOT contact any platform or request content removal on behalf of the applicant."
+}

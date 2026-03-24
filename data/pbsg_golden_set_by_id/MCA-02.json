@@ -1,0 +1,31 @@
+{
+  "id": "MCA-02",
+  "category": "Mental Capacity (LPA & Deputyship)",
+  "topic": "Mental Capacity \u2014 Deputyship",
+  "user_query": "My father had a stroke and can't manage his affairs. How do I help?",
+  "variations": [
+    "Parent lost mental capacity, what do I do?",
+    "How to apply for Deputyship?",
+    "Mother has dementia, can't access her bank account",
+    "How to become a deputy in Singapore?"
+  ],
+  "part_a_general_info": "If a person has already lost mental capacity and has no LPA in place, you must apply to the Family Justice Courts for a Deputyship order under the Mental Capacity Act 2008. You will need a medical report certifying the loss of mental capacity from a qualified medical practitioner. A Deputy can be granted powers over Personal Welfare and/or Property & Affairs, similar to an LPA Donee. For smaller estates (generally under $60,000), a Simplified Track may apply, which is cheaper and faster. The Deputy must submit annual reports to the Office of the Public Guardian on the use of the person's funds.",
+  "triage_questions": [
+    "Q1: Who has lost mental capacity? What is your relationship to them?",
+    "Q2: When and how was the loss of capacity identified?",
+    "Q3: Do they have an existing LPA?",
+    "Q4: What is the approximate total value of their assets?",
+    "Q5: Have other family members been consulted? Do they agree with your application?"
+  ],
+  "branching_logic": [
+    "If Q3 = LPA exists \u2192 No need for Deputyship. Activate the LPA.",
+    "If Q4 < $60,000 \u2192 Simplified Track may apply.",
+    "If Q5 = family disagrees \u2192 Contested application. More complex."
+  ],
+  "routing": [
+    "Route A (No LPA, family agrees): Refer to PBSG clinic for Deputyship application. If estate <$60k, advise Simplified Track.",
+    "Route B (LPA exists): No Deputyship needed. Advise on activating the existing LPA via OPG.",
+    "Route C (Family disputes): Escalate to PBSG staff. Contested Deputyship may require legal representation."
+  ],
+  "guardrail": "Must NOT prepare any Deputyship application or court documents."
+}

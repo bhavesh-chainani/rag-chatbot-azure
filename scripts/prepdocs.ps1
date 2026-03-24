@@ -21,6 +21,12 @@ if ($args) {
   $additionalArgs = "$args"
 }
 
+$byIdDir = Join-Path $cwd "data/pbsg_golden_set_by_id"
+$hasSplitGolden = (Test-Path $byIdDir) -and (Get-ChildItem -Path $byIdDir -Filter "*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+if ($hasSplitGolden) {
+  $additionalArgs = "$additionalArgs --exclude pbsg_golden_set_complete_v2.json"
+}
+
 $argumentList = "./app/backend/prepdocs.py $dataArg --verbose $additionalArgs"
 
 $argumentList

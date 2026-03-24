@@ -1,0 +1,29 @@
+{
+  "id": "CIV-02",
+  "category": "Other Civil / Procedural",
+  "topic": "Civil \u2014 Self-Representation (Litigant in Person)",
+  "user_query": "Can I represent myself in court?",
+  "variations": [
+    "Litigant in person \u2014 how?",
+    "Going to court without lawyer",
+    "Self-representation in Singapore courts",
+    "Can't afford lawyer but need to go to court"
+  ],
+  "part_a_general_info": "Yes, you can represent yourself as a 'Litigant-in-Person' (LIP) in most Singapore courts. The Community Justice Centre (CJC) provides free resources, guidance, and limited legal advice for self-represented litigants. The State Courts and Family Justice Courts have information counters to assist LIPs with procedural queries. In certain tribunals (e.g., Small Claims Tribunal, Employment Claims Tribunal), lawyers are generally not allowed, so all parties represent themselves.",
+  "triage_questions": [
+    "Q1: Which court is your case in?",
+    "Q2: What stage are the proceedings at?",
+    "Q3: Have you received any court documents?",
+    "Q4: Have you approached the CJC?"
+  ],
+  "branching_logic": [
+    "If Q1 = High Court/complex matter \u2192 Self-representation is risky for complex cases.",
+    "If Q3 = received documents and unsure what to do \u2192 Refer to CJC urgently."
+  ],
+  "routing": [
+    "Route A (Tribunal, straightforward): Provide general procedural information. Refer to CJC for guidance.",
+    "Route B (State Courts, civil): Refer to CJC and PBSG legal clinic for guidance on procedures.",
+    "Route C (Complex/High Court): Strongly recommend legal representation. Refer to LAB (if eligible) or PBSG clinic."
+  ],
+  "guardrail": "Must NOT prepare any court documents or provide case-specific legal advice."
+}

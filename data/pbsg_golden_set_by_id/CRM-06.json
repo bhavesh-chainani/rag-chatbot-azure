@@ -1,0 +1,30 @@
+{
+  "id": "CRM-06",
+  "category": "Criminal Law",
+  "topic": "Criminal Law \u2014 Drug Offences",
+  "user_query": "My son was caught for drug consumption.",
+  "variations": [
+    "Arrested by CNB",
+    "Drug trafficking charge",
+    "Urine test positive",
+    "Misuse of Drugs Act penalties"
+  ],
+  "part_a_general_info": "Drug offences are treated strictly under the Misuse of Drugs Act (MDA). Penalties depend on the nature of the drug and the quantity. Consumption: First-time abusers may be sent to the Drug Rehabilitation Centre (DRC) for treatment and rehabilitation. Repeat offenders may face long imprisonment and caning. Trafficking: Carries severe penalties, including life imprisonment or the death penalty for amounts exceeding prescribed thresholds. Possession: Even small quantities carry significant penalties. The quantity and type of drug determines the presumption applied.",
+  "triage_questions": [
+    "Q1: Has he been formally charged in court, or is he in DRC?",
+    "Q2: What is the specific offence (consumption, possession, trafficking)?",
+    "Q3: Is this his first offence?",
+    "Q4: Is the family able to afford a lawyer?"
+  ],
+  "branching_logic": [
+    "If Q2 = Trafficking \u2192 Urgent. Immediate legal representation needed. Potential capital charge.",
+    "If Q1 = DRC \u2192 Administrative process, not a court charge yet. Focus on rehabilitation support.",
+    "If Q2 = Consumption, first offence \u2192 DRC is the likely outcome rather than prosecution."
+  ],
+  "routing": [
+    "Route A (Charged in court, no means): Refer to CLAS (Pro Bono SG) or Public Defender's Office (PDO).",
+    "Route B (Capital charge / death penalty): Refer to LASCO (Legal Assistance Scheme for Capital Offences, Supreme Court).",
+    "Route C (DRC inquiry): Refer to Singapore Prison Service or Yellow Ribbon Singapore for family support."
+  ],
+  "guardrail": "Must NOT advise on potential sentence length, plea mitigation strategies, or the likelihood of a capital charge."
+}

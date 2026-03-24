@@ -1,0 +1,29 @@
+{
+  "id": "EMP-06",
+  "category": "Employment Law",
+  "topic": "Employment Law \u2014 Overtime Pay",
+  "user_query": "My boss refuses to pay me for overtime work.",
+  "variations": [
+    "I worked extra hours but got no money",
+    "Is OT pay mandatory?",
+    "Company says no overtime pay for my role",
+    "Claiming money for working weekends and public holidays"
+  ],
+  "part_a_general_info": "Under Part 4 of the Employment Act 1968, overtime (OT) pay is mandatory only for: (a) workmen (manual labour) earning up to $4,500/month, and (b) non-workmen earning up to $2,600/month. For these employees, OT must be paid at 1.5 times the hourly basic rate of pay. Managers and executives are generally not covered under Part 4 and their entitlement to OT depends strictly on their employment contract.",
+  "triage_questions": [
+    "Q1: What is your job role (e.g., manual worker, clerk, manager)?",
+    "Q2: What is your basic monthly salary?",
+    "Q3: Does your employment contract specifically mention overtime pay?",
+    "Q4: Are you a Singapore Citizen/PR or Work Permit holder?"
+  ],
+  "branching_logic": [
+    "If Q1 = Manager OR Q2 > $2,600 (non-workman) \u2192 Statutory OT likely does not apply; depends on contract.",
+    "If Q4 = Work Permit \u2192 Route to MOM/TADM with language support if needed."
+  ],
+  "routing": [
+    "Route A (Covered under Part 4): File claim at TADM.",
+    "Route B (Not covered, contract silent): Statutory claim unlikely to succeed. Refer to PBSG Employment Clinic for contract review if amount is substantial.",
+    "Route C (Not covered, contract provides OT): File claim at TADM for breach of contract."
+  ],
+  "guardrail": "Must NOT calculate the specific OT sum owed or interpret ambiguous contract clauses."
+}

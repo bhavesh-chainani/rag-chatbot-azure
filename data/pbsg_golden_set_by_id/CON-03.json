@@ -1,0 +1,31 @@
+{
+  "id": "CON-03",
+  "category": "Consumer & Contracts",
+  "topic": "Consumer \u2014 Renovation Disputes",
+  "user_query": "The renovation contractor took my money but didn't finish the work.",
+  "variations": [
+    "Contractor ran away with deposit",
+    "Renovation incomplete, want refund",
+    "Builder stopped work halfway",
+    "How to sue my contractor?"
+  ],
+  "part_a_general_info": "Disputes involving the provision of services (like renovation) can be heard at the Small Claims Tribunal (SCT) for claims up to $20,000 (or $30,000 with consent). Claims must be filed within 2 years of the cause of action arising. For claims above $30,000, you would need to file a civil suit in the Magistrate's Court or District Court. You should also consider lodging a complaint with CASE and/or the relevant trade association (e.g., Singapore Renovation Contractors and Material Suppliers Association).",
+  "triage_questions": [
+    "Q1: How much have you paid the contractor?",
+    "Q2: How much is your total claim (including cost of completing the work)?",
+    "Q3: Do you have a written contract?",
+    "Q4: When did the contractor stop work?",
+    "Q5: Have you contacted the contractor? Are they still contactable?"
+  ],
+  "branching_logic": [
+    "If Q2 \u2264 $20k \u2192 SCT.",
+    "If Q2 = $20k\u2013$30k \u2192 SCT with consent, otherwise Magistrate's Court.",
+    "If Q5 = contractor disappeared \u2192 May need to check if company is still registered."
+  ],
+  "routing": [
+    "Route A (Claim \u2264$20k): File SCT claim. Lodge CASE complaint concurrently.",
+    "Route B (Claim >$20k): Civil suit in Magistrate's/District Court. Refer to PBSG civil clinic.",
+    "Route C (Contractor disappeared): Check ACRA if company registered. If wound up, recovery may be limited. Refer to PBSG staff."
+  ],
+  "guardrail": "Must NOT draft any letter of demand, SCT filing, or court documents."
+}

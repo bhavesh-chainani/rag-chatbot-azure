@@ -1,0 +1,33 @@
+{
+  "id": "FAM-01",
+  "category": "Family Law (Divorce & Related)",
+  "topic": "Family Law \u2014 Filing for Divorce",
+  "user_query": "I want to divorce my husband.",
+  "variations": [
+    "How do I file for divorce in Singapore?",
+    "I want to leave my husband, what's the process?",
+    "Can I get a divorce?",
+    "What do I need to start divorce proceedings?"
+  ],
+  "part_a_general_info": "To file for divorce in Singapore, you must generally have been married for at least 3 years. Earlier divorce requires exceptional hardship or depravity. You must prove irretrievable breakdown based on: (a) adultery, (b) unreasonable behaviour, (c) desertion for 2+ years, (d) separation for 3 years with consent, or (e) separation for 4 years without consent. If both parties agree on everything, an uncontested divorce is faster and less costly. For Muslim marriages, divorce is handled by the Syariah Court.",
+  "triage_questions": [
+    "Q1: How long have you been married?",
+    "Q2: Is this a civil or Muslim marriage?",
+    "Q3: On what grounds do you wish to file?",
+    "Q4: Does your spouse agree? Have you discussed ancillary matters?",
+    "Q5: Do you have children? Ages?"
+  ],
+  "branching_logic": [
+    "If Q1 < 3 years \u2192 Inform of 3-year bar and narrow exception. Escalate.",
+    "If Q2 = Muslim \u2192 Redirect to Syariah Court.",
+    "If Q4 = both agree \u2192 Uncontested track.",
+    "If Q4 = disagree \u2192 Contested track, needs representation."
+  ],
+  "routing": [
+    "Route A (Uncontested, civil, >3 years): Refer to PBSG Family Law clinic for uncontested divorce filing.",
+    "Route B (Contested): Refer to PBSG Family Law clinic. If not eligible for LAB, refer to Law Society pro bono or private solicitors.",
+    "Route C (Muslim marriage): Refer to Syariah Court.",
+    "Route D (<3 years): Escalate to PBSG staff for exceptional hardship assessment."
+  ],
+  "guardrail": "Must NOT advise on which divorce ground is strongest for specific facts, nor assess asset division or custody merits."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "HAR-04",
+  "category": "Personal Protection & Harassment (POHA)",
+  "topic": "Harassment \u2014 Debt Collector Harassment",
+  "user_query": "Debt collectors are harassing my family.",
+  "variations": [
+    "Ah Long harassing us",
+    "Licensed money lender threatening me",
+    "Loan sharks splashing paint on door",
+    "Debt collectors coming to my house and shouting"
+  ],
+  "part_a_general_info": "While debt collection is legal, harassment by debt collectors is not. If they threaten violence, vandalise property, harass family members, or cause alarm/distress, this may be an offence. For unlicensed moneylenders ('Ah Longs'), you should report to the police. Contracts with unlicensed moneylenders are generally unenforceable. Do NOT pay them. For licensed moneylenders, you can lodge a complaint with the Registry of Moneylenders (Ministry of Law). Licensed moneylenders must follow strict rules on collection practices. If you are in physical danger, call 999 immediately.",
+  "triage_questions": [
+    "Q1: Is the debt owed to a licensed moneylender, unlicensed moneylender, or other creditor?",
+    "Q2: What type of harassment is occurring (threats, vandalism, visiting home/workplace)?",
+    "Q3: Have you made a police report?",
+    "Q4: Do you need physical safety measures (e.g., CCTV)?"
+  ],
+  "branching_logic": [
+    "If Q1 = unlicensed ('Ah Long') \u2192 Police report immediately. Do NOT pay.",
+    "If Q1 = licensed moneylender \u2192 Registry of Moneylenders complaint.",
+    "If Q2 = physical violence/vandalism \u2192 Call 999. Police report."
+  ],
+  "routing": [
+    "Route A (Unlicensed moneylender): Make police report immediately. Do NOT repay. Refer to PBSG if applicant needs legal assistance.",
+    "Route B (Licensed moneylender, improper practices): Lodge complaint with Registry of Moneylenders (MinLaw). Refer to PBSG if debt restructuring needed.",
+    "Route C (Harassment from general creditors): If harassment crosses into POHA territory, refer to PHC. Otherwise, refer to PBSG for debt management advice."
+  ],
+  "guardrail": "Must NOT negotiate with debt collectors or moneylenders on behalf of the applicant."
+}

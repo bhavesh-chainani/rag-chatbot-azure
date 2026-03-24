@@ -1,0 +1,30 @@
+{
+  "id": "MCA-03",
+  "category": "Mental Capacity (LPA & Deputyship)",
+  "topic": "Mental Capacity \u2014 Access to Bank Account",
+  "user_query": "My mother is in a nursing home. How do I access her bank account to pay bills?",
+  "variations": [
+    "Parent in hospital, can't sign for money",
+    "How to manage finances of person who lost capacity?",
+    "Need to pay nursing home fees from parent's account",
+    "Bank won't let me access family member's account"
+  ],
+  "part_a_general_info": "If she has mental capacity, she can sign a bank authorisation or power of attorney directly with the bank. If she has an existing LPA that covers Property & Affairs, the appointed Donee can manage her accounts once the LPA is registered and activated. If she has lost capacity and there is no LPA, you must apply for a Deputyship order to access her funds. Banks will not release funds without court authorisation. For urgent expenses (medical, nursing home fees), some institutions may make temporary arrangements. Contact the bank directly about interim measures.",
+  "triage_questions": [
+    "Q1: Does your mother still have mental capacity?",
+    "Q2: Does she have an existing LPA?",
+    "Q3: Which bank holds the account?",
+    "Q4: What expenses need to be paid urgently?"
+  ],
+  "branching_logic": [
+    "If Q1 = has capacity \u2192 Simpler route: bank authorisation or power of attorney.",
+    "If Q2 = LPA exists \u2192 Activate and present to bank.",
+    "If neither \u2192 Deputyship required."
+  ],
+  "routing": [
+    "Route A (Has capacity): Advise direct bank authorisation. No legal proceedings needed.",
+    "Route B (LPA exists): Advise on LPA activation via OPG. Present activated LPA to bank.",
+    "Route C (No capacity, no LPA): Refer to PBSG clinic for Deputyship application. Advise bank about interim urgent measures."
+  ],
+  "guardrail": "Must NOT sign or execute any financial authorisation on behalf of the applicant or the person."
+}

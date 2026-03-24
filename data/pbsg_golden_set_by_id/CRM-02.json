@@ -1,0 +1,31 @@
+{
+  "id": "CRM-02",
+  "category": "Criminal Law",
+  "topic": "Criminal \u2014 Bail",
+  "user_query": "Can I get bail? How does bail work?",
+  "variations": [
+    "How much is bail?",
+    "My family member is in remand, how to bail out?",
+    "What are bail conditions?",
+    "Can bail be revoked?"
+  ],
+  "part_a_general_info": "Most offences in Singapore are bailable. For bailable offences, the accused has a right to be released on bail. For non-bailable offences, bail is at the court's discretion. Bail requires a surety (bailor) who guarantees the accused will attend court. The bail amount is set by the police or court. Bail conditions may include reporting requirements, travel restrictions, and no-contact orders. Failure to comply with bail conditions or failure to attend court can result in the bail being revoked and the bail amount being forfeited.",
+  "triage_questions": [
+    "Q1: What charges is the person facing?",
+    "Q2: Is the person currently in remand?",
+    "Q3: What are the specific bail conditions?",
+    "Q4: Do you have a surety (bailor) available?",
+    "Q5: What is the bail amount set?"
+  ],
+  "branching_logic": [
+    "If Q1 = non-bailable offence \u2192 Bail is discretionary, not guaranteed.",
+    "If Q4 = no surety \u2192 May need to find a suitable bailor. Some charities may assist.",
+    "If bail already set and surety available \u2192 Can proceed to post bail."
+  ],
+  "routing": [
+    "Route A (Bailable offence, surety available): Advise on bail posting process at police station or court.",
+    "Route B (Non-bailable offence): Refer to CLAS/PDO for bail application to court.",
+    "Route C (No surety): Refer to PBSG staff for assistance in finding a bailor."
+  ],
+  "guardrail": "Must NOT act as surety or post bail on behalf of anyone."
+}

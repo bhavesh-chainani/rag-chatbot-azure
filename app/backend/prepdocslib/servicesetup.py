@@ -22,7 +22,7 @@ from .parser import Parser
 from .pdfparser import DocumentAnalysisParser, LocalPdfParser
 from .strategy import SearchInfo
 from .textparser import TextParser
-from .textsplitter import SentenceTextSplitter, SimpleTextSplitter
+from .textsplitter import DEFAULT_JSON_OBJECT_MAX_LENGTH, SentenceTextSplitter, SimpleTextSplitter
 
 logger = logging.getLogger("scripts")
 
@@ -286,7 +286,7 @@ def build_file_processors(
 
     # These file formats can always be parsed:
     file_processors = {
-        ".json": FileProcessor(JsonParser(), SimpleTextSplitter()),
+        ".json": FileProcessor(JsonParser(), SimpleTextSplitter(max_object_length=DEFAULT_JSON_OBJECT_MAX_LENGTH)),
         ".md": FileProcessor(TextParser(), sentence_text_splitter),
         ".txt": FileProcessor(TextParser(), sentence_text_splitter),
         ".csv": FileProcessor(CsvParser(), sentence_text_splitter),

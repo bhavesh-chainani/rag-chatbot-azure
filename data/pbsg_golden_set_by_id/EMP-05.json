@@ -1,0 +1,29 @@
+{
+  "id": "EMP-05",
+  "category": "Employment Law",
+  "topic": "Employment Law \u2014 Non-Payment of CPF",
+  "user_query": "My company didn't pay my CPF.",
+  "variations": [
+    "Employer not contributing CPF",
+    "Boss never top up my CPF",
+    "How to check if CPF was paid by employer?",
+    "Company owes me CPF contributions"
+  ],
+  "part_a_general_info": "Under the Central Provident Fund Act 1953, employers are legally required to make CPF contributions for employees who are Singapore Citizens or Permanent Residents. Non-payment of CPF is a criminal offence. You can check your CPF contributions via the CPF website or app. If your employer has not been making contributions, you can lodge a report with the CPF Board. The CPF Board has enforcement powers and can recover arrears on your behalf. Employers who fail to pay CPF contributions may be prosecuted and face fines or imprisonment.",
+  "triage_questions": [
+    "Q1: How long has your employer not been contributing CPF?",
+    "Q2: Have you checked your CPF statement to confirm non-payment?",
+    "Q3: Are you a Singapore Citizen or PR?",
+    "Q4: Are you still employed with this company?"
+  ],
+  "branching_logic": [
+    "If Q3 = not SC/PR \u2192 CPF contributions are generally not required for non-residents. Different issue.",
+    "If Q4 = still employed \u2192 Advise caution in approach; may affect employment relationship."
+  ],
+  "routing": [
+    "Route A (Confirmed non-payment, SC/PR): Refer to CPF Board to lodge a report. CPF Board will investigate and enforce.",
+    "Route B (Non-resident): Inform that CPF is generally not required for non-residents. If salary dispute, refer to TADM instead.",
+    "Route C (Left employment): Refer to CPF Board and concurrently to TADM if there are other outstanding salary claims."
+  ],
+  "guardrail": "Must NOT advise on specific CPF contribution amounts or calculate arrears. Refer to CPF Board."
+}

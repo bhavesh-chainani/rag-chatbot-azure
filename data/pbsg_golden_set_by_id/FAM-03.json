@@ -1,0 +1,32 @@
+{
+  "id": "FAM-03",
+  "category": "Family Law (Divorce & Related)",
+  "topic": "Family Law \u2014 Child Custody / Access",
+  "user_query": "I want full custody of my children.",
+  "variations": [
+    "Can I get sole custody after divorce?",
+    "My ex won't let me see my kids",
+    "How does custody work in Singapore?",
+    "What's the difference between custody and care and control?"
+  ],
+  "part_a_general_info": "Courts generally grant 'joint custody' (both parents make major decisions). Sole custody is exceptional. 'Care and control' determines where the child lives daily. The other parent gets 'access' (visitation). The paramount consideration is the child's welfare and best interests. If a court order exists and one parent is non-compliant, enforcement can be sought at the FJC.",
+  "triage_questions": [
+    "Q1: Are you in divorce proceedings or already divorced?",
+    "Q2: How many children and their ages?",
+    "Q3: Current living arrangement?",
+    "Q4: Is there an existing court order on custody/access?",
+    "Q5: What specific outcome are you seeking?"
+  ],
+  "branching_logic": [
+    "If Q1 = during divorce \u2192 Custody as ancillary matter.",
+    "If Q4 = existing order, non-compliance \u2192 Enforcement pathway.",
+    "If Q5 = sole custody \u2192 Explain it is exceptional. Escalate for merits assessment."
+  ],
+  "routing": [
+    "Route A (Part of divorce): Advise custody is ancillary. Refer to PBSG Family Law clinic.",
+    "Route B (Enforcement): Refer to PBSG clinic for enforcement application at FJC.",
+    "Route C (Variation): Must show material change in circumstances. Refer to PBSG clinic.",
+    "Route D (Access denied): Refer to PBSG clinic. If child taken overseas without consent, escalate urgently."
+  ],
+  "guardrail": "Must NOT assess which parent should get custody or comment on case merits."
+}

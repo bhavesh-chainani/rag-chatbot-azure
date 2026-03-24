@@ -1,0 +1,30 @@
+{
+  "id": "HAR-02",
+  "category": "Personal Protection & Harassment (POHA)",
+  "topic": "Harassment \u2014 Neighbour Disputes",
+  "user_query": "My neighbour is harassing me with noise every night.",
+  "variations": [
+    "Noisy neighbour, what can I do?",
+    "Neighbour dispute \u2014 who to complain to?",
+    "Next door plays loud music every night",
+    "Neighbour throwing things at my door"
+  ],
+  "part_a_general_info": "For neighbour disputes involving interference with enjoyment of your residence (noise, smell, obstruction), you can apply to the Community Disputes Resolution Tribunal (CDRT). Mediation at the Community Mediation Centre (CMC) is generally required before filing a CDRT claim. CMC mediation is free. If the behaviour amounts to harassment (threats, physical intimidation, doxxing), you may also consider applying for a Protection Order under POHA at the PHC. For noise complaints, you can also approach your Town Council or HDB Branch Office as a first step.",
+  "triage_questions": [
+    "Q1: What type of behaviour is involved (noise, physical, threats)?",
+    "Q2: Have you tried speaking to the neighbour directly?",
+    "Q3: Have you reported to HDB/Town Council?",
+    "Q4: Have you tried mediation at CMC?"
+  ],
+  "branching_logic": [
+    "If Q1 = threats/physical intimidation \u2192 This may be POHA territory, not just CDRT.",
+    "If Q4 = yes, mediation failed \u2192 Can proceed to CDRT.",
+    "If Q4 = no mediation yet \u2192 Must try CMC first."
+  ],
+  "routing": [
+    "Route A (Noise/nuisance, no mediation yet): Refer to CMC for mediation first. Also suggest contacting Town Council/HDB.",
+    "Route B (CMC mediation failed): Refer to CDRT for formal claim.",
+    "Route C (Threats/harassment): Refer to PHC for POHA Protection Order. Make police report if threats involved."
+  ],
+  "guardrail": "Must NOT assess whether the neighbour's behaviour legally constitutes 'harassment' or 'nuisance'."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "BKR-04",
+  "category": "Bankruptcy & Insolvency",
+  "topic": "Bankruptcy \u2014 Spouse's Debts",
+  "user_query": "My husband is bankrupt. Am I liable for his debts?",
+  "variations": [
+    "Spouse bankrupt, am I affected?",
+    "Husband's debts \u2014 do I have to pay?",
+    "Joint account with bankrupt spouse",
+    "Can creditors come after me for spouse's debt?"
+  ],
+  "part_a_general_info": "You are generally NOT liable for your spouse's debts unless you acted as a guarantor or hold a joint loan/account. If you co-signed any loan or acted as surety, you may be jointly liable for that specific debt. Joint bank accounts may be affected. The OA may claim the bankrupt spouse's share of joint assets. Your personal assets (held solely in your name) are generally not at risk.",
+  "triage_questions": [
+    "Q1: Did you co-sign or guarantee any of your spouse's loans?",
+    "Q2: Do you have any joint bank accounts or joint assets?",
+    "Q3: Have any creditors contacted you directly?"
+  ],
+  "branching_logic": [
+    "If Q1 = yes, acted as guarantor \u2192 Liable for that specific debt.",
+    "If Q2 = joint accounts \u2192 OA may claim spouse's share."
+  ],
+  "routing": [
+    "Route A (No guarantee, no joint assets): Generally not liable. Advise to keep assets separate.",
+    "Route B (Acted as guarantor): May be liable for guaranteed debt. Refer to PBSG clinic for assessment.",
+    "Route C (Joint assets): Refer to PBSG clinic. OA may claim bankrupt's share of joint assets."
+  ],
+  "guardrail": "Must NOT advise on specific asset protection strategies."
+}

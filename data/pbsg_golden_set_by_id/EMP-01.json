@@ -1,0 +1,32 @@
+{
+  "id": "EMP-01",
+  "category": "Employment Law",
+  "topic": "Employment Law \u2014 Unpaid Salary",
+  "user_query": "My employer hasn't paid my salary for 3 months. What can I do?",
+  "variations": [
+    "Boss owes me salary. Where do I report?",
+    "How do I claim unpaid wages?",
+    "Company never pay me three months already",
+    "Who do I complain to if I don't get paid?"
+  ],
+  "part_a_general_info": "Under the Employment Act 1968, employers must pay salary within 7 days after the end of each salary period. If your employer has not paid, you may file a salary claim with the Tripartite Alliance for Dispute Management (TADM). Claims must generally be filed within 1 year from the date salary was due. If you have left the company, you must file within 6 months of your last day. The Employment Claims Tribunals (ECT) can hear claims up to $20,000 (or $30,000 with union assistance). Mediation at TADM is mandatory before ECT.",
+  "triage_questions": [
+    "Q1: Are you still working for the employer, or have you left?",
+    "Q2: When was the last salary payment you received?",
+    "Q3: How much salary is owed in total?",
+    "Q4: Are you a Singapore Citizen, PR, or on a work permit?",
+    "Q5: Have you already filed a claim with TADM?"
+  ],
+  "branching_logic": [
+    "If Q1 = 'left' \u2192 Check if within 6-month limitation. If outside, flag as time-barred and escalate.",
+    "If Q4 = 'work permit' \u2192 Additionally inform about MOM regulations.",
+    "If Q5 = 'already filed TADM' \u2192 Branch to ECT pathway."
+  ],
+  "routing": [
+    "Route A (No TADM claim): Refer to TADM for mandatory mediation. Provide filing link and limitation period.",
+    "Route B (TADM failed): If Claim Referral Certificate obtained, refer to ECT. Refer to PBSG employment clinic if needed.",
+    "Route C (Work permit holder): Additionally refer to MOM. Escalate to PBSG staff for specialist referral.",
+    "Route D (Time-barred): Inform claim may be time-barred. Escalate to PBSG staff to assess exceptions."
+  ],
+  "guardrail": "Must NOT advise on specific contractual entitlements or draft any letter of demand. General statutory framework and routing only."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "BKR-03",
+  "category": "Bankruptcy & Insolvency",
+  "topic": "Bankruptcy \u2014 Effects of Bankruptcy",
+  "user_query": "What happens if I am bankrupt? Can I travel?",
+  "variations": [
+    "Bankrupt restrictions Singapore",
+    "Can bankrupt person work?",
+    "How long does bankruptcy last?",
+    "Will I lose my house if bankrupt?"
+  ],
+  "part_a_general_info": "Undischarged bankrupts need the permission of the Official Assignee (OA) to travel overseas. Some professions have restrictions for bankrupts (e.g., lawyers, accountants, company directors). You must inform the OA of your employment. Discharge from bankruptcy can occur after 3\u20137 years, depending on whether you have met your target contribution to the estate. An HDB flat (at least one owner is SC) is generally protected. However, private property may be sold. You must contribute a portion of your income to the estate and cannot incur debt above $1,000 without informing the creditor of your bankruptcy status.",
+  "triage_questions": [
+    "Q1: Are you already bankrupt, or considering filing?",
+    "Q2: What is your current employment?",
+    "Q3: Do you own property?",
+    "Q4: How long have you been bankrupt?"
+  ],
+  "branching_logic": [
+    "If Q2 = restricted profession \u2192 Inform about professional restrictions.",
+    "If Q4 = more than 5 years \u2192 May be eligible for discharge. Check with OA."
+  ],
+  "routing": [
+    "Route A (General enquiry): Provide general information on bankrupt's rights and obligations. Refer to OA for specific questions.",
+    "Route B (Seeking discharge): Refer to PBSG clinic for assistance with discharge application.",
+    "Route C (Employment impact): Advise to check with OA and professional body. Refer to PBSG clinic if issues arise."
+  ],
+  "guardrail": "Must NOT advise on specific financial decisions or discharge strategy."
+}

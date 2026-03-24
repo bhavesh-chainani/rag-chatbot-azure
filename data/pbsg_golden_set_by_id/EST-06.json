@@ -1,0 +1,28 @@
+{
+  "id": "EST-06",
+  "category": "Wills, Probate & Estate",
+  "topic": "Estate \u2014 Resealing Foreign Grants",
+  "user_query": "My husband died in Malaysia and has assets in Singapore.",
+  "variations": [
+    "Foreign will, Singapore assets",
+    "Probate obtained overseas, how to use here?",
+    "Deceased was a foreigner with Singapore bank account",
+    "Resealing grant of probate"
+  ],
+  "part_a_general_info": "If the deceased was domiciled in a Commonwealth country (e.g., Malaysia, UK, Hong Kong) and a Grant of Probate or Letters of Administration has already been issued there, you can apply to the Singapore Courts to 'reseal' that grant. This makes the foreign grant valid for dealing with assets in Singapore. If the deceased was from a non-Commonwealth country (e.g., China, USA), a fresh grant in Singapore is usually required. Resealing applications are made to the High Court (General Division) and require certified copies of the foreign grant, the original will, and other supporting documents.",
+  "triage_questions": [
+    "Q1: Which country was the deceased domiciled in?",
+    "Q2: Has a Grant of Probate already been obtained in that country?",
+    "Q3: What is the value of assets in Singapore?",
+    "Q4: Are you the executor/administrator named in the foreign grant?"
+  ],
+  "branching_logic": [
+    "If Q1 = Commonwealth (Malaysia/UK/HK etc.) \u2192 Resealing is possible.",
+    "If Q1 = Non-Commonwealth (e.g., China, USA) \u2192 Fresh Grant required in Singapore."
+  ],
+  "routing": [
+    "Route A (Resealing from Commonwealth): This is a complex High Court procedure. Refer to private lawyer via Law Society Directory. PBSG clinics generally do not handle complex cross-border probate.",
+    "Route B (Non-Commonwealth, fresh grant): Fresh grant application needed. Refer to private lawyer. If small estate (<$50k), Public Trustee may assist."
+  ],
+  "guardrail": "Must NOT assist in drafting resealing applications or any court documents."
+}

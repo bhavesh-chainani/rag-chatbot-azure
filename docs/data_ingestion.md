@@ -25,13 +25,13 @@ The chat app provides two ways to ingest data: manual ingestion and cloud ingest
 
 In order to ingest a document format, we need a tool that can turn it into text. By default, the manual indexing uses Azure Document Intelligence (DI in the table below), but we also have local parsers for several formats. The local parsers are not as sophisticated as Azure Document Intelligence, but they can be used to decrease charges.
 
-For policy-like corpora (such as the Pro Bono SG Golden Set), prefer ingesting a structured JSON representation rather than the original `.docx`. This preserves fields such as triage questions, branching logic, routing, and guardrails as stable chunks. In this repository, `data/pbsg_golden_set_complete_v2.json` is generated from `data/PBSG_Golden_Set_Complete_v2.docx` via:
+For policy-like corpora (such as the Pro Bono SG Golden Set), prefer ingesting structured JSON rather than the original `.docx`. In this repository, `scripts/build_pbsg_golden_set_json.py` reads `data/PBSG_Golden_Set_Complete_v2.docx` and writes **`data/pbsg_golden_set_by_id/<ENTRY_ID>.json`** (one Golden Set object per file):
 
 ```shell
 python scripts/build_pbsg_golden_set_json.py
 ```
 
-The same script writes `data/pbsg_golden_set_by_id/<ENTRY_ID>.json` (one Golden Set object per file). Ingestion uses those files so each search document’s **content** and embedding focus on a single entry; `scripts/prepdocs.sh` / `prepdocs.ps1` skip the monolithic `pbsg_golden_set_complete_v2.json` when split files exist so entries are not double-indexed. Refresh only the split folder with `python scripts/split_pbsg_golden_set_by_id.py`.
+Each file is one search document so **content** and embeddings stay scoped to a single entry id.
 
 Similarly, for diagram-heavy operational routing documents, ingest a normalized JSON version instead of raw PDF text so branch conditions are explicit. In this repository, `data/legal_help_triage_flowchart_2025_11_26.json` is generated from `data/2025.11.26 Legal Help Triaging Flow Chart.drawio (1).pdf` via:
 
@@ -49,7 +49,7 @@ python scripts/build_legal_help_flowchart_json.py
 | JSON   | Yes (Local)                          | Yes                      |
 | CSV    | Yes (Local)                          | Yes                      |
 
-For **JSON arrays**, the parser emits **one page per top-level object** (`id`, triage, routing, etc.). The text splitter indexes **each object separately** (up to a generous per-object size limit). For the PBSG golden set, prefer **`data/pbsg_golden_set_by_id/*.json`** so each file maps to one `sourcefile` (e.g. `FAM-03.json`) and one coherent chunk. Re-ingest after changing `data/*.json` (and remove stale `data/*.md5` if you need a forced refresh). Manual runs can use `--exclude pbsg_golden_set_complete_v2.json` on `prepdocs.py` when using the split directory.
+For **JSON arrays**, the parser emits **one page per top-level object** (`id`, triage, routing, etc.). The text splitter indexes **each object separately** (up to a generous per-object size limit). The PBSG golden set uses **one file per entry** under `data/pbsg_golden_set_by_id/` so each `sourcefile` (e.g. `FAM-03.json`) maps to one chunk. Re-ingest after changing `data/*.json` (and remove stale `data/*.md5` if you need a forced refresh). `prepdocs.py` supports `--exclude <basename>` if you need to skip specific paths.
 
 ## Ingestion stages
 

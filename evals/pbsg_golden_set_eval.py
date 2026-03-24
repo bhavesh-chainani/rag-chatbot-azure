@@ -9,8 +9,18 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET = ROOT / "data" / "pbsg_golden_set_complete_v2.json"
+DEFAULT_DATASET_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
 DEFAULT_OUTPUT = ROOT / "evals" / "results" / "pbsg_golden_set_eval.json"
+
+
+def load_golden_dataset(path: Path) -> list[dict[str, Any]]:
+    """Load one combined list from a directory of per-id JSON files or a legacy array JSON file."""
+    if path.is_dir():
+        paths = sorted(path.glob("*.json"), key=lambda p: p.stem)
+        if not paths:
+            raise FileNotFoundError(f"No *.json entries under {path}")
+        return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
+    return json.loads(path.read_text(encoding="utf-8"))
 
 SELECTED_ENTRY_RE = re.compile(r"Selected Entry:\s*([A-Z]{3}-\d{2}|Unclear)", re.IGNORECASE)
 ROUTE_RE = re.compile(r"\bRoute\s+([A-Z])\b", re.IGNORECASE)
@@ -157,14 +167,19 @@ def evaluate_phase2_case(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate PBSG golden set behavior through /chat endpoint.")
     parser.add_argument("--targeturl", type=str, required=True, help="Backend base URL, e.g. http://127.0.0.1:50505")
-    parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Path to structured PBSG dataset JSON")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=DEFAULT_DATASET_DIR,
+        help="Directory of per-id JSON files (default: data/pbsg_golden_set_by_id) or a single array JSON file",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Path for evaluation report JSON")
     parser.add_argument("--max-entries", type=int, default=0, help="Limit entries (0 means all)")
     parser.add_argument("--per-entry-variations", type=int, default=0, help="Limit variations per entry (0 means all)")
     parser.add_argument("--timeout-seconds", type=int, default=90, help="HTTP timeout per request")
     args = parser.parse_args()
 
-    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
+    dataset = load_golden_dataset(args.dataset)
     entries = dataset[: args.max_entries] if args.max_entries and args.max_entries > 0 else dataset
 
     overrides = {

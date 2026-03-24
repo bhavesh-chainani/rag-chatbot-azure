@@ -35,28 +35,28 @@ async def test_jsonparser_array_multiple_obj():
 def test_golden_set_retrieval_prefix_shapes():
     assert golden_set_retrieval_prefix({"id": "not-an-id"}) == ""
     obj = {
-        "id": "FAM-03",
-        "topic": "Child access",
-        "category": "Family Law",
-        "variations": ["My ex won't let me see my kids"],
-        "user_query": "I want custody.",
+        "id": "EMP-01",
+        "topic": "Unpaid wages",
+        "category": "Employment Law",
+        "variations": ["Boss has not paid me for two months"],
+        "user_query": "My employer has not paid my salary.",
     }
     prefix = golden_set_retrieval_prefix(obj)
-    assert prefix.startswith("Golden Set entry FAM-03.")
-    assert "My ex won't let me see my kids" in prefix
+    assert prefix.startswith("Golden Set entry EMP-01.")
+    assert "Boss has not paid me for two months" in prefix
 
 
 @pytest.mark.asyncio
 async def test_jsonparser_golden_array_prepends_cues():
     payload = (
-        '[{"id": "FAM-03", "topic": "T", "variations": ["seen kids"],'
+        '[{"id": "EMP-01", "topic": "T", "variations": ["unpaid salary phrasing"],'
         ' "user_query": "uq", "x": 1}]'
     )
     file = io.StringIO(payload)
-    file.name = "pbsg_golden_set_complete_v2.json"
+    file.name = "EMP-01.json"
     jsonparser = JsonParser()
     pages = [page async for page in jsonparser.parse(file)]
     assert len(pages) == 1
-    assert "Golden Set entry FAM-03." in pages[0].text
-    assert "seen kids" in pages[0].text
-    assert '"id": "FAM-03"' in pages[0].text
+    assert "Golden Set entry EMP-01." in pages[0].text
+    assert "unpaid salary phrasing" in pages[0].text
+    assert '"id": "EMP-01"' in pages[0].text

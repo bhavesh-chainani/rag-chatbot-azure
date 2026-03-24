@@ -76,17 +76,13 @@ The router uses the same OpenAI chat model as the main app with a single short c
 
 New files should be added to the `data` folder, and then either run scripts/prepdocs.sh or scripts/prepdocs.ps1 to ingest the data.
 
-For the Pro Bono SG golden set, maintain `data/pbsg_golden_set_complete_v2.json` as the structured source used for **evaluation** and regeneration. If the source Word document changes, regenerate the JSON (and per-id split files) with:
+For the Pro Bono SG golden set, **`data/pbsg_golden_set_by_id/<ENTRY_ID>.json`** is the canonical structured data (one object per file) for **ingestion** and **evaluation**. If the source Word document changes, regenerate all entry files with:
 
 ```shell
 python scripts/build_pbsg_golden_set_json.py
 ```
 
-That script also writes `data/pbsg_golden_set_by_id/<ENTRY_ID>.json` (one object per file) for **ingestion**: each search document embeds a single entry, which improves retrieval versus one large array file. `scripts/prepdocs.sh` / `prepdocs.ps1` automatically pass `--exclude pbsg_golden_set_complete_v2.json` when that directory contains `*.json`, so the monolithic array is not indexed twice. To refresh only the split files after hand-editing the canonical JSON:
-
-```shell
-python scripts/split_pbsg_golden_set_by_id.py
-```
+That script reads `data/PBSG_Golden_Set_Complete_v2.docx` and overwrites the JSON files under `data/pbsg_golden_set_by_id/`.
 
 For the legal-help intake flowchart, maintain `data/legal_help_triage_flowchart_2025_11_26.json` as the cleaned, structured representation used for retrieval. If the source PDF changes, regenerate with:
 

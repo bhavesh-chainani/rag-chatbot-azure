@@ -1,13 +1,12 @@
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DOCX = ROOT / "data" / "PBSG_Golden_Set_Complete_v2.docx"
-OUTPUT_JSON = ROOT / "data" / "pbsg_golden_set_complete_v2.json"
+OUTPUT_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
 
 ENTRY_HEADER_RE = re.compile(
     r"^([A-Z]{3}-\d{2})\s+\|\s+(.+?)$",
@@ -118,11 +117,12 @@ def main() -> None:
         body = text[start:end].strip()
         entries.append(parse_entry(entry_id, topic, body))
 
-    OUTPUT_JSON.write_text(json.dumps(entries, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-    print(f"Wrote {len(entries)} entries to {OUTPUT_JSON}")
-
-    split_script = ROOT / "scripts" / "split_pbsg_golden_set_by_id.py"
-    subprocess.run([sys.executable, str(split_script)], check=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        eid = entry["id"]
+        out_path = OUTPUT_DIR / f"{eid}.json"
+        out_path.write_text(json.dumps(entry, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    print(f"Wrote {len(entries)} files to {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":

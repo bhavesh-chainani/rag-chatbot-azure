@@ -155,7 +155,7 @@ if __name__ == "__main__":  # pragma: no cover
         action="append",
         default=[],
         metavar="FILENAME",
-        help="Skip files with this basename (repeatable). Example: --exclude pbsg_golden_set_complete_v2.json",
+        help="Skip files with this basename (repeatable). Example: --exclude draft_notes.txt",
     )
 
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")

@@ -127,7 +127,7 @@ Note that the "groundedness" evaluator is not reliable for multimodal RAG, since
 
 ## Evaluate PBSG Golden Set triage behavior
 
-For the Pro Bono SG workflow, use the structured dataset (`data/pbsg_golden_set_complete_v2.json`) and run the dedicated endpoint-based evaluator:
+For the Pro Bono SG workflow, use the per-id JSON files under `data/pbsg_golden_set_by_id/` (default) or pass `--dataset` to a directory or legacy single-array JSON file. Run the endpoint-based evaluator:
 
 ```bash
 python evals/pbsg_golden_set_eval.py --targeturl http://localhost:50505

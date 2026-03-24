@@ -84,6 +84,8 @@ python scripts/build_pbsg_golden_set_json.py
 
 That script reads `data/PBSG_Golden_Set_Complete_v2.docx` and overwrites the JSON files under `data/pbsg_golden_set_by_id/`.
 
+**Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip `PBSG_Golden_Set_Complete_v2.docx` so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). For a differently named source `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
+
 For the legal-help intake flowchart, maintain `data/legal_help_triage_flowchart_2025_11_26.json` as the cleaned, structured representation used for retrieval. If the source PDF changes, regenerate with:
 
 ```shell

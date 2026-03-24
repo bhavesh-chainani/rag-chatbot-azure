@@ -21,6 +21,9 @@ if ($args) {
   $additionalArgs = "$args"
 }
 
+# Golden Set: Word is build input only; index per-id JSON, not the .docx.
+$additionalArgs = "$additionalArgs --exclude PBSG_Golden_Set_Complete_v2.docx"
+
 $argumentList = "./app/backend/prepdocs.py $dataArg --verbose $additionalArgs"
 
 $argumentList

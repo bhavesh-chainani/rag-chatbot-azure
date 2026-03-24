@@ -15,4 +15,8 @@ if [ $# -gt 0 ]; then
   additionalArgs="$@"
 fi
 
+# Golden Set: Word is only an input to build_pbsg_golden_set_json.py — index JSON under
+# pbsg_golden_set_by_id/, not the .docx (duplicate/noisy chunks).
+additionalArgs="$additionalArgs --exclude PBSG_Golden_Set_Complete_v2.docx"
+
 ./.venv/bin/python ./app/backend/prepdocs.py './data/*' --verbose $additionalArgs

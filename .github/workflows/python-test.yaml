@@ -26,7 +26,8 @@ jobs:
       matrix:
         os: ["ubuntu-latest", "windows-latest"]
         python_version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        node_version: ["20.14", "22"]
+        # @vitejs/plugin-react@6 requires ^20.19.0 || >=22.12.0 (npm EBADENGINE if too old)
+        node_version: ["20.19", "22"]
     steps:
         - uses: actions/checkout@v6
           with:

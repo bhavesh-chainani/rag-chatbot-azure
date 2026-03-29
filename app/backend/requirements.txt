@@ -164,7 +164,7 @@ markupsafe==3.0.3
     #   werkzeug
 mdurl==0.1.2
     # via markdown-it-py
-microsoft-kiota-abstractions==1.9.3
+microsoft-kiota-abstractions==1.9.10
     # via
     #   microsoft-kiota-authentication-azure
     #   microsoft-kiota-http
@@ -221,6 +221,7 @@ opentelemetry-api==1.40.0
     #   opentelemetry-instrumentation-fastapi
     #   opentelemetry-instrumentation-flask
     #   opentelemetry-instrumentation-httpx
+    #   opentelemetry-instrumentation-logging
     #   opentelemetry-instrumentation-openai
     #   opentelemetry-instrumentation-psycopg2
     #   opentelemetry-instrumentation-requests
@@ -238,6 +239,7 @@ opentelemetry-instrumentation==0.61b0
     #   opentelemetry-instrumentation-fastapi
     #   opentelemetry-instrumentation-flask
     #   opentelemetry-instrumentation-httpx
+    #   opentelemetry-instrumentation-logging
     #   opentelemetry-instrumentation-openai
     #   opentelemetry-instrumentation-psycopg2
     #   opentelemetry-instrumentation-requests
@@ -260,6 +262,8 @@ opentelemetry-instrumentation-flask==0.61b0
     # via azure-monitor-opentelemetry
 opentelemetry-instrumentation-httpx==0.61b0
     # via -r requirements.in
+opentelemetry-instrumentation-logging==0.61b0
+    # via azure-monitor-opentelemetry
 opentelemetry-instrumentation-openai==0.53.3
     # via -r requirements.in
 opentelemetry-instrumentation-psycopg2==0.61b0
@@ -284,6 +288,7 @@ opentelemetry-sdk==1.40.0
     #   microsoft-kiota-authentication-azure
     #   microsoft-kiota-http
     #   opentelemetry-resource-detector-azure
+    #   opentelemetry-semantic-conventions-ai
 opentelemetry-semantic-conventions==0.61b0
     # via
     #   opentelemetry-instrumentation
@@ -300,7 +305,8 @@ opentelemetry-semantic-conventions==0.61b0
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-semantic-conventions-ai==0.5.0
+    #   opentelemetry-semantic-conventions-ai
+opentelemetry-semantic-conventions-ai==0.4.16
     # via opentelemetry-instrumentation-openai
 opentelemetry-util-http==0.61b0
     # via
@@ -332,7 +338,7 @@ pycparser==2.22
     # via cffi
 pydantic==2.12.5
     # via openai
-pydantic-core==2.42.0
+pydantic-core==2.41.5
     # via pydantic
 pygments==2.19.2
     # via rich
@@ -379,7 +385,7 @@ tenacity==9.1.2
     # via -r requirements.in
 tiktoken==0.12.0
     # via -r requirements.in
-tomli==2.3.0
+tomli==2.4.1
     # via hypercorn
 tqdm==4.66.5
     # via openai

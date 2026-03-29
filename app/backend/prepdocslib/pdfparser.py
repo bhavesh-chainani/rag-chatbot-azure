@@ -134,9 +134,7 @@ class DocumentAnalysisParser(Parser):
 
                 page_offset = page.spans[0].offset
                 page_length = page.spans[0].length
-                mask_chars: list[MaskEntry] = cast(
-                    list[MaskEntry], [(ObjectType.NONE, None)] * page_length
-                )
+                mask_chars: list[MaskEntry] = cast(list[MaskEntry], [(ObjectType.NONE, None)] * page_length)
                 # mark all positions of the table spans in the page
                 for table_idx, table in enumerate(tables_on_page):
                     for span in table.spans:

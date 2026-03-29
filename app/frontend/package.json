@@ -6,6 +6,9 @@
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
+  "overrides": {
+    "rollup-plugin-visualizer": "^6.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",

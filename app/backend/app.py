@@ -858,7 +858,7 @@ def create_app():
         # This tracks OpenAI SDK requests:
         OpenAIInstrumentor().instrument()
         # This middleware tracks app route requests:
-        app.asgi_app = OpenTelemetryMiddleware(app.asgi_app)  # type: ignore[assignment]
+        app.asgi_app = OpenTelemetryMiddleware(app.asgi_app)  # type: ignore[ty:invalid-assignment]
 
     # Log levels should be one of https://docs.python.org/3/library/logging.html#logging-levels
     # Set root level to WARNING to avoid seeing overly verbose logs from SDKS

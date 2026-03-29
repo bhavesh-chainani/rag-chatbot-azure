@@ -44,7 +44,7 @@ def test_sentencetextsplitter_split_small_pages():
 async def test_sentencetextsplitter_list_parse_and_split(tmp_path, snapshot):
     pdfs = list(Path("data").glob("*.pdf"))
     if len(pdfs) < 2:
-        pytest.skip("Requires at least 2 PDFs in data/ to run (found %d)" % len(pdfs))
+        pytest.skip(f"Requires at least 2 PDFs in data/ to run (found {len(pdfs)})")
 
     text_splitter = SentenceTextSplitter()
     pdf_parser = LocalPdfParser()

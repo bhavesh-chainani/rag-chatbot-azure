@@ -49,8 +49,7 @@ def test_golden_set_retrieval_prefix_shapes():
 @pytest.mark.asyncio
 async def test_jsonparser_golden_array_prepends_cues():
     payload = (
-        '[{"id": "EMP-01", "topic": "T", "variations": ["unpaid salary phrasing"],'
-        ' "user_query": "uq", "x": 1}]'
+        '[{"id": "EMP-01", "topic": "T", "variations": ["unpaid salary phrasing"],' ' "user_query": "uq", "x": 1}]'
     )
     file = io.StringIO(payload)
     file.name = "EMP-01.json"

@@ -7,7 +7,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
 DEFAULT_OUTPUT = ROOT / "evals" / "results" / "pbsg_golden_set_eval.json"
@@ -21,6 +20,7 @@ def load_golden_dataset(path: Path) -> list[dict[str, Any]]:
             raise FileNotFoundError(f"No *.json entries under {path}")
         return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
     return json.loads(path.read_text(encoding="utf-8"))
+
 
 SELECTED_ENTRY_RE = re.compile(r"Selected Entry:\s*([A-Z]{3}-\d{2}|Unclear)", re.IGNORECASE)
 ROUTE_RE = re.compile(r"\bRoute\s+([A-Z])\b", re.IGNORECASE)
@@ -94,7 +94,9 @@ def evaluate_phase1_case(
         missing = [q for q, nq in zip(expected_questions, normalized_expected_questions) if nq not in normalized_answer]
         result["missing_questions"] = missing
         total_questions = len(expected_questions)
-        result["part_b_completeness"] = 1.0 if total_questions == 0 else (total_questions - len(missing)) / total_questions
+        result["part_b_completeness"] = (
+            1.0 if total_questions == 0 else (total_questions - len(missing)) / total_questions
+        )
     except urllib.error.HTTPError as exc:
         result["error"] = f"HTTPError {exc.code}: {exc.reason}"
         result["latency_ms"] = int((time.time() - started) * 1000)
@@ -125,7 +127,9 @@ def evaluate_phase2_case(
         "latency_ms": None,
     }
 
-    expected_labels = sorted({match.group(1).upper() for route in expected_routes for match in ROUTE_RE.finditer(route)})
+    expected_labels = sorted(
+        {match.group(1).upper() for route in expected_routes for match in ROUTE_RE.finditer(route)}
+    )
 
     phase2_user_message = (
         "Applicant answered the Part B questions. "
@@ -239,7 +243,9 @@ def main() -> None:
     )
     phase2_applicable = [c for c in phase2_no_error if c["route_validity_applicable"]]
     phase2_route_valid_rate = (
-        sum(1 for c in phase2_applicable if c["route_validity_ok"]) / len(phase2_applicable) if phase2_applicable else 0.0
+        sum(1 for c in phase2_applicable if c["route_validity_ok"]) / len(phase2_applicable)
+        if phase2_applicable
+        else 0.0
     )
 
     report = {

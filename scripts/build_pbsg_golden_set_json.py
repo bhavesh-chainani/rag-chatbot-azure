@@ -3,7 +3,6 @@ import re
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DOCX = ROOT / "data" / "PBSG_Golden_Set_Complete_v2.docx"
 OUTPUT_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
@@ -68,8 +67,9 @@ def extract_list_items(section_text: str, prefixes: tuple[str, ...]) -> list[str
 
 def parse_entry(entry_id: str, topic: str, body: str) -> dict:
     user_query = normalize_whitespace(
-        extract_between(body, "User Query", ["Variations", "Part A", "PART A: General Legal Information"])
-            .replace('"', "")
+        extract_between(body, "User Query", ["Variations", "Part A", "PART A: General Legal Information"]).replace(
+            '"', ""
+        )
     )
     variations_section = section_between(body, "Phrasing Variations (for RAG training)", "Part A")
     variations = extract_list_items(variations_section, ("•",))

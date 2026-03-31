@@ -1,29 +1,142 @@
 {
   "id": "MCA-01",
-  "category": "Mental Capacity (LPA & Deputyship)",
-  "topic": "Mental Capacity \u2014 What is an LPA?",
+  "schema_version": "2.0",
+  "category": "Mental Capacity (LPA Only)",
+  "topic": "Mental Capacity - What is an LPA?",
   "user_query": "What is an LPA?",
   "variations": [
     "How do I plan ahead if I lose mental capacity?",
     "What is Lasting Power of Attorney?",
-    "I want someone to make decisions for me if I can't",
-    "LPA Singapore \u2014 how does it work?"
+    "I want someone to make decisions for me if I can't.",
+    "Can you help me make an LPA?",
+    "Can you help me certify my LPA?"
   ],
-  "part_a_general_info": "A Lasting Power of Attorney (LPA) is a legal document where you appoint one or more 'Donees' to make decisions for you if you lose mental capacity in the future. An LPA can cover: (a) Personal Welfare (where to live, healthcare decisions, daily care), and/or (b) Property & Affairs (managing bank accounts, selling property, paying bills). You must have mental capacity at the time of making the LPA. It must be certified by a Certificate Issuer (accredited doctor, psychiatrist, or lawyer). You can appoint more than one Donee, acting jointly (must agree on everything) or jointly and severally (can act independently). An LPA can be revoked at any time while you still have mental capacity.",
+  "part_a_general_info": "A Lasting Power of Attorney (LPA) is a legal document where an individual, known as a Donor, appoints one or more Donees to make decisions if the Donor loses mental capacity in future. An LPA can cover (a) Personal Welfare (for example, healthcare and daily care decisions) and/or (b) Property and Affairs (for example, bank accounts, bills, and property). The Donor must have mental capacity when making the LPA, and the LPA must be certified by an approved Certificate Issuer (such as an accredited doctor, psychiatrist, or lawyer). Donees can be appointed to act jointly or jointly and severally. PBSG cannot make, certify, or witness LPAs, but can share self-help resources, suggest next steps, and where appropriate route for legal-clinic intake.",
   "triage_questions": [
-    "Q1: Are you looking to make an LPA for yourself, or help someone else make one?",
-    "Q2: Does the person still have mental capacity?",
-    "Q3: What type of decisions do you want covered \u2014 personal welfare, property & affairs, or both?",
-    "Q4: Have you identified who you want as your Donee(s)?"
+    "Q1: Is this enquiry about setting up an LPA for yourself? (Answer options: Yes / No)",
+    "Q1A (ask if Q1=Yes): Is there another specific legal issue behind this enquiry? (Answer options: Yes, and I can describe it / No)",
+    "Q1B (ask if Q1=No): Does the person you are asking for currently have mental capacity? (Answer options: Yes / No / Not sure)",
+    "Q1C (ask if Q1B=Not sure): Any indicator of likely loss of capacity? (doctor said unable to decide, advised to consider deputyship, unconscious, cannot communicate, cannot understand/retain/use information) (Answer options: Yes / No / Not sure)"
   ],
   "branching_logic": [
-    "If Q2 = person has already lost capacity \u2192 Cannot make LPA. Must apply for Deputyship instead (see MCA-02).",
-    "If Q1 = helping someone else \u2192 Ensure THAT person is the one giving instructions, not the applicant."
+    "If Q1=Yes and Q1A='Yes, and I can describe it': route to the matching specialised user-query set.",
+    "If Q1=Yes and Q1A=No: Route A.",
+    "If Q1=No and Q1B=Yes: Route B.",
+    "If Q1=No and Q1B=No: route to Deputyship user-query set.",
+    "If Q1=No and Q1B=Not sure and Q1C=Yes: Route A.",
+    "If Q1=No and Q1B=Not sure and (Q1C=No or Not sure): Route C."
   ],
   "routing": [
-    "Route A (Making own LPA): Refer to Office of the Public Guardian (OPG) for LPA Form 1 (general) or Form 2 (customised). Certificate Issuer needed.",
-    "Route B (Person lost capacity): LPA too late. Refer to Deputyship pathway (MCA-02).",
-    "Route C (Needs help finding Certificate Issuer): Refer to OPG list of accredited Certificate Issuers."
+    "Route A (Legal Clinics Process): explain legal-clinic scope, assess eligibility, send clinic application / appointment workflow, and share self-help resources.",
+    "Route B (Reject - third-party issue without direct applicant): explain clinics are for the person with the legal issue; share self-help resources.",
+    "Route C (Escalate to PBSG Staff): gather more facts, take contact details, and escalate for staff follow-up."
   ],
-  "guardrail": "Must NOT certify or witness any LPA. Must NOT advise on specific powers to include."
+  "routes": [
+    {
+      "id": "ROUTE_A",
+      "label": "Legal Clinics Process",
+      "type": "legal_clinic_intake",
+      "actions": [
+        "Explain legal-clinic scope",
+        "Assess eligibility",
+        "Send clinic application or appointment workflow",
+        "Share self-help resources"
+      ]
+    },
+    {
+      "id": "ROUTE_B",
+      "label": "Reject - Third-party issue without direct applicant",
+      "type": "reject_with_resources",
+      "actions": [
+        "Explain clinics are for the person with the legal issue",
+        "Share self-help resources"
+      ]
+    },
+    {
+      "id": "ROUTE_C",
+      "label": "Escalate to PBSG Staff",
+      "type": "staff_escalation",
+      "actions": [
+        "Gather further details",
+        "Take contact details",
+        "Escalate for staff follow-up"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "prompt": "Is this enquiry about setting up an LPA for yourself?",
+      "type": "single_choice",
+      "options": [
+        { "id": "YES", "label": "Yes" },
+        { "id": "NO", "label": "No" }
+      ]
+    },
+    {
+      "id": "Q1A",
+      "prompt": "Is there another specific legal issue behind this enquiry?",
+      "type": "single_choice",
+      "ask_if": { "question_id": "Q1", "equals": "YES" },
+      "options": [
+        { "id": "HAS_SPECIFIC_ISSUE", "label": "Yes, and I can describe it" },
+        { "id": "NO", "label": "No" }
+      ]
+    },
+    {
+      "id": "Q1B",
+      "prompt": "Does the person you are asking for currently have mental capacity?",
+      "type": "single_choice",
+      "ask_if": { "question_id": "Q1", "equals": "NO" },
+      "options": [
+        { "id": "YES", "label": "Yes" },
+        { "id": "NO", "label": "No" },
+        { "id": "NOT_SURE", "label": "Not sure" }
+      ]
+    },
+    {
+      "id": "Q1C",
+      "prompt": "Any indicator of likely loss of capacity (for example: doctor said unable to decide, advised to consider deputyship, unconscious, unable to communicate, unable to understand/retain/use information)?",
+      "type": "single_choice",
+      "ask_if": { "question_id": "Q1B", "equals": "NOT_SURE" },
+      "options": [
+        { "id": "YES", "label": "Yes" },
+        { "id": "NO", "label": "No" },
+        { "id": "NOT_SURE", "label": "Not sure" }
+      ]
+    }
+  ],
+  "decision_rules": [
+    {
+      "id": "R1",
+      "when": { "all": [{ "question_id": "Q1", "equals": "YES" }, { "question_id": "Q1A", "equals": "HAS_SPECIFIC_ISSUE" }] },
+      "then": { "type": "topic_redirect", "target": "MATCHING_SPECIALISED_QUERY_SET" }
+    },
+    {
+      "id": "R2",
+      "when": { "all": [{ "question_id": "Q1", "equals": "YES" }, { "question_id": "Q1A", "equals": "NO" }] },
+      "then": { "type": "route", "target": "ROUTE_A" }
+    },
+    {
+      "id": "R3",
+      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }, { "question_id": "Q1B", "equals": "YES" }] },
+      "then": { "type": "route", "target": "ROUTE_B" }
+    },
+    {
+      "id": "R4",
+      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }, { "question_id": "Q1B", "equals": "NO" }] },
+      "then": { "type": "topic_redirect", "target": "DEPUTYSHIP_QUERY_SET" }
+    },
+    {
+      "id": "R5",
+      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }, { "question_id": "Q1B", "equals": "NOT_SURE" }, { "question_id": "Q1C", "equals": "YES" }] },
+      "then": { "type": "route", "target": "ROUTE_A" }
+    },
+    {
+      "id": "R6",
+      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }, { "question_id": "Q1B", "equals": "NOT_SURE" }, { "question_id": "Q1C", "in": ["NO", "NOT_SURE"] }] },
+      "then": { "type": "route", "target": "ROUTE_C" }
+    }
+  ],
+  "guardrail": "Must NOT make, certify, or witness any LPA. Must NOT advise on which LPA form to use or what specific powers/clauses should be included."
 }

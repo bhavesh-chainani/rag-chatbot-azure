@@ -15,8 +15,9 @@ if [ $# -gt 0 ]; then
   additionalArgs="$@"
 fi
 
-# Golden Set: Word is only an input to build_pbsg_golden_set_json.py — index JSON under
+# Golden Set: Word files are build inputs only — index JSON under
 # pbsg_golden_set_by_id/, not the .docx (duplicate/noisy chunks).
 additionalArgs="$additionalArgs --exclude PBSG_Golden_Set_Complete_v2.docx"
+additionalArgs="$additionalArgs --exclude 2026.03.31 PBSG_Golden_Set_v3 MCA (LPA Only).docx"
 
 ./.venv/bin/python ./app/backend/prepdocs.py './data/*' --verbose $additionalArgs

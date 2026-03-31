@@ -1,31 +1,29 @@
 {
-  "id": "MCA-03",
+  "id": "MCA-05",
   "schema_version": "2.0",
   "category": "Mental Capacity (LPA Only)",
-  "topic": "Mental Capacity - What should I do to activate the LPA as a Donee?",
-  "user_query": "What should I do to activate the LPA as a Donee?",
+  "topic": "Mental Capacity - I do not agree with what an appointed Donee wants to do or has done. What can I do?",
+  "user_query": "I do not agree with what an appointed Donee wants to do or has done. What can I do?",
   "variations": [
-    "Do I need to notify anyone when the Donor loses mental capacity?",
-    "I think the person who appointed me as Donee can no longer manage his decisions. What do I do?",
-    "My family member named me in the LPA. How do I use it?"
+    "I do not think the Donee is acting in the Donor's best interests. Who can I report this to?",
+    "How can I challenge what a Donee is doing?",
+    "I think the Donee is abusing powers. What can I do?",
+    "My family member appointed this person to manage decisions, but I disagree with what he is doing. Can I stop him?"
   ],
   "part_a_general_info": "A Lasting Power of Attorney (LPA) is a legal document where an individual, known as a Donor, appoints one or more Donees to make decisions if the Donor loses mental capacity in future. An LPA can cover (a) Personal Welfare (for example, healthcare and daily care decisions) and/or (b) Property and Affairs (for example, bank accounts, bills, and property). The Donor must have mental capacity when making the LPA, and the LPA must be certified by an approved Certificate Issuer (such as an accredited doctor, psychiatrist, or lawyer). Donees can be appointed to act jointly or jointly and severally. PBSG cannot make, certify, or witness LPAs, but can share self-help resources, suggest next steps, and where appropriate route for legal-clinic intake.",
   "triage_questions": [
-    "Q1: Has the Donor already lost mental capacity? (Answer options: Yes / No / Not sure)",
-    "Q1A (ask if Q1=Yes): Have you reviewed OPG guidance on using/activating an LPA? (Answer options: Yes, but I still have issues / Yes, but I still do not understand / No)",
+    "Q1: Has the Donor lost mental capacity? (Answer options: Yes / No / Not sure)",
     "Q1B (ask if Q1=Not sure): Any indicator of likely loss of capacity? (doctor said unable to decide, advised to consider deputyship, unconscious, cannot communicate, cannot understand/retain/use information) (Answer options: Yes / No / Not sure)"
   ],
   "branching_logic": [
-    "If Q1=Yes and (Q1A='Yes, but I still have issues' or Q1A='Yes, but I still do not understand'): Route A.",
-    "If Q1=Yes and Q1A=No: Route B2.",
-    "If Q1=No: Route B1.",
+    "If Q1=Yes: Route A.",
+    "If Q1=No: Route B.",
     "If Q1=Not sure and Q1B=Yes: Route A.",
     "If Q1=Not sure and (Q1B=No or Not sure): Route C."
   ],
   "routing": [
     "Route A (Legal Clinics Process): explain legal-clinic scope, assess eligibility, send clinic application / appointment workflow, and share self-help resources.",
-    "Route B1 (Reject - not yet actionable): explain Donee powers generally start only after certified loss of capacity; send OPG resources and re-contact channels.",
-    "Route B2 (Reject - read resources first): send OPG resources and re-contact channels if legal help is still needed after review.",
+    "Route B (Reject - not yet actionable): explain Donee powers generally start only after certified loss of capacity; send OPG resources and re-contact channels.",
     "Route C (Escalate to PBSG Staff): gather more facts, take contact details, and escalate for staff follow-up."
   ],
   "routes": [
@@ -41,22 +39,13 @@
       ]
     },
     {
-      "id": "ROUTE_B1",
+      "id": "ROUTE_B",
       "label": "Reject - Not Yet Actionable",
       "type": "reject_with_resources",
       "actions": [
         "Explain Donee powers generally start after certified loss of capacity",
         "Send OPG resources",
         "Share re-contact channels"
-      ]
-    },
-    {
-      "id": "ROUTE_B2",
-      "label": "Reject - Read Resources First",
-      "type": "reject_with_resources",
-      "actions": [
-        "Send OPG resources",
-        "Share re-contact channels if legal help is still needed"
       ]
     },
     {
@@ -73,23 +62,12 @@
   "questions": [
     {
       "id": "Q1",
-      "prompt": "Has the Donor already lost mental capacity?",
+      "prompt": "Has the Donor lost mental capacity?",
       "type": "single_choice",
       "options": [
         { "id": "YES", "label": "Yes" },
         { "id": "NO", "label": "No" },
         { "id": "NOT_SURE", "label": "Not sure" }
-      ]
-    },
-    {
-      "id": "Q1A",
-      "prompt": "Have you reviewed OPG guidance on using or activating an LPA?",
-      "type": "single_choice",
-      "ask_if": { "question_id": "Q1", "equals": "YES" },
-      "options": [
-        { "id": "YES_STILL_ISSUES", "label": "Yes, but I still have issues" },
-        { "id": "YES_STILL_DONT_UNDERSTAND", "label": "Yes, but I still do not understand" },
-        { "id": "NO", "label": "No" }
       ]
     },
     {
@@ -107,29 +85,24 @@
   "decision_rules": [
     {
       "id": "R1",
-      "when": { "all": [{ "question_id": "Q1", "equals": "YES" }, { "question_id": "Q1A", "in": ["YES_STILL_ISSUES", "YES_STILL_DONT_UNDERSTAND"] }] },
+      "when": { "all": [{ "question_id": "Q1", "equals": "YES" }] },
       "then": { "type": "route", "target": "ROUTE_A" }
     },
     {
       "id": "R2",
-      "when": { "all": [{ "question_id": "Q1", "equals": "YES" }, { "question_id": "Q1A", "equals": "NO" }] },
-      "then": { "type": "route", "target": "ROUTE_B2" }
+      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }] },
+      "then": { "type": "route", "target": "ROUTE_B" }
     },
     {
       "id": "R3",
-      "when": { "all": [{ "question_id": "Q1", "equals": "NO" }] },
-      "then": { "type": "route", "target": "ROUTE_B1" }
-    },
-    {
-      "id": "R4",
       "when": { "all": [{ "question_id": "Q1", "equals": "NOT_SURE" }, { "question_id": "Q1B", "equals": "YES" }] },
       "then": { "type": "route", "target": "ROUTE_A" }
     },
     {
-      "id": "R5",
+      "id": "R4",
       "when": { "all": [{ "question_id": "Q1", "equals": "NOT_SURE" }, { "question_id": "Q1B", "in": ["NO", "NOT_SURE"] }] },
       "then": { "type": "route", "target": "ROUTE_C" }
     }
   ],
-  "guardrail": "Must NOT assess whether a person has mental capacity."
+  "guardrail": "Must NOT assess mental capacity, assess conduct, or opine on whether a Donee's specific action is legally correct."
 }

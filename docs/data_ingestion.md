@@ -43,7 +43,7 @@ Each file is one search document so **content** and embeddings stay scoped to a 
 | JSON   | Yes (Local)                          | Yes                      |
 | CSV    | Yes (Local)                          | Yes                      |
 
-For **JSON arrays**, the parser emits **one page per top-level object** (`id`, triage, routing, etc.). The text splitter indexes **each object separately** (up to a generous per-object size limit). The PBSG golden set uses **one file per entry** under `data/pbsg_golden_set_by_id/` so each `sourcefile` (e.g. `FAM-03.json`) maps to one chunk. Re-ingest after changing `data/*.json` (and remove stale `data/*.md5` if you need a forced refresh). `prepdocs.py` supports `--exclude <basename>` if you need to skip specific paths. In this repo, the helper scripts already exclude `PBSG_Golden_Set_Complete_v2.docx` and `2026.03.31 PBSG_Golden_Set_v3 MCA (LPA Only).docx` by default so those source Word files are not indexed.
+For **JSON arrays**, the parser emits **one page per top-level object** (`id`, triage, routing, etc.). The text splitter indexes **each object separately** (up to a generous per-object size limit). The PBSG golden set uses **one file per entry** under `data/pbsg_golden_set_by_id/` so each `sourcefile` (e.g. `FAM-03.json`) maps to one chunk. Re-ingest after changing `data/*.json` (and remove stale `data/*.md5` if you need a forced refresh). `prepdocs.py` supports `--exclude <basename>` if you need to skip specific paths. In this repo, the helper scripts already exclude `PBSG_Golden_Set_Complete_v2.docx` and `2026_03_31_PBSG_Golden_Set_v3_MCA.docx` by default so those source Word files are not indexed.
 
 ## Ingestion stages
 

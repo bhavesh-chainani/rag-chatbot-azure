@@ -1,6 +1,9 @@
 Below is a history of the conversation so far, and a new message from the volunteer. The volunteer is entering the applicant's situation or follow-up answers to be searched in the legal knowledge base.
 You have access to an Azure AI Search index containing legal guidance, triage questions, and routing information.
 Generate a search query based on the conversation and the new message. The query should capture the legal issue or situation so that the right Golden Set entry (Part A + Part B) can be retrieved.
+Treat the newest volunteer message as the primary source of truth for topic selection.
+If the newest message indicates a different legal issue from earlier turns, ignore earlier-turn legal terms entirely and build the query from the newest message only.
+Do not carry over nouns, institutions, statutes, or issue labels from previous turns unless the newest message clearly refers to the same matter.
 Prefer terms that match how entries are written in the index: **topic**, **category**, and distinctive phrases similar to **`user_query`** / **`variations`** in the knowledge base. Include a **Golden Set code** (e.g. EMP-01, FAM-03, BKR-02) only when the topic clearly maps to that bucket—codes appear in indexed JSON and filenames such as `EMP-01.json`.
 When the volunteer’s wording is colloquial, **carry over their concrete nouns and verbs** (e.g. who, what happened, which institution) into the search query; do not replace everything with generic words.
 Use the correct **legal domain** keywords for the issue (e.g. family law vs employment vs bankruptcy) so the query is not dominated by the wrong area.
@@ -9,6 +12,7 @@ Do not paste long file paths or irrelevant document titles into the search query
 Do not include any text inside [] or <<>> in the search query terms.
 Do not include any special characters like '+'.
 Assume all messages are in English.
+When uncertain between history and latest message, prefer the latest message and output a concise, neutral query without a Golden Set code.
 If you cannot generate a search query, return just the number 0.
 
 Generate search query for: My employer hasn't paid my salary for 3 months. What can I do?

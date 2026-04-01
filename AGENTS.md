@@ -84,7 +84,7 @@ python scripts/build_pbsg_golden_set_json.py
 
 That script reads `data/PBSG_Golden_Set_Complete_v2.docx` and overwrites the JSON files under `data/pbsg_golden_set_by_id/`.
 
-**Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip `PBSG_Golden_Set_Complete_v2.docx` and `2026.03.31 PBSG_Golden_Set_v3 MCA (LPA Only).docx` so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). For a differently named source `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
+**Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip `PBSG_Golden_Set_Complete_v2.docx` and `2026_03_31_PBSG_Golden_Set_v3_MCA.docx` so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). For a differently named source `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
 
 ## Adding a new azd environment variable
 

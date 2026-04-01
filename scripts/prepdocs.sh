@@ -10,14 +10,9 @@ fi
 
 echo 'Running "prepdocs.py"'
 
-additionalArgs=""
-if [ $# -gt 0 ]; then
-  additionalArgs="$@"
-fi
-
 # Golden Set: Word files are build inputs only — index JSON under
 # pbsg_golden_set_by_id/, not the .docx (duplicate/noisy chunks).
-additionalArgs="$additionalArgs --exclude PBSG_Golden_Set_Complete_v2.docx"
-additionalArgs="$additionalArgs --exclude 2026.03.31 PBSG_Golden_Set_v3 MCA (LPA Only).docx"
+set -- "$@" --exclude "PBSG_Golden_Set_Complete_v2.docx"
+set -- "$@" --exclude "2026_03_31_PBSG_Golden_Set_v3_MCA.docx"
 
-./.venv/bin/python ./app/backend/prepdocs.py './data/*' --verbose $additionalArgs
+./.venv/bin/python ./app/backend/prepdocs.py './data/*' --verbose "$@"

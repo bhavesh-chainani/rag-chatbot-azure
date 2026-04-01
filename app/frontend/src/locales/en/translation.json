@@ -37,7 +37,7 @@
     "chatEmptyStateTitle": "Legal Chatbot Assistant",
     "chatEmptyStateSubtitle": "Enter the applicant's situation or try an example",
     "defaultExamples": {
-        "1": "What is an LPA?",
+        "1": "What is Lasting Power of Attorney?",
         "2": "What are my rights and responsibilities as a Donee or Prospective Donee?",
         "3": "What should I do to activate the LPA as a Donee?",
         "placeholder": "Type the applicant's situation (e.g. planning ahead for loss of mental capacity, LPA, Donee)"

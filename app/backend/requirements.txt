@@ -348,7 +348,7 @@ pyjwt==2.11.0
     #   msal
 pymupdf==1.26.0
     # via -r requirements.in
-pypdf==6.9.2
+pypdf==6.10.0
     # via -r requirements.in
 python-dotenv==1.1.1
     # via -r requirements.in

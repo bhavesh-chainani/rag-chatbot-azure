@@ -18,6 +18,8 @@ $argumentList = @("./app/backend/prepdocs.py", "./data/*", "--verbose")
 if ($args) {
   $argumentList += $args
 }
+$argumentList += @("--exclude", "PBSG_Golden_Set_Complete_v2.docx")
 $argumentList += @("--exclude", "2026_03_31_PBSG_Golden_Set_v3_MCA.docx")
+$argumentList += @("--exclude", "2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx")
 
 Start-Process -FilePath $venvPythonPath -ArgumentList $argumentList -Wait -NoNewWindow

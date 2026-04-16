@@ -6,9 +6,9 @@ from typing import IO
 from .page import Page
 from .parser import Parser
 
-# PBSG Golden Set entries use ids like FAM-03, EMP-01. Prepend retrieval cues so
-# keyword (BM25) and embeddings align with informal user phrasings in `variations`.
-_GOLDEN_ENTRY_ID = re.compile(r"^[A-Z]{3}-\d{2}$")
+# PBSG Golden Set entries use ids like FAM-03, EMP-01, or GEN3-T01 (General Enquiries).
+# Prepend retrieval cues so keyword (BM25) and embeddings align with informal phrasings.
+_GOLDEN_ENTRY_ID = re.compile(r"^(?:[A-Z]{3}-\d{2}|GEN3-[A-Z0-9-]+)$")
 
 
 def golden_set_retrieval_prefix(obj: dict) -> str:

@@ -46,6 +46,19 @@ def test_golden_set_retrieval_prefix_shapes():
     assert "Boss has not paid me for two months" in prefix
 
 
+def test_golden_set_retrieval_prefix_gen3_id():
+    obj = {
+        "id": "GEN3-T01",
+        "topic": "First contact",
+        "category": "PBSG Hotline — General Enquiries (v3)",
+        "variations": ["New caller, what do I do?"],
+        "user_query": "How do I triage?",
+    }
+    prefix = golden_set_retrieval_prefix(obj)
+    assert prefix.startswith("Golden Set entry GEN3-T01.")
+    assert "New caller, what do I do?" in prefix
+
+
 @pytest.mark.asyncio
 async def test_jsonparser_golden_array_prepends_cues():
     payload = (

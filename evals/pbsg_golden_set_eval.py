@@ -22,7 +22,10 @@ def load_golden_dataset(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-SELECTED_ENTRY_RE = re.compile(r"Selected Entry:\s*([A-Z]{3}-\d{2}|Unclear)", re.IGNORECASE)
+SELECTED_ENTRY_RE = re.compile(
+    r"Selected Entry:\s*([A-Z]{3}-\d{2}|GEN3-[A-Z0-9-]+|Unclear)",
+    re.IGNORECASE,
+)
 ROUTE_RE = re.compile(r"\bRoute\s+([A-Z])\b", re.IGNORECASE)
 
 

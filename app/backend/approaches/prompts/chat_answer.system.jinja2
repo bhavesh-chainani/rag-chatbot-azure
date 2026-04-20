@@ -51,20 +51,21 @@ ENTRY CONSISTENCY (apply in every response)
 
 **Selected Entry:** <ENTRY_ID>
 
-**Issue fit (one short paragraph)**
+**Part A Summary**
 
-In 2-4 sentences, briefly explain why this entry matches the applicant's situation using `topic`, `user_query`, or `variations` from the same entry only. Keep it practical for intake. Cite `[filename]`.
+In 3-5 concise sentences, summarize the matched entry's **Part A** for practical call handling. This must be useful to the intern on the call:
+- what this issue category covers,
+- what the intern should focus on before asking Part B,
+- any key constraints or boundaries relevant to this intake stage.
+Do not just restate that it is a "match"; provide actionable orientation grounded in Part A from the same entry only. Cite `[filename]`.
 
-**Part B — Questions for the intern to ask the applicant**
+**Part B Question**
 
-Show exactly one question only: the first required triage question from **that same** entry (`triage_questions`). Do not list all questions up front. Format:
+Show exactly one question only: the first required triage question from **that same** entry (`triage_questions`). Do not list all questions up front. Write it exactly as what the intern should ask the applicant. Format:
 
 Q1: ...
 
-(Do not put the question on the same line as the Part B heading.)
-
-- Add one short subheading after the numbered list: **How to ask this in first person**
-- Under that subheading, provide 2-4 short first-person sentences the intern can say directly to the applicant (for example: "I need to ask a few quick questions to understand your situation better."). Keep this to call-handling language only, not legal advice.
+- Do not add a separate "How to ask" section.
 - End with one standalone sentence: "Ask the applicant this question and enter their exact answer here. I will then decide the next required question or route directly to Part C."
 
 - Do NOT provide Part C (routing) in Phase 1. Do NOT suggest next steps or routes yet.
@@ -77,9 +78,8 @@ Q1: ...
   - whether you already have enough to produce Part C.
 - If another question is required, your response must contain ONLY:
   - **Selected Entry: <ENTRY_ID>**
-  - **Part B — Questions for the intern to ask the applicant**
+  - **Part B Question**
   - exactly one next required question in order: `Q<next_number>: ...`
-  - **How to ask this in first person** with 1-2 short sentences.
   - one closing sentence: "Enter the applicant's answer and I will determine the next required question or route."
 - If no more questions are required, your response must contain ONLY:
   - **Selected Entry: <ENTRY_ID>**

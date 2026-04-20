@@ -228,6 +228,12 @@ DISALLOWED_LEGAL_ADVICE_PATTERNS = (
     re.compile(r"\bI\s+interpret\s+(?:this|your)\s+(?:document|contract|agreement)\b", re.IGNORECASE),
     re.compile(r"\bthis\s+clause\s+means\b", re.IGNORECASE),
 )
+HIGH_RISK_USER_QUERY_PATTERNS = (
+    re.compile(r"\bwhat should (?:i|we|the caller) do legally\b", re.IGNORECASE),
+    re.compile(r"\bwill (?:i|we|the caller) win\b", re.IGNORECASE),
+    re.compile(r"\binterpret (?:this|my|our|the) (?:document|contract|agreement)\b", re.IGNORECASE),
+    re.compile(r"\bwhat does this clause mean\b", re.IGNORECASE),
+)
 GUARDRAIL_REPLACEMENT_MESSAGE = (
     "I can help with intake triage and routing based on the knowledge base, but I cannot provide legal advice on what the "
     "caller should do legally, interpret legal documents, or predict case outcomes. Please share the applicant's facts and I "
@@ -244,6 +250,12 @@ def sanitize_assistant_content(content: str) -> str:
     if any(pattern.search(sanitized) for pattern in DISALLOWED_LEGAL_ADVICE_PATTERNS):
         return GUARDRAIL_REPLACEMENT_MESSAGE
     return sanitized
+
+
+def is_high_risk_user_query(user_message: str | None) -> bool:
+    if not user_message:
+        return False
+    return any(pattern.search(user_message) for pattern in HIGH_RISK_USER_QUERY_PATTERNS)
 
 
 def enforce_backend_guardrails_on_chat_response(chat_response: dict[str, Any]) -> dict[str, Any]:
@@ -268,6 +280,51 @@ async def single_chat_response_stream(chat_response: dict[str, Any]) -> AsyncGen
     yield {"delta": {"role": role}, "context": context, "session_state": session_state}
 
 
+async def enforce_backend_guardrails_on_stream(
+    events: AsyncGenerator[dict[str, Any], None],
+) -> AsyncGenerator[dict[str, Any], None]:
+    """
+    Lightweight streaming guardrail pass:
+    - keeps true streaming for latency
+    - strips explicit user-facing guardrail headers from streamed text
+    - blocks further content if disallowed legal-advice patterns appear
+    """
+    generated_text = ""
+    blocked = False
+    emitted_replacement = False
+
+    async for event in events:
+        delta = event.get("delta") if isinstance(event, dict) else None
+        if not isinstance(delta, dict):
+            yield event
+            continue
+
+        content = delta.get("content")
+        if not isinstance(content, str):
+            yield event
+            continue
+
+        if blocked:
+            # Drop remaining content deltas once blocked, keep metadata/context events.
+            continue
+
+        candidate = generated_text + content
+        if any(pattern.search(candidate) for pattern in DISALLOWED_LEGAL_ADVICE_PATTERNS):
+            blocked = True
+            if not emitted_replacement:
+                emitted_replacement = True
+                yield {"delta": {"role": delta.get("role", "assistant"), "content": f"\n\n{GUARDRAIL_REPLACEMENT_MESSAGE}"}}
+            continue
+
+        # Remove any explicit "Guardrails" heading if generated.
+        cleaned = re.sub(r"\*\*Guardrails(?:[^\n]*)\*\*", "", content, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        generated_text += cleaned
+        if cleaned:
+            event["delta"]["content"] = cleaned
+            yield event
+
+
 def get_last_user_message_text(messages: list[dict[str, Any]]) -> str | None:
     """Extract the last user message as plain text for query routing; returns None if not a string (e.g. multimodal)."""
     if not messages:
@@ -275,6 +332,80 @@ def get_last_user_message_text(messages: list[dict[str, Any]]) -> str | None:
     content = messages[-1].get("content")
     if isinstance(content, str):
         return content
+    return None
+
+
+def get_last_assistant_message_text(messages: list[dict[str, Any]]) -> str | None:
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    return None
+
+
+def classify_short_answer(text: str | None) -> str | None:
+    if not text:
+        return None
+    normalized = text.strip().lower().rstrip(".!?")
+    if normalized in {"yes", "y"}:
+        return "yes"
+    if normalized in {"no", "n"}:
+        return "no"
+    if normalized in {"not sure", "unsure", "don't know", "do not know"}:
+        return "not_sure"
+    return None
+
+
+def apply_deterministic_triage_overrides(messages: list[dict[str, Any]], chat_response: dict[str, Any]) -> dict[str, Any]:
+    """
+    Minimal deterministic guard for known terminal branch:
+    GEN3-T01, Q1=Yes must route immediately to Route A (Already Represented).
+    """
+    last_assistant = get_last_assistant_message_text(messages)
+    last_user = get_last_user_message_text(messages)
+    if not last_assistant or not last_user:
+        return chat_response
+
+    # Only intervene when previous turn clearly asked GEN3-T01 Q1.
+    if "Selected Entry: GEN3-T01" not in last_assistant:
+        return chat_response
+    if "Q1: Is the caller currently represented by a lawyer on this same matter?" not in last_assistant:
+        return chat_response
+
+    answer_label = classify_short_answer(last_user)
+    if answer_label != "yes":
+        return chat_response
+
+    message = chat_response.get("message")
+    if not isinstance(message, dict):
+        return chat_response
+
+    message["content"] = (
+        "**Selected Entry:** GEN3-T01\n\n"
+        "**Part C — Routing recommendation:**\n\n"
+        "Route A (Already Represented — Reject). The caller reports they are already represented by a lawyer on the same matter, "
+        "so the intake should not proceed with further Part B questions for this branch. Escalate to PBSG Staff if there is any "
+        "uncertainty about representation status.\n\n"
+        "Enter a new matter only if the caller has a different issue that is not already represented."
+    )
+    return chat_response
+
+
+def get_deterministic_triage_override_response(messages: list[dict[str, Any]], session_state: Any) -> dict[str, Any] | None:
+    """
+    Fast deterministic response for known terminal branch to avoid LLM drift and latency.
+    """
+    provisional = {
+        "message": {"content": "", "role": "assistant"},
+        "context": {"thoughts": [], "data_points": {}, "followup_questions": None},
+        "session_state": session_state,
+    }
+    adjusted = apply_deterministic_triage_overrides(messages, provisional)
+    content = adjusted.get("message", {}).get("content") if isinstance(adjusted.get("message"), dict) else None
+    if isinstance(content, str) and content.strip():
+        return adjusted
     return None
 
 
@@ -293,6 +424,12 @@ async def chat(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+        deterministic_override = get_deterministic_triage_override_response(request_json["messages"], session_state)
+        if deterministic_override is not None:
+            result = deterministic_override
+            if BACKEND_GUARDRAIL_ENFORCEMENT:
+                result = enforce_backend_guardrails_on_chat_response(result)
+            return jsonify(result)
 
         # Query router: if enabled and not skipped, check relevance before invoking RAG.
         if current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
@@ -327,6 +464,7 @@ async def chat(auth_claims: dict[str, Any]):
             context=context,
             session_state=session_state,
         )
+        result = apply_deterministic_triage_overrides(request_json["messages"], result)
         if BACKEND_GUARDRAIL_ENFORCEMENT:
             result = enforce_backend_guardrails_on_chat_response(result)
         return jsonify(result)
@@ -349,6 +487,15 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED],
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
+        deterministic_override = get_deterministic_triage_override_response(request_json["messages"], session_state)
+        if deterministic_override is not None:
+            result = deterministic_override
+            if BACKEND_GUARDRAIL_ENFORCEMENT:
+                result = enforce_backend_guardrails_on_chat_response(result)
+            response = await make_response(format_as_ndjson(single_chat_response_stream(result)))
+            response.timeout = None  # type: ignore
+            response.mimetype = "application/json-lines"
+            return response
 
         # Query router is temporarily disabled: always pass through to RAG.
         if False and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
@@ -384,13 +531,16 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     return response
 
         approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-        if BACKEND_GUARDRAIL_ENFORCEMENT:
-            # Enforce guardrails on the full assistant message before sending to client.
+        if BACKEND_GUARDRAIL_ENFORCEMENT and is_high_risk_user_query(
+            get_last_user_message_text(request_json["messages"])
+        ):
+            # High-risk prompts use strict full-response sanitization.
             non_stream_result = await approach.run(
                 request_json["messages"],
                 context=context,
                 session_state=session_state,
             )
+            non_stream_result = apply_deterministic_triage_overrides(request_json["messages"], non_stream_result)
             guarded_result = enforce_backend_guardrails_on_chat_response(non_stream_result)
             result = single_chat_response_stream(guarded_result)
         else:
@@ -399,6 +549,8 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 context=context,
                 session_state=session_state,
             )
+            if BACKEND_GUARDRAIL_ENFORCEMENT:
+                result = enforce_backend_guardrails_on_stream(result)
         response = await make_response(format_as_ndjson(result))
         response.timeout = None  # type: ignore
         response.mimetype = "application/json-lines"

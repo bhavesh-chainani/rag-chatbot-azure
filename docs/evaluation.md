@@ -124,3 +124,23 @@ To run the evaluation on the changes in a PR, a repository member can post a `/e
 The repository also includes an `evaluate_config_multimodal.json` file specifically for evaluating multimodal RAG answers. This configuration uses a different ground truth file, `ground_truth_multimodal.jsonl`, which includes questions based off the sample data that require both text and image sources to answer.
 
 Note that the "groundedness" evaluator is not reliable for multimodal RAG, since it does not currently incorporate the image sources. We still include it in the metrics, but the more reliable metrics are "relevance" and "citations matched".
+
+## Evaluate PBSG Golden Set triage behavior
+
+For the Pro Bono SG workflow, use the per-id JSON files under `data/pbsg_golden_set_by_id/` (default) or pass `--dataset` to a directory or legacy single-array JSON file. Run the endpoint-based evaluator:
+
+```bash
+python evals/pbsg_golden_set_eval.py --targeturl http://localhost:50505
+```
+
+This evaluator checks:
+
+* **Phase 1 entry selection**: whether the answer picks the expected `Selected Entry` ID
+* **Part B completeness**: whether all expected triage questions for that entry are present
+* **Phase 2 route validity**: whether returned route labels (`Route A`, `Route B`, etc.) are valid for that entry
+
+Useful options:
+
+* `--max-entries`: run only a subset of entries for quick iteration
+* `--per-entry-variations`: limit number of variations per entry
+* `--output`: customize where the JSON report is written (default `evals/results/pbsg_golden_set_eval.json`)

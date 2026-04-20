@@ -25,6 +25,14 @@ The chat app provides two ways to ingest data: manual ingestion and cloud ingest
 
 In order to ingest a document format, we need a tool that can turn it into text. By default, the manual indexing uses Azure Document Intelligence (DI in the table below), but we also have local parsers for several formats. The local parsers are not as sophisticated as Azure Document Intelligence, but they can be used to decrease charges.
 
+For policy-like corpora (such as the Pro Bono SG Golden Set), prefer ingesting structured JSON rather than the original `.docx`. In this repository, `scripts/build_pbsg_golden_set_json.py` reads **`data/2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`** by default (GEN3 topic ids) and writes **`data/pbsg_golden_set_by_id/<ENTRY_ID>.json`** (one Golden Set object per file). Use **`python scripts/build_pbsg_golden_set_json.py --legacy`** to rebuild from `data/PBSG_Golden_Set_Complete_v2.docx` instead.
+
+```shell
+python scripts/build_pbsg_golden_set_json.py
+```
+
+Each file is one search document so **content** and embeddings stay scoped to a single entry id.
+
 | Format | Manual indexing                      | Integrated Vectorization |
 | ------ | ------------------------------------ | ------------------------ |
 | PDF    | Yes (DI or local with PyPDF)         | Yes                      |
@@ -34,6 +42,8 @@ In order to ingest a document format, we need a tool that can turn it into text.
 | TXT    | Yes (Local)                          | Yes                      |
 | JSON   | Yes (Local)                          | Yes                      |
 | CSV    | Yes (Local)                          | Yes                      |
+
+For **JSON arrays**, the parser emits **one page per top-level object** (`id`, triage, routing, etc.). The text splitter indexes **each object separately** (up to a generous per-object size limit). The PBSG golden set uses **one file per entry** under `data/pbsg_golden_set_by_id/` so each `sourcefile` (e.g. `GEN3-T01.json`) maps to one chunk. Re-ingest after changing `data/*.json` (and remove stale `data/*.md5` if you need a forced refresh). `prepdocs.py` supports `--exclude <basename>` if you need to skip specific paths. In this repo, the helper scripts already exclude the golden-set source Word files (including `2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`) by default so Azure Search only ingests the JSON.
 
 ## Ingestion stages
 

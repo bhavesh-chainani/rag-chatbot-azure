@@ -13,16 +13,13 @@ if (Test-Path -Path "/usr") {
 
 Write-Host 'Running "prepdocs.py"'
 
-
-$cwd = (Get-Location)
-$dataArg = "`"$cwd/data/*`""
-$additionalArgs = ""
+# Golden Set: Word files are build inputs only; index per-id JSON, not the .docx.
+$argumentList = @("./app/backend/prepdocs.py", "./data/*", "--verbose")
 if ($args) {
-  $additionalArgs = "$args"
+  $argumentList += $args
 }
-
-$argumentList = "./app/backend/prepdocs.py $dataArg --verbose $additionalArgs"
-
-$argumentList
+$argumentList += @("--exclude", "PBSG_Golden_Set_Complete_v2.docx")
+$argumentList += @("--exclude", "2026_03_31_PBSG_Golden_Set_v3_MCA.docx")
+$argumentList += @("--exclude", "2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx")
 
 Start-Process -FilePath $venvPythonPath -ArgumentList $argumentList -Wait -NoNewWindow

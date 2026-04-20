@@ -24,6 +24,39 @@ from approaches.promptmanager import PromptManager
 from prepdocslib.blobmanager import AdlsBlobManager, BlobManager
 from prepdocslib.embeddings import ImageEmbeddings
 
+COMMON_QUERY_TERMS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "how",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "we",
+    "what",
+    "when",
+    "where",
+    "who",
+    "why",
+    "you",
+}
+
 
 class ChatReadRetrieveReadApproach(Approach):
     """
@@ -65,6 +98,7 @@ class ChatReadRetrieveReadApproach(Approach):
         use_web_source: bool = False,
         use_sharepoint_source: bool = False,
         retrieval_reasoning_effort: Optional[str] = None,
+        enforce_access_control: bool = False,
     ):
         self.search_client = search_client
         self.search_index_name = search_index_name
@@ -97,6 +131,7 @@ class ChatReadRetrieveReadApproach(Approach):
         self.web_source_enabled = use_web_source
         self.use_sharepoint_source = use_sharepoint_source
         self.retrieval_reasoning_effort = retrieval_reasoning_effort
+        self.enforce_access_control = enforce_access_control
 
     def extract_followup_questions(self, content: Optional[str]):
         if content is None:
@@ -109,6 +144,18 @@ class ChatReadRetrieveReadApproach(Approach):
             return self.extract_rewritten_query(chat_completion, default_query, no_response_token=self.NO_RESPONSE)
         except Exception:
             return default_query
+
+    def tokenize_for_overlap(self, text: str) -> set[str]:
+        tokens = re.findall(r"[a-z0-9]+", text.lower())
+        return {token for token in tokens if token not in COMMON_QUERY_TERMS and len(token) > 1}
+
+    def rewrite_looks_drifted(self, original_user_query: str, rewritten_query: str) -> bool:
+        original_tokens = self.tokenize_for_overlap(original_user_query)
+        rewritten_tokens = self.tokenize_for_overlap(rewritten_query)
+        if not original_tokens or not rewritten_tokens:
+            return False
+        overlap_ratio = len(original_tokens & rewritten_tokens) / len(original_tokens)
+        return overlap_ratio < 0.2
 
     async def run_without_streaming(
         self,
@@ -346,8 +393,12 @@ class ChatReadRetrieveReadApproach(Approach):
         top = overrides.get("top", 3)
         minimum_search_score = overrides.get("minimum_search_score", 0.0)
         minimum_reranker_score = overrides.get("minimum_reranker_score", 0.0)
+        # Reranker scores are only available on semantic ranker path.
+        # If semantic ranker is off, do not filter results by reranker threshold.
+        if not use_semantic_ranker:
+            minimum_reranker_score = 0.0
         search_index_filter = self.build_filter(overrides)
-        access_token = auth_claims.get("access_token")
+        access_token = auth_claims.get("access_token") if self.enforce_access_control else None
         send_text_sources = overrides.get("send_text_sources", True)
         send_image_sources = overrides.get("send_image_sources", self.multimodal_enabled) and self.multimodal_enabled
         search_text_embeddings = overrides.get("search_text_embeddings", True)
@@ -380,6 +431,10 @@ class ChatReadRetrieveReadApproach(Approach):
         )
 
         query_text = rewrite_result.query
+        rewrite_fallback_to_user_query = False
+        if self.rewrite_looks_drifted(original_user_query, query_text):
+            query_text = original_user_query
+            rewrite_fallback_to_user_query = True
 
         # STEP 2: Retrieve relevant documents from the search index with the GPT optimized query
 
@@ -431,13 +486,19 @@ class ChatReadRetrieveReadApproach(Approach):
                     {
                         "use_semantic_captions": use_semantic_captions,
                         "use_semantic_ranker": use_semantic_ranker,
+                        # Keep legacy key for compatibility, but add explicit key name
+                        # to avoid confusion with the app-level LLM query rewrite step.
                         "use_query_rewriting": use_query_rewriting,
+                        "use_azure_search_query_rewriting": use_query_rewriting,
                         "top": top,
                         "filter": search_index_filter,
                         "use_vector_search": use_vector_search,
                         "use_text_search": use_text_search,
                         "search_text_embeddings": search_text_embeddings,
                         "search_image_embeddings": search_image_embeddings,
+                        "rewrite_fallback_to_user_query": rewrite_fallback_to_user_query,
+                        "minimum_search_score": minimum_search_score,
+                        "minimum_reranker_score": minimum_reranker_score,
                     },
                 ),
                 ThoughtStep(
@@ -455,7 +516,7 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
     ):
         search_index_filter = self.build_filter(overrides)
-        access_token = auth_claims.get("access_token")
+        access_token = auth_claims.get("access_token") if self.enforce_access_control else None
         minimum_reranker_score = overrides.get("minimum_reranker_score", 0)
         send_text_sources = overrides.get("send_text_sources", True)
         send_image_sources = overrides.get("send_image_sources", self.multimodal_enabled) and self.multimodal_enabled

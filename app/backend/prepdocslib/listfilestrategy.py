@@ -6,7 +6,7 @@ import re
 from abc import ABC
 from collections.abc import AsyncGenerator
 from glob import glob
-from typing import IO, Optional
+from typing import IO, FrozenSet, Optional
 
 logger = logging.getLogger("scripts")
 
@@ -84,9 +84,15 @@ class LocalListFileStrategy(ListFileStrategy):
     Concrete strategy for listing files that are located in a local filesystem
     """
 
-    def __init__(self, path_pattern: str, enable_global_documents: bool = False):
+    def __init__(
+        self,
+        path_pattern: str,
+        enable_global_documents: bool = False,
+        exclude_basenames: Optional[FrozenSet[str]] = None,
+    ):
         self.path_pattern = path_pattern
         self.enable_global_documents = enable_global_documents
+        self.exclude_basenames = exclude_basenames or frozenset()
 
     async def list_paths(self) -> AsyncGenerator[str, None]:
         async for p in self._list_paths(self.path_pattern):
@@ -98,6 +104,8 @@ class LocalListFileStrategy(ListFileStrategy):
                 async for p in self._list_paths(f"{path}/*"):
                     yield p
             else:
+                if os.path.basename(path) in self.exclude_basenames:
+                    continue
                 # Only list files, not directories
                 yield path
 

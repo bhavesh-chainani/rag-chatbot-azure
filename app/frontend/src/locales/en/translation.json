@@ -37,10 +37,10 @@
     "chatEmptyStateTitle": "Legal Chatbot Assistant",
     "chatEmptyStateSubtitle": "Enter the applicant's situation or try an example",
     "defaultExamples": {
-        "1": "Applicant says: My employer hasn't paid my salary for 3 months. What can I do?",
-        "2": "Applicant was fired unfairly. What can they do?",
-        "3": "Applicant is a freelancer and the client will not pay. Can they go to TADM?",
-        "placeholder": "Type the applicant's situation (e.g. injured at work, employer won't pay medical bills)"
+        "1": "How do I plan ahead if I lose mental capacity?",
+        "2": "What are my rights and responsibilities as a Donee or Prospective Donee?",
+        "3": "What should I do to activate the LPA as a Donee?",
+        "placeholder": "Type the applicant's situation (e.g. planning ahead for loss of mental capacity, LPA, Donee)"
     },
     "askTitle": "Enter applicant's situation",
     "multimodalExamples": {

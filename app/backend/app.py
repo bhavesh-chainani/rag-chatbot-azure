@@ -825,6 +825,7 @@ async def setup_clients():
         use_web_source=current_app.config[CONFIG_WEB_SOURCE_ENABLED],
         use_sharepoint_source=current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
         retrieval_reasoning_effort=AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT,
+        enforce_access_control=AZURE_ENFORCE_ACCESS_CONTROL,
     )
 
 

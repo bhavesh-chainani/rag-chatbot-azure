@@ -583,26 +583,31 @@ class SentenceTextSplitter(TextSplitter):
             yield previous_chunk
 
 
+# Golden-set / structured JSON entries are usually a few thousand characters; keep one chunk per
+# entry when possible (embedding models typically allow 8k+ tokens for text-embedding-3-*).
+DEFAULT_JSON_OBJECT_MAX_LENGTH = 16000
+
+
 class SimpleTextSplitter(TextSplitter):
     """
-    Class that splits pages into smaller chunks based on a max object length. It is not aware of the content of the page.
-    This is required because embedding models may not be able to analyze an entire page at once
+    Splits each page independently up to max_object_length characters.
+
+    For JSON arrays (e.g. golden-set files), JsonParser emits one Page per top-level object; this
+    splitter keeps each object in its own chunk(s) instead of concatenating all pages and slicing
+    at fixed character boundaries (which used to split across entry IDs).
     """
 
     def __init__(self, max_object_length: int = 1000):
         self.max_object_length = max_object_length
 
     def split_pages(self, pages: list[Page]) -> Generator[Chunk, None, None]:
-        all_text = "".join(page.text for page in pages)
-        if len(all_text.strip()) == 0:
-            return
-
-        length = len(all_text)
-        if length <= self.max_object_length:
-            yield Chunk(page_num=0, text=all_text)
-            return
-
-        # its too big, so we need to split it
-        for i in range(0, length, self.max_object_length):
-            yield Chunk(page_num=i // self.max_object_length, text=all_text[i : i + self.max_object_length])
-        return
+        for page in pages:
+            raw = page.text or ""
+            if not raw.strip():
+                continue
+            length = len(raw)
+            if length <= self.max_object_length:
+                yield Chunk(page_num=page.page_num, text=raw)
+                continue
+            for i in range(0, length, self.max_object_length):
+                yield Chunk(page_num=page.page_num, text=raw[i : i + self.max_object_length])

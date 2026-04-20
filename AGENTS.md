@@ -76,6 +76,22 @@ The router uses the same OpenAI chat model as the main app with a single short c
 
 New files should be added to the `data` folder, and then either run scripts/prepdocs.sh or scripts/prepdocs.ps1 to ingest the data.
 
+For the Pro Bono SG golden set, **`data/pbsg_golden_set_by_id/<ENTRY_ID>.json`** is the canonical structured data (one object per file) for **ingestion** and **evaluation**. If the source Word document changes, regenerate all entry files with:
+
+```shell
+python scripts/build_pbsg_golden_set_json.py
+```
+
+By default that script reads **`data/2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`** (GEN3 topic ids such as `GEN3-T01`) and overwrites the JSON files under `data/pbsg_golden_set_by_id/`. To rebuild from the older domain golden set Word file instead, run:
+
+```shell
+python scripts/build_pbsg_golden_set_json.py --legacy
+```
+
+(`--legacy` uses `data/PBSG_Golden_Set_Complete_v2.docx` and the `XXX-NN | topic` header layout.) The script requires macOS `textutil` to convert `.docx` to plain text.
+
+**Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip the golden-set source Word files so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). Skipped basenames include `PBSG_Golden_Set_Complete_v2.docx`, `2026_03_31_PBSG_Golden_Set_v3_MCA.docx`, and `2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`. For any other build-only `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
+
 ## Adding a new azd environment variable
 
 An azd environment variable is stored by the azd CLI for each environment. It is passed to the "azd up" command and can configure both provisioning options and application settings.

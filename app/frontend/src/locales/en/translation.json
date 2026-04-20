@@ -37,10 +37,10 @@
     "chatEmptyStateTitle": "Legal Chatbot Assistant",
     "chatEmptyStateSubtitle": "Enter the applicant's situation or try an example",
     "defaultExamples": {
-        "1": "How do I plan ahead if I lose mental capacity?",
-        "2": "What are my rights and responsibilities as a Donee or Prospective Donee?",
-        "3": "What should I do to activate the LPA as a Donee?",
-        "placeholder": "Type the applicant's situation (e.g. planning ahead for loss of mental capacity, LPA, Donee)"
+        "1": "New caller asking for legal help. How should I start triaging this call?",
+        "2": "Caller has a criminal matter and says they were charged in court. What should I ask first?",
+        "3": "Caller says this is a personal contract dispute and wants legal assistance. How do I triage?",
+        "placeholder": "Type the applicant's situation (e.g. caller already has a lawyer, criminal charge, divorce, or civil dispute)"
     },
     "askTitle": "Enter applicant's situation",
     "multimodalExamples": {

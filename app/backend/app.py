@@ -294,8 +294,8 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
 
-        # Query router: if enabled and not skipped, check relevance before invoking RAG.
-        if current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
+        # Query router is temporarily disabled: always pass through to RAG.
+        if False and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
             "skip_query_router"
         ):
             last_text = get_last_user_message_text(request_json["messages"])
@@ -374,7 +374,7 @@ def config():
             "ragSendImageSources": current_app.config[CONFIG_RAG_SEND_IMAGE_SOURCES],
             "webSourceEnabled": current_app.config[CONFIG_WEB_SOURCE_ENABLED],
             "sharepointSourceEnabled": current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
-            "queryRouterEnabled": current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED, False),
+            "queryRouterEnabled": False,
         }
     )
 

@@ -358,55 +358,339 @@ def classify_short_answer(text: str | None) -> str | None:
     return None
 
 
-def apply_deterministic_triage_overrides(messages: list[dict[str, Any]], chat_response: dict[str, Any]) -> dict[str, Any]:
-    """
-    Minimal deterministic guard for known terminal branch:
-    GEN3-T01, Q1=Yes must route immediately to Route A (Already Represented).
-    """
-    last_assistant = get_last_assistant_message_text(messages)
-    last_user = get_last_user_message_text(messages)
-    if not last_assistant or not last_user:
-        return chat_response
+PENDING_ENTRY_RE = re.compile(r"Selected Entry:\s*(GEN3-[A-Z0-9]+)", re.IGNORECASE)
+PENDING_QUESTION_RE = re.compile(r"\bQ([0-9]+[A-Z]?)\s*:", re.IGNORECASE)
 
-    # Only intervene when previous turn clearly asked GEN3-T01 Q1.
-    if "Selected Entry: GEN3-T01" not in last_assistant:
-        return chat_response
-    if "Q1: Is the caller currently represented by a lawyer on this same matter?" not in last_assistant:
-        return chat_response
+DETERMINISTIC_QUESTIONS: dict[str, dict[str, str]] = {
+    "GEN3-T01": {
+        "Q1": "Is the caller currently represented by a lawyer on this same matter?",
+        "Q2": "Is the caller the person who needs legal help, or are they calling on behalf of someone else?",
+        "Q3": "Is this a business/commercial matter (company dispute, B2B contract, commercial debt, shareholder dispute)?",
+        "Q3A": "Is the matter for a non-profit / charity / social enterprise (or someone seeking to incorporate one), or for a for-profit business?",
+        "Q4": "Has the caller already received legal advice from a lawyer on this same matter?",
+        "Q4A": "Is the caller seeking legal guidance (clinic consultation) or legal representation (a lawyer to act on their behalf)?",
+        "Q5": "What type of matter is the caller facing (criminal, matrimonial/family, or civil/other)?",
+    },
+    "GEN3-T02": {
+        "Q1": "Is the offence a capital offence (punishable with death)?",
+        "Q2": "Is there a court date/deadline within 14 days?",
+        "Q3": "Has the caller been charged in court?",
+        "Q4": "Is the caller a Singapore Citizen or PR?",
+        "Q5": "Has the caller applied to, or been told about, the Public Defender’s Office (PDO)?",
+        "Q5A": "What is the PDO status — processing/accepted, unable to assist, or unknown?",
+        "Q6": "Is the caller within CLAS means thresholds (PCHI <= S$1,650, savings threshold by age, and non-private housing)?",
+    },
+    "GEN3-T03": {
+        "Q1": "Is there active/recent family violence, or a court date/deadline within 14 days?",
+        "Q2": "Is the caller a Singapore Citizen or PR?",
+        "Q3": "Has the caller applied to the Legal Aid Bureau (LAB) for civil legal aid?",
+        "Q4": "Does the caller have at least one Singaporean child (under 21)?",
+        "Q5": "Is the caller within FJSS Pro Bono means thresholds?",
+        "Q5A": "Is the caller marginally above Pro Bono thresholds, or clearly well above thresholds?",
+    },
+    "GEN3-T04": {
+        "Q1": "Is the caller a Singapore Citizen or PR?",
+        "Q2": "Is the caller seeking representation or guidance?",
+        "Q3": "Has the caller applied to the Legal Aid Bureau (LAB)?",
+        "Q4": "Is the caller within legal clinic means thresholds?",
+        "Q4A": "Is the caller marginal/exceptional, or clearly outside criteria with no exceptional circumstances?",
+    },
+}
 
-    answer_label = classify_short_answer(last_user)
-    if answer_label != "yes":
-        return chat_response
 
-    message = chat_response.get("message")
-    if not isinstance(message, dict):
-        return chat_response
+def parse_pending_entry_and_question(last_assistant: str | None) -> tuple[str | None, str | None]:
+    if not last_assistant:
+        return None, None
+    entry_match = PENDING_ENTRY_RE.search(last_assistant)
+    question_matches = PENDING_QUESTION_RE.findall(last_assistant)
+    if not entry_match or not question_matches:
+        return None, None
+    # Use the last question label shown in the assistant turn.
+    return entry_match.group(1).upper(), f"Q{question_matches[-1].upper()}"
 
-    message["content"] = (
-        "**Selected Entry:** GEN3-T01\n\n"
-        "**Part C — Routing recommendation:**\n\n"
-        "Route A (Already Represented — Reject). The caller reports they are already represented by a lawyer on the same matter, "
-        "so the intake should not proceed with further Part B questions for this branch. Escalate to PBSG Staff if there is any "
-        "uncertainty about representation status.\n\n"
-        "Enter a new matter only if the caller has a different issue that is not already represented."
+
+def normalize_answer_label(answer: str, entry_id: str, question_id: str) -> str | None:
+    normalized = answer.strip().lower()
+    short = classify_short_answer(answer)
+
+    if short:
+        return short
+
+    if question_id == "Q2" and entry_id == "GEN3-T01":
+        if "on behalf" in normalized or "for someone else" in normalized:
+            return "on_behalf"
+        if "self" in normalized or "for myself" in normalized or "me" == normalized:
+            return "self"
+    if question_id == "Q3A" and entry_id == "GEN3-T01":
+        if "non-profit" in normalized or "charity" in normalized or "social enterprise" in normalized:
+            return "non_profit"
+        if "for-profit" in normalized or "business" in normalized or "company" in normalized:
+            return "for_profit"
+    if question_id == "Q4A" and entry_id == "GEN3-T01":
+        if "guidance" in normalized or "clinic" in normalized or "advice" in normalized:
+            return "guidance"
+        if "representation" in normalized or "lawyer to act" in normalized:
+            return "representation"
+    if question_id == "Q5" and entry_id == "GEN3-T01":
+        if "criminal" in normalized or "charged" in normalized or "police" in normalized:
+            return "criminal"
+        if "family" in normalized or "matrimonial" in normalized or "divorce" in normalized:
+            return "matrimonial"
+        if "civil" in normalized or "contract" in normalized or "employment" in normalized or "probate" in normalized:
+            return "civil"
+    if question_id == "Q2" and entry_id == "GEN3-T04":
+        if "representation" in normalized:
+            return "representation"
+        if "guidance" in normalized:
+            return "guidance"
+    if question_id == "Q5A" and entry_id == "GEN3-T02":
+        if "unable" in normalized or "rejected" in normalized:
+            return "unable_to_assist"
+        if "processing" in normalized or "accepted" in normalized or "approved" in normalized:
+            return "processing_or_accepted"
+        if "unknown" in normalized:
+            return "unknown"
+    if question_id == "Q5A" and entry_id == "GEN3-T03":
+        if "marginal" in normalized:
+            return "marginal"
+        if "well above" in normalized or "clearly above" in normalized:
+            return "well_above"
+    if question_id == "Q4A" and entry_id == "GEN3-T04":
+        if "marginal" in normalized or "exceptional" in normalized:
+            return "marginal_or_exceptional"
+        if "outside" in normalized or "none" in normalized:
+            return "outside_no_exceptional"
+
+    return None
+
+
+def make_question_response(entry_id: str, question_id: str) -> str:
+    question_text = DETERMINISTIC_QUESTIONS[entry_id][question_id]
+    return (
+        f"**Selected Entry:** {entry_id}\n\n"
+        "**Part B Question**\n\n"
+        f"> **{question_id}: {question_text}**\n\n"
+        "Enter the applicant's answer and I will determine the next required question or route."
     )
-    return chat_response
+
+
+def make_route_response(entry_id: str, route_text: str) -> str:
+    return (
+        f"**Selected Entry:** {entry_id}\n\n"
+        "**Part C — Routing recommendation:**\n\n"
+        f"{route_text}\n\n"
+        "Escalate to PBSG Staff if any key facts are unclear."
+    )
+
+
+def deterministic_transition(entry_id: str, question_id: str, answer_label: str) -> str | None:
+    if entry_id == "GEN3-T01":
+        if question_id == "Q1":
+            if answer_label == "yes":
+                return make_route_response("GEN3-T01", "Route A (Already Represented — Reject).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T01", "Q2")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q2":
+            if answer_label == "on_behalf":
+                return make_route_response("GEN3-T01", "If caller is calling on behalf and person can self-help: Route B (Refer Person to Contact PBSG Directly). Otherwise continue to Q3.")
+            if answer_label in {"self", "no"}:
+                return make_question_response("GEN3-T01", "Q3")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q3":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T01", "Q3A")
+            if answer_label == "no":
+                return make_question_response("GEN3-T01", "Q4")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q3A":
+            if answer_label == "non_profit":
+                return make_route_response("GEN3-T01", "Route C (Non-Profit Legal Services).")
+            if answer_label == "for_profit":
+                return make_route_response("GEN3-T01", "Route D (Reject — Business/Commercial Matter).")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q4":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T01", "Q4A")
+            if answer_label == "no":
+                return make_question_response("GEN3-T01", "Q5")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q4A":
+            if answer_label == "guidance":
+                return make_route_response("GEN3-T01", "Route E (Reject for Guidance — Prior Advice Received).")
+            if answer_label == "representation":
+                return make_question_response("GEN3-T01", "Q5")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q5":
+            if answer_label == "criminal":
+                return make_route_response("GEN3-T01", "Route G (Criminal Stream) -> Proceed to GEN3-T02.")
+            if answer_label == "matrimonial":
+                return make_route_response("GEN3-T01", "Route H (Matrimonial Stream) -> Proceed to GEN3-T03.")
+            if answer_label == "civil":
+                return make_route_response("GEN3-T01", "Route I (Civil Stream) -> Proceed to GEN3-T04.")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T01", "Route F (Escalate to PBSG Staff).")
+
+    if entry_id == "GEN3-T02":
+        if question_id == "Q1":
+            if answer_label == "yes":
+                return make_route_response("GEN3-T02", "Route A (LASCO).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T02", "Q2")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T02", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q2":
+            if answer_label in {"yes", "not_sure"}:
+                return make_route_response("GEN3-T02", "Route D (CLAS + Urgent concurrent).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T02", "Q3")
+        if question_id == "Q3":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T02", "Q4")
+            if answer_label == "no":
+                return make_route_response("GEN3-T02", "Proceed to GEN3-T04 — Civil and Guidance Stream Triage.")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T02", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q4":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T02", "Q5")
+            if answer_label == "no":
+                return make_question_response("GEN3-T02", "Q6")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T02", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q5":
+            if answer_label == "no":
+                return make_route_response("GEN3-T02", "Route B (Refer to PDO First).")
+            if answer_label == "yes":
+                return make_question_response("GEN3-T02", "Q5A")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T02", "Route B (Refer to PDO First).")
+        if question_id == "Q5A":
+            if answer_label == "processing_or_accepted":
+                return make_route_response("GEN3-T02", "Route C (PDO is handling — PBSG not needed).")
+            if answer_label == "unable_to_assist":
+                return make_route_response("GEN3-T02", "Proceed to GEN3-T04 — Civil and Guidance Stream Triage.")
+            if answer_label in {"unknown", "not_sure"}:
+                return make_route_response("GEN3-T02", "Route B (Refer to PDO First).")
+        if question_id == "Q6":
+            if answer_label == "yes":
+                return make_route_response("GEN3-T02", "Route E (CLAS — Standard Intake).")
+            if answer_label == "no":
+                return make_route_response("GEN3-T02", "Proceed to GEN3-T04 — Civil and Guidance Stream Triage.")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T02", "Route F (Escalate to PBSG Staff).")
+
+    if entry_id == "GEN3-T03":
+        if question_id == "Q1":
+            if answer_label in {"yes", "not_sure"}:
+                return make_route_response("GEN3-T03", "Route A (FJSS + Urgent concurrent).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T03", "Q2")
+        if question_id == "Q2":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T03", "Q3")
+            if answer_label == "no":
+                return make_question_response("GEN3-T03", "Q4")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T03", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q3":
+            if answer_label == "no":
+                return make_route_response("GEN3-T03", "Route B (Refer to LAB First).")
+            if answer_label == "yes":
+                return make_question_response("GEN3-T03", "Q5")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T03", "Route B (Refer to LAB First).")
+        if question_id == "Q4":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T03", "Q5")
+            if answer_label == "no":
+                return make_route_response("GEN3-T03", "Proceed to GEN3-T04 — Civil and Guidance Stream Triage.")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T03", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q5":
+            if answer_label == "yes":
+                return make_route_response("GEN3-T03", "Route D (FJSS Pro Bono — Standard Intake).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T03", "Q5A")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T03", "Route F (Escalate to PBSG Staff).")
+        if question_id == "Q5A":
+            if answer_label == "marginal":
+                return make_route_response("GEN3-T03", "Route E (FJSS Modest Means — Standard Intake).")
+            if answer_label == "well_above":
+                return make_route_response("GEN3-T03", "Proceed to GEN3-T04 — Civil and Guidance Stream Triage.")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T03", "Route F (Escalate to PBSG Staff).")
+
+    if entry_id == "GEN3-T04":
+        if question_id == "Q1":
+            if answer_label == "yes":
+                return make_question_response("GEN3-T04", "Q2")
+            if answer_label == "no":
+                return make_question_response("GEN3-T04", "Q4")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T04", "Route C (Escalate to PBSG Staff).")
+        if question_id == "Q2":
+            if answer_label == "representation":
+                return make_question_response("GEN3-T04", "Q3")
+            if answer_label == "guidance":
+                return make_question_response("GEN3-T04", "Q4")
+            if answer_label == "not_sure":
+                return make_question_response("GEN3-T04", "Q4")
+        if question_id == "Q3":
+            if answer_label == "no":
+                return make_route_response("GEN3-T04", "Route B (Refer to LAB).")
+            if answer_label == "yes":
+                return make_question_response("GEN3-T04", "Q4")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T04", "Route B (Refer to LAB).")
+        if question_id == "Q4":
+            if answer_label == "yes":
+                return make_route_response("GEN3-T04", "Route A (Legal Clinic).")
+            if answer_label == "no":
+                return make_question_response("GEN3-T04", "Q4A")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T04", "Route C (Escalate to PBSG Staff).")
+        if question_id == "Q4A":
+            if answer_label == "marginal_or_exceptional":
+                return make_route_response("GEN3-T04", "Route C (Escalate to PBSG Staff).")
+            if answer_label == "outside_no_exceptional":
+                return make_route_response("GEN3-T04", "Route D (Reject and Share Self-Help Resources).")
+            if answer_label == "not_sure":
+                return make_route_response("GEN3-T04", "Route C (Escalate to PBSG Staff).")
+
+    return None
 
 
 def get_deterministic_triage_override_response(messages: list[dict[str, Any]], session_state: Any) -> dict[str, Any] | None:
     """
     Fast deterministic response for known terminal branch to avoid LLM drift and latency.
     """
-    provisional = {
-        "message": {"content": "", "role": "assistant"},
+    last_assistant = get_last_assistant_message_text(messages)
+    last_user = get_last_user_message_text(messages)
+    entry_id, question_id = parse_pending_entry_and_question(last_assistant)
+    if not entry_id or not question_id or not last_user:
+        return None
+    if entry_id not in DETERMINISTIC_QUESTIONS:
+        return None
+
+    answer_label = normalize_answer_label(last_user, entry_id, question_id)
+    if not answer_label:
+        return None
+    override_content = deterministic_transition(entry_id, question_id, answer_label)
+    if not override_content:
+        return None
+    return {
+        "message": {"content": override_content, "role": "assistant"},
         "context": {"thoughts": [], "data_points": {}, "followup_questions": None},
         "session_state": session_state,
     }
-    adjusted = apply_deterministic_triage_overrides(messages, provisional)
-    content = adjusted.get("message", {}).get("content") if isinstance(adjusted.get("message"), dict) else None
-    if isinstance(content, str) and content.strip():
-        return adjusted
-    return None
 
 
 @bp.route("/chat", methods=["POST"])
@@ -464,7 +748,6 @@ async def chat(auth_claims: dict[str, Any]):
             context=context,
             session_state=session_state,
         )
-        result = apply_deterministic_triage_overrides(request_json["messages"], result)
         if BACKEND_GUARDRAIL_ENFORCEMENT:
             result = enforce_backend_guardrails_on_chat_response(result)
         return jsonify(result)
@@ -540,7 +823,6 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 context=context,
                 session_state=session_state,
             )
-            non_stream_result = apply_deterministic_triage_overrides(request_json["messages"], non_stream_result)
             guarded_result = enforce_backend_guardrails_on_chat_response(non_stream_result)
             result = single_chat_response_stream(guarded_result)
         else:

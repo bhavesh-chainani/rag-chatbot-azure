@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Legal Chatbot",
-    "headerTitle": "Legal Chatbot",
+    "pageTitle": "Pro Bono SG Triage",
+    "headerTitle": "Pro Bono SG Triage",
     "chat": "Sohbet",
     "login": "Giriş yap",
     "logout": "Çıkış yap",
@@ -34,8 +34,8 @@
     },
     "developerSettings": "Geliştirici ayarları",
 
-    "chatEmptyStateTitle": "Gönüllüler için Legal Chatbot",
-    "chatEmptyStateSubtitle": "Başvuranın durumunu girin veya bir örnek deneyin",
+    "chatEmptyStateTitle": "Pro Bono SG Triage Asistanı",
+    "chatEmptyStateSubtitle": "Arayanın durumunu açıklayın, triaj yapmanıza yardımcı olalım",
     "defaultExamples": {
         "1": "Başvuran: İşverenim 3 aydır maaşımı ödemedi. Ne yapabilirim?",
         "2": "Başvuran haksız yere işten çıkarıldı. Ne yapabilir?",

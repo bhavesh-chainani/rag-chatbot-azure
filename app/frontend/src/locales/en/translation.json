@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Legal Chatbot",
-    "headerTitle": "Legal Chatbot",
+    "pageTitle": "Pro Bono SG Triage",
+    "headerTitle": "Pro Bono SG Triage",
     "chat": "Chat",
     "login": "Login",
     "logout": "Logout",
@@ -34,8 +34,8 @@
     },
     "developerSettings": "Developer settings",
 
-    "chatEmptyStateTitle": "Legal Chatbot Assistant",
-    "chatEmptyStateSubtitle": "Enter the applicant's situation or try an example",
+    "chatEmptyStateTitle": "Pro Bono SG Triage Assistant",
+    "chatEmptyStateSubtitle": "Describe the caller's situation and we'll help you triage",
     "defaultExamples": {
         "1": "New caller asking for legal help. How should I start triaging this call?",
         "2": "Caller has a criminal matter and says they were charged in court. What should I ask first?",

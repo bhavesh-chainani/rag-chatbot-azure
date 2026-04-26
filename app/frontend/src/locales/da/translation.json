@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Legal Chatbot",
-    "headerTitle": "Legal Chatbot",
+    "pageTitle": "Pro Bono SG Triage",
+    "headerTitle": "Pro Bono SG Triage",
     "chat": "Chat",
     "login": "Log ind",
     "logout": "Log ud",
@@ -33,8 +33,8 @@
         "fileDeleted": "Fil slettet"
     },
     "developerSettings": "Udviklerindstillinger",
-    "chatEmptyStateTitle": "Legal Chatbot for frivillige",
-    "chatEmptyStateSubtitle": "Indtast ansøgerens situation eller prøv et eksempel",
+    "chatEmptyStateTitle": "Pro Bono SG Triage Assistent",
+    "chatEmptyStateSubtitle": "Beskriv den opkaldendes situation, og vi hjælper dig med at triagere",
     "defaultExamples": {
         "1": "Ansøger: Min arbejdsgiver har ikke betalt min løn i 3 måneder. Hvad kan jeg gøre?",
         "2": "Ansøgeren er blevet uretmæssigt fyret. Hvad kan de gøre?",

@@ -15,7 +15,7 @@ If necessary, edit this file to ensure it accurately reflects the current state 
       * app/backend/approaches/promptmanager.py: Manages loading and rendering of Jinja2 prompt templates
       * app/backend/approaches/prompts/query_rewrite.system.jinja2: Jinja2 template used to rewrite the query based off search history into a better search query
       * app/backend/approaches/prompts/chat_query_rewrite_tools.json: Tools used by the query rewriting prompt
-      * app/backend/approaches/prompts/chat_answer.system.jinja2: Jinja2 template for the system message used by the Chat approach to answer questions
+      * app/backend/approaches/prompts/chat_answer.system.jinja2: Jinja2 template for the system message used by the Chat approach — implements the auto-extract triage flow (see "Triage approach" section below)
       * app/backend/approaches/prompts/chat_answer.user.jinja2: Jinja2 template for the user message used by the Chat approach, including sources
     * app/backend/prepdocslib: Contains the document ingestion library used by both local and cloud ingestion
       * app/backend/prepdocslib/blobmanager.py: Manages uploads to Azure Blob Storage
@@ -71,6 +71,28 @@ When enabled, the app checks each user message for relevance to the bot’s scop
 * **Bypass**: the frontend can send `overrides.skip_query_router: true` (e.g. from Developer Settings) to force RAG for that request.
 
 The router uses the same OpenAI chat model as the main app with a single short completion (low token count). On router failure the request is passed through to RAG (fail open).
+
+## Triage approach (auto-extract)
+
+The system prompt in `chat_answer.system.jinja2` implements an **auto-extract triage flow** designed for interns with zero legal knowledge who have a caller sitting right in front of them. The key innovation over a simple sequential Q&A is:
+
+1. **Topic match**: The intern types a paragraph describing the caller's situation. The RAG pipeline retrieves Golden Set entries, and the LLM matches the best entry.
+2. **Auto-extract**: The LLM reads the intern's paragraph and checks every Part B triage question from the matched entry. Questions whose answers are already present in the paragraph (explicitly or by clear implication) are marked as answered.
+3. **Smart routing**: The LLM follows the `branching_logic` with all extracted answers to determine how far down the decision tree it can get:
+   - **All needed questions answered** → routes immediately (OUTPUT A) with a script the intern reads aloud
+   - **Some answered, more needed** → shows what it gathered + asks exactly ONE follow-up question (OUTPUT B)
+   - **Nothing extractable** → brief Part A briefing + first question (OUTPUT C)
+   - **No matching entry** → Unclear handling (OUTPUT D)
+4. **Follow-up turns**: As the intern provides answers, the system updates its map and either asks the next required question or gives the final routing recommendation.
+
+Design principles:
+- Every response must be **scannable in under 15 seconds** (caller is right there)
+- Questions are phrased as **scripts the intern reads verbatim** to the caller
+- Routing recommendations include **exact words to say** to the caller
+- Never asks a question whose answer is already known
+- Stops asking questions the moment branching logic allows a valid route
+
+The four output formats (A/B/C/D) all preserve the `**Selected Entry:**` anchor and `Route <letter>` labels needed by the eval script (`evals/pbsg_golden_set_eval.py`).
 
 ## Adding new data
 

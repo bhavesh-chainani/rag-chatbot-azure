@@ -84,6 +84,7 @@ The system prompt in `chat_answer.system.jinja2` implements an **auto-extract tr
    - **Nothing extractable** → brief Part A briefing + first question (OUTPUT C)
    - **No matching entry** → Unclear handling (OUTPUT D)
 4. **Follow-up turns**: As the intern provides answers, the system updates its map and either asks the next required question or gives the final routing recommendation.
+5. **Multi-topic handling**: When a caller's situation spans multiple legal areas (e.g. criminal charge AND divorce), the system identifies all matching entries, prioritizes them, and handles each sequentially. After completing routing for the first topic (OUTPUT A), it transitions automatically to the next topic, re-using any facts already gathered so it never re-asks known answers.
 
 Design principles:
 - Every response must be **scannable in under 15 seconds** (caller is right there)
@@ -91,6 +92,7 @@ Design principles:
 - Routing recommendations include **exact words to say** to the caller
 - Never asks a question whose answer is already known
 - Stops asking questions the moment branching logic allows a valid route
+- When multiple topics are detected, handles higher-priority topics first (capital offences > urgent matters > criminal > matrimonial > civil > other)
 
 The four output formats (A/B/C/D) all preserve the `**Selected Entry:**` anchor and `Route <letter>` labels needed by the eval script (`evals/pbsg_golden_set_eval.py`).
 

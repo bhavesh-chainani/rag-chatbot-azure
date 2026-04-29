@@ -20,7 +20,8 @@
     "Q1: Is the caller a Singapore Citizen or PR?",
     "Q2 (SGC/PR path): Is the caller seeking representation (a lawyer to act for them) or guidance (initial advice)?",
     "Q3 (Representation, SGC/PR): Has the caller applied to the Legal Aid Bureau (LAB)?",
-    "Q4 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$5,000, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
+    "Q4 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$5,000, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
+    "Q4A (if Q4 = No): Is the caller marginally outside the means criteria (meets at least one criterion or has exceptional circumstances), or clearly outside all criteria with no exceptional circumstances?"
   ],
   "branching_logic": [
     "Q1: Is the caller a Singapore Citizen or PR?",
@@ -38,8 +39,11 @@
     "Q4 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$5,000, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
     "(PCHI = total monthly household income \u00f7 number of persons in household, including the caller and all dependants.)",
     "If Q4 = Yes (all within thresholds) \u2192 Route A (Legal Clinic)",
-    "If Q4 = No (marginal \u2014 fulfils at least one of the three means criteria OR raised exceptional circumstances (e.g. financial hardship, medical condition, financial liabilities, financially supporting dependents not living in same household)) \u2192 Route C (Escalate to PBSG Staff).",
-    "If Q4 = No (fulfils none of the means criteria and raised no exceptional circumstances) \u2192 Route D (Reject and Share Self-Help Resources)",
+    "If Q4 = No \u2192 Ask Q4A before routing.",
+    "Q4A (if Q4 = No): Is the caller marginally outside the means criteria (meets at least one criterion or has exceptional circumstances), or clearly outside all criteria with no exceptional circumstances?",
+    "If Q4A = Marginal / exceptional circumstances \u2192 Route C (Escalate to PBSG Staff).",
+    "If Q4A = Clearly outside all criteria with no exceptional circumstances \u2192 Route D (Reject and Share Self-Help Resources)",
+    "If Q4A = Not Sure \u2192 Route C (Escalate to PBSG Staff).",
     "If Q4 = Not Sure \u2192 Walk through the thresholds; if still unclear, take down figures and proceed to Route C (Escalate to PBSG Staff)."
   ],
   "routing": [

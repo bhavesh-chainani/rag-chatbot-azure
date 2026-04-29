@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
@@ -214,6 +215,59 @@ async def format_as_ndjson(r: AsyncGenerator[dict, None]) -> AsyncGenerator[str,
         yield json.dumps(error_dict(error))
 
 
+BACKEND_GUARDRAIL_ENFORCEMENT = os.getenv("BACKEND_GUARDRAIL_ENFORCEMENT", "true").lower() == "true"
+
+GUARDRAILS_SECTION_RE = re.compile(
+    r"\n\*\*Guardrails(?:[^\n]*)\*\*\s*\n(?:.*\n)*?(?=\n\*\*[^\n]+\*\*|\Z)",
+    re.IGNORECASE,
+)
+DISALLOWED_LEGAL_ADVICE_PATTERNS = (
+    re.compile(r"\b(?:you|the caller)\s+should\s+(?:sue|file|plead|admit|accept|reject|sign)\b", re.IGNORECASE),
+    re.compile(r"\b(?:you|the caller)\s+will\s+(?:win|lose)\b", re.IGNORECASE),
+    re.compile(r"\b(?:high|strong)\s+chance\s+of\s+(?:winning|success)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+interpret\s+(?:this|your)\s+(?:document|contract|agreement)\b", re.IGNORECASE),
+    re.compile(r"\bthis\s+clause\s+means\b", re.IGNORECASE),
+)
+GUARDRAIL_REPLACEMENT_MESSAGE = (
+    "I can help with intake triage and routing based on the knowledge base, but I cannot provide legal advice on what the "
+    "caller should do legally, interpret legal documents, or predict case outcomes. Please share the applicant's facts and I "
+    "will continue with the next required triage question or route."
+)
+
+
+def sanitize_assistant_content(content: str) -> str:
+    sanitized = content
+    # Remove user-facing guardrail blocks; they are enforced server-side.
+    sanitized = GUARDRAILS_SECTION_RE.sub("\n", sanitized)
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized).strip()
+
+    if any(pattern.search(sanitized) for pattern in DISALLOWED_LEGAL_ADVICE_PATTERNS):
+        return GUARDRAIL_REPLACEMENT_MESSAGE
+    return sanitized
+
+
+def enforce_backend_guardrails_on_chat_response(chat_response: dict[str, Any]) -> dict[str, Any]:
+    message = chat_response.get("message")
+    if not isinstance(message, dict):
+        return chat_response
+    content = message.get("content")
+    if not isinstance(content, str):
+        return chat_response
+    message["content"] = sanitize_assistant_content(content)
+    return chat_response
+
+
+async def single_chat_response_stream(chat_response: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
+    message = chat_response.get("message", {})
+    context = chat_response.get("context")
+    session_state = chat_response.get("session_state")
+    role = message.get("role", "assistant")
+    content = message.get("content", "")
+    yield {"delta": {"role": role}, "context": context, "session_state": session_state}
+    yield {"delta": {"role": role, "content": content}}
+    yield {"delta": {"role": role}, "context": context, "session_state": session_state}
+
+
 def get_last_user_message_text(messages: list[dict[str, Any]]) -> str | None:
     """Extract the last user message as plain text for query routing; returns None if not a string (e.g. multimodal)."""
     if not messages:
@@ -273,6 +327,8 @@ async def chat(auth_claims: dict[str, Any]):
             context=context,
             session_state=session_state,
         )
+        if BACKEND_GUARDRAIL_ENFORCEMENT:
+            result = enforce_backend_guardrails_on_chat_response(result)
         return jsonify(result)
     except Exception as error:
         return error_response(error, "/chat")
@@ -294,8 +350,8 @@ async def chat_stream(auth_claims: dict[str, Any]):
                 current_app.config[CONFIG_CHAT_HISTORY_BROWSER_ENABLED],
             )
 
-        # Query router: if enabled and not skipped, check relevance before invoking RAG.
-        if current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
+        # Query router is temporarily disabled: always pass through to RAG.
+        if False and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
             "skip_query_router"
         ):
             last_text = get_last_user_message_text(request_json["messages"])
@@ -328,11 +384,21 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     return response
 
         approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-        result = await approach.run_stream(
-            request_json["messages"],
-            context=context,
-            session_state=session_state,
-        )
+        if BACKEND_GUARDRAIL_ENFORCEMENT:
+            # Enforce guardrails on the full assistant message before sending to client.
+            non_stream_result = await approach.run(
+                request_json["messages"],
+                context=context,
+                session_state=session_state,
+            )
+            guarded_result = enforce_backend_guardrails_on_chat_response(non_stream_result)
+            result = single_chat_response_stream(guarded_result)
+        else:
+            result = await approach.run_stream(
+                request_json["messages"],
+                context=context,
+                session_state=session_state,
+            )
         response = await make_response(format_as_ndjson(result))
         response.timeout = None  # type: ignore
         response.mimetype = "application/json-lines"
@@ -374,7 +440,7 @@ def config():
             "ragSendImageSources": current_app.config[CONFIG_RAG_SEND_IMAGE_SOURCES],
             "webSourceEnabled": current_app.config[CONFIG_WEB_SOURCE_ENABLED],
             "sharepointSourceEnabled": current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
-            "queryRouterEnabled": current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED, False),
+            "queryRouterEnabled": False,
         }
     )
 

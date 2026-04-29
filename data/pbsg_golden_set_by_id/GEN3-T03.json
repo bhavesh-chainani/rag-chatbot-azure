@@ -16,7 +16,8 @@
     "Q2: Is the caller a Singapore Citizen or PR?",
     "Q3 (SGC/PR path): Has the caller applied to the Legal Aid Bureau (LAB) for civil legal aid?",
     "Q4 (Foreigner path): Does the caller have at least one Singaporean child (under 21)?",
-    "Q5 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$1,050, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
+    "Q5 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$1,050, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
+    "Q5A (if Q5 = No): Is the caller marginally above Pro Bono thresholds (PCHI \u2264 S$1,400, savings \u2264 $12,000 if younger than 60 years old or \u2264 $48,000 if 60 years old or older, and in non-private housing), or clearly well above these thresholds?"
   ],
   "branching_logic": [
     "Q1: Is there active or recent family violence (against the caller or a child), or is there court date/deadline within 14 days?",
@@ -39,8 +40,11 @@
     "Q5 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$1,050, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
     "(PCHI = total monthly household income \u00f7 number of persons in household, including the caller and all dependants.)",
     "If Q5 = Yes (all within thresholds) \u2192 Route D (FJSS Pro Bono \u2014 Standard Intake)",
-    "If Q5 = No (marginal \u2014 Per Capita Household Income (PCHI) \u2264 S$1,400, savings of \u2264 $12,000 if younger than 60 years old (or \u2264 $48,000 if 60 years old or older), caller stays in non-private housing (e.g. HDB, shelter, remand/prison)) \u2192 Route E (FJSS Modest Means)",
-    "If Q5 = No (well over thresholds) \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
+    "If Q5 = No \u2192 Ask Q5A before routing.",
+    "Q5A (if Q5 = No): Is the caller marginally above Pro Bono thresholds (PCHI \u2264 S$1,400, savings \u2264 $12,000 if younger than 60 years old or \u2264 $48,000 if 60 years old or older, and in non-private housing), or clearly well above these thresholds?",
+    "If Q5A = Marginally above thresholds \u2192 Route E (FJSS Modest Means)",
+    "If Q5A = Clearly well above thresholds \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
+    "If Q5A = Not Sure \u2192 Route F (Escalate to PBSG Staff).",
     "If Q5 = Not Sure \u2192 Walk through the thresholds; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff)."
   ],
   "routing": [

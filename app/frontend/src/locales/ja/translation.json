@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Legal Chatbot",
-    "headerTitle": "Legal Chatbot",
+    "pageTitle": "Pro Bono SG Triage",
+    "headerTitle": "Pro Bono SG Triage",
     "chat": "チャット",
     "login": "ログイン",
     "logout": "ログアウト",
@@ -34,8 +34,8 @@
     },
     "developerSettings": "高度な設定",
 
-    "chatEmptyStateTitle": "ボランティア向け法律チャットボット",
-    "chatEmptyStateSubtitle": "申請者の状況を入力するか、例をお試しください",
+    "chatEmptyStateTitle": "Pro Bono SG Triage アシスタント",
+    "chatEmptyStateSubtitle": "電話者の状況を説明してください。トリアージをお手伝いします",
     "defaultExamples": {
         "1": "申請者：3ヶ月給料が支払われていません。どうすればよいですか？",
         "2": "申請者は不当に解雇されました。何ができますか？",

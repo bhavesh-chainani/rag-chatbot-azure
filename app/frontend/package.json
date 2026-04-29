@@ -16,8 +16,8 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@azure/msal-browser": "^5.6.2",
-    "@azure/msal-react": "^3.0.16",
+    "@azure/msal-browser": "^5.8.0",
+    "@azure/msal-react": "^5.3.1",
     "@fluentui/react-components": "^9.73.1",
     "@fluentui/react-icons": "^2.0.319",
     "@fluentui/react-table": "^9.19.9",

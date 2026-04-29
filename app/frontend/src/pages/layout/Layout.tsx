@@ -5,6 +5,7 @@ import styles from "./Layout.module.css";
 import { useLogin } from "../../authConfig";
 
 import { LoginButton } from "../../components/LoginButton";
+import headerLogo from "../../assets/pbsg_logo.png";
 
 const Layout = () => {
     const { t } = useTranslation();
@@ -14,6 +15,7 @@ const Layout = () => {
             <header className={styles.header} role={"banner"}>
                 <div className={styles.headerContainer}>
                     <Link to="/" className={styles.headerTitleContainer}>
+                        <img src={headerLogo} alt="Pro Bono SG" className={styles.headerLogo} />
                         <h3 className={styles.headerTitle}>{t("headerTitle")}</h3>
                     </Link>
                     <div className={styles.loginMenuContainer}>{useLogin && <LoginButton />}</div>

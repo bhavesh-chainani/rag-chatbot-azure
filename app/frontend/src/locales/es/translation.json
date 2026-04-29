@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Legal Chatbot",
-    "headerTitle": "Legal Chatbot",
+    "pageTitle": "Pro Bono SG Triage",
+    "headerTitle": "Pro Bono SG Triage",
     "chat": "Chat",
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",
@@ -34,8 +34,8 @@
     },
     "developerSettings": "Configuración del desarrollador",
 
-    "chatEmptyStateTitle": "Legal Chatbot para voluntarios",
-    "chatEmptyStateSubtitle": "Introduce la situación del solicitante o prueba un ejemplo",
+    "chatEmptyStateTitle": "Pro Bono SG Triage Asistente",
+    "chatEmptyStateSubtitle": "Describa la situación del llamante y le ayudaremos con el triaje",
     "defaultExamples": {
         "1": "Solicitante: Mi empleador no me ha pagado el salario en 3 meses. ¿Qué puedo hacer?",
         "2": "El solicitante fue despedido injustamente. ¿Qué puede hacer?",

@@ -581,7 +581,7 @@ const Chat = () => {
                     <NewChatButton className={styles.commandButton} onClick={clearChat} disabled={isLoading} />
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                     {showUserUpload && <UploadFile className={styles.commandButton} disabled={!loggedIn} />}
-                    <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} />
+                    {/* <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} /> */}
                 </div>
             </div>
             <div className={styles.chatRoot} style={{ marginLeft: isHistoryPanelOpen ? "300px" : "0" }}>

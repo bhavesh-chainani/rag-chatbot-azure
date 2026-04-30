@@ -51,12 +51,12 @@ def test_golden_set_retrieval_prefix_gen3_id():
         "id": "GEN3-T01",
         "topic": "First contact",
         "category": "PBSG Hotline — General Enquiries (v3)",
-        "variations": ["New caller, what do I do?"],
+        "variations": ["New applicant, what do I do?"],
         "user_query": "How do I triage?",
     }
     prefix = golden_set_retrieval_prefix(obj)
     assert prefix.startswith("Golden Set entry GEN3-T01.")
-    assert "New caller, what do I do?" in prefix
+    assert "New applicant, what do I do?" in prefix
 
 
 @pytest.mark.asyncio

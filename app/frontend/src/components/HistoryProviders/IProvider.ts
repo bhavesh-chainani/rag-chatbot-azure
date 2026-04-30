@@ -13,6 +13,7 @@ export interface IHistoryProvider {
     getProviderName(): HistoryProviderOptions;
     resetContinuationToken(): void;
     getNextItems(count: number, idToken?: string): Promise<HistoryMetaData[]>;
+    searchItems(query: string, count: number, idToken?: string): Promise<HistoryMetaData[]>;
     addItem(id: string, answers: Answers, idToken?: string): Promise<void>;
     getItem(id: string, idToken?: string): Promise<Answers | null>;
     deleteItem(id: string, idToken?: string): Promise<void>;

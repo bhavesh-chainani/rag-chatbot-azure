@@ -2,23 +2,23 @@
   "id": "GEN3-T06",
   "category": "PBSG Hotline \u2014 General Enquiries (v3)",
   "topic": "Urgent Matter \u2014 Emergency / FSC / Concurrent Legal Pathway",
-  "user_query": "Caller appears to be in urgent distress or faces an imminent deadline. How do I respond?",
+  "user_query": "Applicant appears to be in urgent distress or faces an imminent deadline. How do I respond?",
   "variations": [
-    "Caller says they are in danger right now.",
-    "Caller has a court date this week.",
-    "Caller is about to be evicted/homeless.",
-    "Caller says they have no food or money for their family.",
-    "Caller mentioned self-harm."
+    "Applicant says they are in danger right now.",
+    "Applicant has a court date this week.",
+    "Applicant is about to be evicted/homeless.",
+    "Applicant says they have no food or money for their family.",
+    "Applicant mentioned self-harm."
   ],
-  "part_a_general_info": "Urgency in the PBSG context is BROADER than legal deadlines. It includes physical safety, basic needs, immigration status, child welfare, and mental health crises. Your response must be concurrent \u2014 emergency services + social services + legal pathway in parallel, NOT sequential. Urgency trigger list (any one qualifies): \u2022 Physical violence occurring or threatened (incl. family violence, workplace violence) \u2022 Self-harm or suicide risk (caller or someone they are calling about) \u2022 Child abduction or imminent removal of a child \u2022 Immigration pass expiring within 14 days (or already expired) \u2022 Imminent homelessness, no food, no money for basic needs \u2022 Court date or legal deadline within 14 days \u2022 Caller in police custody or detention (or their dependant is) \u2022 Medical emergency involving the caller or a dependant Key numbers to have ready: \u2022 Police emergency: 999 \u2022 Ambulance / fire: 995 \u2022 National Mindline (24-hour national mental health hotline): 1771 \u2022 National Anti-Violence and Sexual Harassment Helpline (NAVH): 1800-777-0000 \u2022 SSO (Social Service Office for financial assistance) and FSC (Family Service Centre for social assistance) directories: https://www.msf.gov.sg/our-services/directories \u2022 PBSG Urgent Legal Consultation: same-day slots at the State Courts (see GEN3-I06)",
+  "part_a_general_info": "Urgency in the PBSG context is BROADER than legal deadlines. It includes physical safety, basic needs, immigration status, child welfare, and mental health crises. Your response must be concurrent \u2014 emergency services + social services + legal pathway in parallel, NOT sequential. Urgency trigger list (any one qualifies): \u2022 Physical violence occurring or threatened (incl. family violence, workplace violence) \u2022 Self-harm or suicide risk (applicant or someone they are calling about) \u2022 Child abduction or imminent removal of a child \u2022 Immigration pass expiring within 14 days (or already expired) \u2022 Imminent homelessness, no food, no money for basic needs \u2022 Court date or legal deadline within 14 days \u2022 Applicant in police custody or detention (or their dependant is) \u2022 Medical emergency involving the applicant or a dependant Key numbers to have ready: \u2022 Police emergency: 999 \u2022 Ambulance / fire: 995 \u2022 National Mindline (24-hour national mental health hotline): 1771 \u2022 National Anti-Violence and Sexual Harassment Helpline (NAVH): 1800-777-0000 \u2022 SSO (Social Service Office for financial assistance) and FSC (Family Service Centre for social assistance) directories: https://www.msf.gov.sg/our-services/directories \u2022 PBSG Urgent Legal Consultation: same-day slots at the State Courts (see GEN3-I06)",
   "triage_questions": [
-    "Q1: Is there an immediate threat to the caller's (or someone else's) life or physical safety right now?",
+    "Q1: Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
     "Q2: Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
     "Q3: Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
-    "Q4: Does the caller still have a legal matter that needs triaging after the urgent concern is addressed?"
+    "Q4: Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?"
   ],
   "branching_logic": [
-    "Q1: Is there an immediate threat to the caller's (or someone else's) life or physical safety right now?",
+    "Q1: Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
     "If Q1 = Yes \u2192 Route A (Emergency Services \u2014 IMMEDIATE)",
     "If Q1 = Not Sure \u2192 Route A as a precaution",
     "If Q1 = No \u2192 Proceed to Q2",
@@ -30,7 +30,7 @@
     "If Q3 = Yes \u2192 Route C (Urgent Legal Consultation \u2014 Same-Day State Courts Slot)",
     "If Q3 = No \u2192 Proceed to Q4",
     "If Q3 = Not Sure \u2192 Route C AND proceed to Q4 (concurrent)",
-    "Q4: Does the caller still have a legal matter that needs triaging after the urgent concern is addressed?",
+    "Q4: Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?",
     "If Q4 = Yes \u2192 Route D (Return to GEN3-T01 for main triage)",
     "If Q4 = No \u2192 Route E (Document urgency intake and close)",
     "If Q4 = Not Sure \u2192 Route D (Return to GEN3-T01 for main triage)"
@@ -42,5 +42,5 @@
     "Route D (Return to GEN3-T01):",
     "Route E (Document and Close):"
   ],
-  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the caller; (b) apply the law to the caller's facts; (c) predict the outcome of a case; (d) tell the caller what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the caller insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect caller confidentiality. Do not discuss the caller outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
+  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

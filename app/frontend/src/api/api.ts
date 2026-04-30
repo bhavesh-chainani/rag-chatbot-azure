@@ -111,6 +111,22 @@ export async function listUploadedFilesApi(idToken: string): Promise<string[]> {
     return dataResponse;
 }
 
+export async function generateChatTitleApi(message: string, idToken: string): Promise<string> {
+    const headers = await getHeaders(idToken);
+    const response = await fetch(`${BACKEND_URI}/chat_history/title`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+    });
+
+    if (!response.ok) {
+        return message.length > 50 ? message.substring(0, 50) + "..." : message;
+    }
+
+    const dataResponse = await response.json();
+    return dataResponse.title || message.substring(0, 50);
+}
+
 export async function postChatHistoryApi(item: any, idToken: string): Promise<any> {
     const headers = await getHeaders(idToken);
     const response = await fetch("/chat_history", {
@@ -141,6 +157,24 @@ export async function getChatHistoryListApi(count: number, continuationToken: st
 
     if (!response.ok) {
         throw new Error(`Getting chat histories failed: ${response.statusText}`);
+    }
+
+    const dataResponse: HistoryListApiResponse = await response.json();
+    return dataResponse;
+}
+
+export async function searchChatHistoryListApi(query: string, count: number, idToken: string): Promise<HistoryListApiResponse> {
+    const headers = await getHeaders(idToken);
+    const encodedQuery = encodeURIComponent(query);
+    const url = `${BACKEND_URI}/chat_history/sessions/search?q=${encodedQuery}&count=${count}`;
+
+    const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { ...headers, "Content-Type": "application/json" }
+    });
+
+    if (!response.ok) {
+        throw new Error(`Searching chat histories failed: ${response.statusText}`);
     }
 
     const dataResponse: HistoryListApiResponse = await response.json();

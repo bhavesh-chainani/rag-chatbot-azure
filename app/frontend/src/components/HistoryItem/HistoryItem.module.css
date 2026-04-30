@@ -1,6 +1,6 @@
 .historyItem {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     padding: 4px 8px;
     border-radius: 6px;
@@ -22,7 +22,10 @@
 }
 
 .historyItemTitle {
-    font-size: 1rem;
+    font-size: 0.875rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25rem;
 }
 
 .deleteIcon {

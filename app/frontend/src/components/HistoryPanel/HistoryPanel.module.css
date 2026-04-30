@@ -1,3 +1,7 @@
+.searchContainer {
+    padding: 8px;
+}
+
 .group {
     margin-top: 1rem;
 }
@@ -11,4 +15,8 @@
 .footer {
     display: flex;
     justify-content: space-between;
+}
+
+.emptySearch {
+    padding: 8px;
 }

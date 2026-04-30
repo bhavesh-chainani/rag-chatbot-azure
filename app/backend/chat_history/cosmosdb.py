@@ -1,9 +1,11 @@
+import logging
 import os
 import time
 from typing import Any
 
 from azure.cosmos.aio import ContainerProxy, CosmosClient
 from azure.identity.aio import AzureDeveloperCliCredential, ManagedIdentityCredential
+from openai import AsyncOpenAI
 from quart import Blueprint, current_app, jsonify, make_response, request
 
 from config import (
@@ -12,11 +14,64 @@ from config import (
     CONFIG_COSMOS_HISTORY_CONTAINER,
     CONFIG_COSMOS_HISTORY_VERSION,
     CONFIG_CREDENTIAL,
+    CONFIG_OPENAI_CLIENT,
+    CONFIG_QUERY_ROUTER_DEPLOYMENT,
+    CONFIG_QUERY_ROUTER_MODEL,
 )
 from decorators import authenticated
 from error import error_response
 
+logger = logging.getLogger(__name__)
+
 chat_history_cosmosdb_bp = Blueprint("chat_history_cosmos", __name__, static_folder="static")
+
+TITLE_GENERATION_PROMPT = (
+    "Generate a short chat title that summarizes the message topic. "
+    "Requirements: 5-15 words, concise summary of the message topic, no quotes. "
+    "Return title text only."
+)
+
+
+async def generate_chat_title(message: str) -> str:
+    """Use the LLM to generate a short, descriptive title from the user's first message."""
+    openai_client: AsyncOpenAI = current_app.config[CONFIG_OPENAI_CLIENT]
+    model = current_app.config[CONFIG_QUERY_ROUTER_MODEL]
+    deployment = current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT)
+    try:
+        response = await openai_client.chat.completions.create(
+            model=deployment or model,
+            messages=[
+                {"role": "system", "content": TITLE_GENERATION_PROMPT},
+                {"role": "user", "content": message[:500]},
+            ],
+            max_completion_tokens=64,
+            reasoning_effort="minimal",
+        )
+        title = (response.choices[0].message.content or "").strip().strip("\"'")
+        if not title:
+            raise ValueError("OpenAI returned an empty title")
+        words = title.split()
+        if len(words) > 15:
+            title = " ".join(words[:15])
+        return title[:120]
+    except Exception as e:
+        logger.warning("Failed to generate chat title: %s", e)
+        raise
+
+
+@chat_history_cosmosdb_bp.post("/chat_history/title")
+@authenticated
+async def generate_title(auth_claims: dict[str, Any]):
+    """Generate a short summarized title for a chat message."""
+    try:
+        request_json = await request.get_json()
+        message = request_json.get("message", "")
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+        title = await generate_chat_title(message)
+        return jsonify({"title": title}), 200
+    except Exception as error:
+        return error_response(error, "/chat_history/title")
 
 
 @chat_history_cosmosdb_bp.post("/chat_history")
@@ -38,7 +93,7 @@ async def post_chat_history(auth_claims: dict[str, Any]):
         session_id = request_json.get("id")
         message_pairs = request_json.get("answers")
         first_question = message_pairs[0][0]
-        title = first_question + "..." if len(first_question) > 50 else first_question
+        title = await generate_chat_title(first_question)
         timestamp = int(time.time() * 1000)
 
         # Insert the session item:
@@ -127,6 +182,63 @@ async def get_chat_history_sessions(auth_claims: dict[str, Any]):
 
     except Exception as error:
         return error_response(error, "/chat_history/sessions")
+
+
+@chat_history_cosmosdb_bp.get("/chat_history/sessions/search")
+@authenticated
+async def search_chat_history_sessions(auth_claims: dict[str, Any]):
+    if not current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED]:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    container: ContainerProxy = current_app.config[CONFIG_COSMOS_HISTORY_CONTAINER]
+    if not container:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    entra_oid = auth_claims.get("oid")
+    if not entra_oid:
+        return jsonify({"error": "User OID not found"}), 401
+
+    try:
+        query_text = (request.args.get("q") or "").strip().lower()
+        if not query_text:
+            return jsonify({"sessions": []}), 200
+
+        count = int(request.args.get("count", 200))
+        count = max(1, min(count, 500))
+        escaped_query = query_text.replace("'", "''")
+
+        res = container.query_items(
+            query=(
+                "SELECT TOP @count c.id, c.entra_oid, c.title, c.timestamp "
+                "FROM c "
+                "WHERE c.entra_oid = @entra_oid "
+                "AND c.type = @type "
+                f"AND CONTAINS(LOWER(c.title), '{escaped_query}') "
+                "ORDER BY c.timestamp DESC"
+            ),
+            parameters=[
+                dict(name="@count", value=count),
+                dict(name="@entra_oid", value=entra_oid),
+                dict(name="@type", value="session"),
+            ],
+            partition_key=[entra_oid],
+        )
+
+        sessions = []
+        async for page in res.by_page():
+            async for item in page:
+                sessions.append(
+                    {
+                        "id": item.get("id"),
+                        "entra_oid": item.get("entra_oid"),
+                        "title": item.get("title", "untitled"),
+                        "timestamp": item.get("timestamp"),
+                    }
+                )
+
+        return jsonify({"sessions": sessions}), 200
+    except Exception as error:
+        return error_response(error, "/chat_history/sessions/search")
 
 
 @chat_history_cosmosdb_bp.get("/chat_history/sessions/<session_id>")

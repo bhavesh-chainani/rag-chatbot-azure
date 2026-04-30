@@ -38,9 +38,9 @@
     "If unclear/uncertain \u2192 Route A (Escalate to PBSG Staff for professional assessment)."
   ],
   "routing": [
-    "Route A (High-Vulnerability \u2014 Escalate + Community Law Centre):",
-    "Route B (Minor \u2014 Special Handling):",
-    "Route C (Low-Vulnerability \u2014 Standard Triage with Adaptations):"
+    "Route A (High-Vulnerability \u2014 Escalate + Community Law Centre): Take down full intake particulars + vulnerability factors noted. Escalate to PBSG Staff for further assessment and active follow-up. If applicant is able to communicate their issue, proceed with standard triage (GEN3-T01) but note that routes may be adjusted by staff.",
+    "Route B (Minor \u2014 Special Handling): Do NOT continue the triage independently. Escalate immediately to PBSG Staff. Do not ask the minor for sensitive disclosures beyond what they have volunteered. If the minor indicates any immediate safety concern, follow GEN3-T06 Route A.",
+    "Route C (Low-Vulnerability \u2014 Standard Triage with Adaptations): Continue with GEN3-T01, but: (a) slow your pace; (b) repeat scheme names and URLs; (c) offer to email a summary after the call; (d) do not rush the applicant. Flag the call in the intake note with the cue observed, for staff awareness."
   ],
   "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

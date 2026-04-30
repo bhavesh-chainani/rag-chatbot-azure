@@ -36,6 +36,26 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def replace_caller_with_applicant(entry: dict) -> dict:
+    """Replace 'caller' with 'applicant' in all string fields (preserving case)."""
+
+    def replace_text(text: str) -> str:
+        text = text.replace("Caller", "Applicant")
+        text = text.replace("caller", "applicant")
+        text = text.replace("CALLER", "APPLICANT")
+        return text
+
+    result = {}
+    for key, value in entry.items():
+        if isinstance(value, str):
+            result[key] = replace_text(value)
+        elif isinstance(value, list):
+            result[key] = [replace_text(item) if isinstance(item, str) else item for item in value]
+        else:
+            result[key] = value
+    return result
+
+
 def extract_between(text: str, start_marker: str, end_markers: list[str]) -> str:
     try:
         start = text.index(start_marker) + len(start_marker)
@@ -70,6 +90,34 @@ def extract_list_items(section_text: str, prefixes: tuple[str, ...]) -> list[str
                 cleaned = line[1:].strip()
             items.append(normalize_whitespace(cleaned).strip('"'))
     return items
+
+
+def extract_gen3_routing(section_text: str) -> list[str]:
+    """Extract full route descriptions (header + body) from Part C routing section.
+
+    Each route starts with a 'Route <letter>' header and includes all following
+    lines until the next route header or end of section.
+    """
+    route_header_re = re.compile(r"^Route\s+[A-Z]", re.MULTILINE)
+    matches = list(route_header_re.finditer(section_text))
+    if not matches:
+        return extract_list_items(section_text, ("Route",))
+
+    routes: list[str] = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(section_text)
+        block = section_text[start:end].strip()
+        lines: list[str] = []
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith(("•", "◦")):
+                line = line[1:].strip()
+            lines.append(line)
+        routes.append(normalize_whitespace(" ".join(lines)))
+    return routes
 
 
 def parse_entry(entry_id: str, topic: str, body: str) -> dict:
@@ -187,12 +235,12 @@ def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
         "Part C — Routing Recommendation",
         ["Guardrails", "LPA Guardrail"],
     )
-    routing = extract_list_items(routing_section, ("Route",))
+    routing = extract_gen3_routing(routing_section)
     guardrail = normalize_whitespace(
         extract_between(body, "Guardrails", ["\n\n", "\n\f", "\f"])
     )
 
-    return {
+    entry = {
         "id": entry_id,
         "category": "PBSG Hotline — General Enquiries (v3)",
         "topic": topic.strip(),
@@ -204,6 +252,7 @@ def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
         "routing": routing,
         "guardrail": guardrail,
     }
+    return replace_caller_with_applicant(entry)
 
 
 def docx_to_text(docx_path: Path) -> str:

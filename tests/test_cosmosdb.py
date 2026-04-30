@@ -139,7 +139,7 @@ async def test_chathistory_generate_title(auth_public_documents_client):
     response = await auth_public_documents_client.post(
         "/chat_history/title",
         headers={"Authorization": "Bearer MockToken"},
-        json={"message": "Caller has mentioned that she's facing a divorce and her husband is taking the kids away"},
+        json={"message": "Applicant has mentioned that she's facing a divorce and her husband is taking the kids away"},
     )
     assert response.status_code == 200
     data = await response.get_json()

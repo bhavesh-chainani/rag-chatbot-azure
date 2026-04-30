@@ -220,15 +220,15 @@ GUARDRAILS_SECTION_RE = re.compile(
     re.IGNORECASE,
 )
 DISALLOWED_LEGAL_ADVICE_PATTERNS = (
-    re.compile(r"\b(?:you|the caller)\s+should\s+(?:sue|file|plead|admit|accept|reject|sign)\b", re.IGNORECASE),
-    re.compile(r"\b(?:you|the caller)\s+will\s+(?:win|lose)\b", re.IGNORECASE),
+    re.compile(r"\b(?:you|the applicant)\s+should\s+(?:sue|file|plead|admit|accept|reject|sign)\b", re.IGNORECASE),
+    re.compile(r"\b(?:you|the applicant)\s+will\s+(?:win|lose)\b", re.IGNORECASE),
     re.compile(r"\b(?:high|strong)\s+chance\s+of\s+(?:winning|success)\b", re.IGNORECASE),
     re.compile(r"\bI\s+interpret\s+(?:this|your)\s+(?:document|contract|agreement)\b", re.IGNORECASE),
     re.compile(r"\bthis\s+clause\s+means\b", re.IGNORECASE),
 )
 GUARDRAIL_REPLACEMENT_MESSAGE = (
     "I can help with intake triage and routing based on the knowledge base, but I cannot provide legal advice on what the "
-    "caller should do legally, interpret legal documents, or predict case outcomes. Please share the applicant's facts and I "
+    "applicant should do legally, interpret legal documents, or predict case outcomes. Please share the applicant's facts and I "
     "will continue with the next required triage question or route."
 )
 

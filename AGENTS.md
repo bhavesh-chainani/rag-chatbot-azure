@@ -74,9 +74,9 @@ The router uses the same OpenAI chat model as the main app with a single short c
 
 ## Triage approach (auto-extract)
 
-The system prompt in `chat_answer.system.jinja2` implements an **auto-extract triage flow** designed for interns with zero legal knowledge who have a caller sitting right in front of them. The key innovation over a simple sequential Q&A is:
+The system prompt in `chat_answer.system.jinja2` implements an **auto-extract triage flow** designed for interns with zero legal knowledge who have a applicant sitting right in front of them. The key innovation over a simple sequential Q&A is:
 
-1. **Topic match**: The intern types a paragraph describing the caller's situation. The RAG pipeline retrieves Golden Set entries, and the LLM matches the best entry.
+1. **Topic match**: The intern types a paragraph describing the applicant's situation. The RAG pipeline retrieves Golden Set entries, and the LLM matches the best entry.
 2. **Auto-extract**: The LLM reads the intern's paragraph and checks every Part B triage question from the matched entry. Questions whose answers are already present in the paragraph (explicitly or by clear implication) are marked as answered.
 3. **Smart routing**: The LLM follows the `branching_logic` with all extracted answers to determine how far down the decision tree it can get:
    - **All needed questions answered** → routes immediately (OUTPUT A) with a script the intern reads aloud
@@ -84,12 +84,12 @@ The system prompt in `chat_answer.system.jinja2` implements an **auto-extract tr
    - **Nothing extractable** → brief Part A briefing + first question (OUTPUT C)
    - **No matching entry** → Unclear handling (OUTPUT D)
 4. **Follow-up turns**: As the intern provides answers, the system updates its map and either asks the next required question or gives the final routing recommendation.
-5. **Multi-topic handling**: When a caller's situation spans multiple legal areas (e.g. criminal charge AND divorce), the system identifies all matching entries, prioritizes them, and handles each sequentially. After completing routing for the first topic (OUTPUT A), it transitions automatically to the next topic, re-using any facts already gathered so it never re-asks known answers.
+5. **Multi-topic handling**: When a applicant's situation spans multiple legal areas (e.g. criminal charge AND divorce), the system identifies all matching entries, prioritizes them, and handles each sequentially. After completing routing for the first topic (OUTPUT A), it transitions automatically to the next topic, re-using any facts already gathered so it never re-asks known answers.
 
 Design principles:
-- Every response must be **scannable in under 15 seconds** (caller is right there)
-- Questions are phrased as **scripts the intern reads verbatim** to the caller
-- Routing recommendations include **exact words to say** to the caller
+- Every response must be **scannable in under 15 seconds** (applicant is right there)
+- Questions are phrased as **scripts the intern reads verbatim** to the applicant
+- Routing recommendations include **exact words to say** to the applicant
 - Never asks a question whose answer is already known
 - Stops asking questions the moment branching logic allows a valid route
 - When multiple topics are detected, handles higher-priority topics first (capital offences > urgent matters > criminal > matrimonial > civil > other)

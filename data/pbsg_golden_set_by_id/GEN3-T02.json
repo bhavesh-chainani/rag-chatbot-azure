@@ -2,22 +2,22 @@
   "id": "GEN3-T02",
   "category": "PBSG Hotline \u2014 General Enquiries (v3)",
   "topic": "Criminal Stream Triage \u2014 CLAS Eligibility",
-  "user_query": "Caller has a criminal matter (arrest, charge, police investigation). How do I triage this?",
+  "user_query": "Applicant has a criminal matter (arrest, charge, police investigation). How do I triage this?",
   "variations": [
-    "Caller has been charged in State Courts.",
-    "Caller is under police investigation.",
-    "Caller needs criminal representation.",
-    "Caller is a foreigner facing a criminal charge."
+    "Applicant has been charged in State Courts.",
+    "Applicant is under police investigation.",
+    "Applicant needs criminal representation.",
+    "Applicant is a foreigner facing a criminal charge."
   ],
-  "part_a_general_info": "This entry runs after the caller has been routed here from GEN3-T01 Route G. The Criminal Stream is governed primarily by the Criminal Legal Aid Scheme (CLAS), administered by Pro Bono SG. CLAS eligibility: \u2022 Caller is a foreigner. \u2022 Caller is charged with a non-capital offence (i.e., NOT punishable with death). Capital cases (e.g., murder, drug trafficking above statutory thresholds) will qualify for LASCO (Legal Assistance Scheme for Capital Offences), which is a separate scheme. Caller must already have been charged in court. \u2022 Offence is one that CLAS covers (https://www.probono.sg/get-legal-help/legal-representation/). If unsure \u2192 escalate. \u2022 Caller meets means test (https://www.probono.sg/get-legal-help/legal-representation/), financial documents will need to be submitted upon application. \u2022 Caller passes merits test (legal assessment on whether the case warrants representation, this will be done after application is submitted, intern/volunteer taking triaging call is NOT to reject based on their own assessment, no matter how unmeritorious the case appears to be). Singapore Citizens / PRs should be advised to apply to the Public Defender\u2019s Office (PDO) FIRST for criminal legal aid. Only if PDO is unable to assist, does PBSG become the primary route for SGC/PR. PBSG may be able to provide legal guidance and assess suitability for any further assistance, such as representation, on an exceptional basis. Foreigners are not eligible for PDO; CLAS is their first port of call.",
+  "part_a_general_info": "This entry runs after the applicant has been routed here from GEN3-T01 Route G. The Criminal Stream is governed primarily by the Criminal Legal Aid Scheme (CLAS), administered by Pro Bono SG. CLAS eligibility: \u2022 Applicant is a foreigner. \u2022 Applicant is charged with a non-capital offence (i.e., NOT punishable with death). Capital cases (e.g., murder, drug trafficking above statutory thresholds) will qualify for LASCO (Legal Assistance Scheme for Capital Offences), which is a separate scheme. Applicant must already have been charged in court. \u2022 Offence is one that CLAS covers (https://www.probono.sg/get-legal-help/legal-representation/). If unsure \u2192 escalate. \u2022 Applicant meets means test (https://www.probono.sg/get-legal-help/legal-representation/), financial documents will need to be submitted upon application. \u2022 Applicant passes merits test (legal assessment on whether the case warrants representation, this will be done after application is submitted, intern/volunteer taking triaging call is NOT to reject based on their own assessment, no matter how unmeritorious the case appears to be). Singapore Citizens / PRs should be advised to apply to the Public Defender\u2019s Office (PDO) FIRST for criminal legal aid. Only if PDO is unable to assist, does PBSG become the primary route for SGC/PR. PBSG may be able to provide legal guidance and assess suitability for any further assistance, such as representation, on an exceptional basis. Foreigners are not eligible for PDO; CLAS is their first port of call.",
   "triage_questions": [
     "Q1: Is the offence a capital offence (punishable with death)?",
     "Q2: Is there a court date/deadline within 14 days?",
-    "Q3: Has the caller been charged in court?",
-    "Q4: Is the caller a Singapore Citizen or PR?",
-    "Q5 (SGC/PR path): Has the caller applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
+    "Q3: Has the applicant been charged in court?",
+    "Q4: Is the applicant a Singapore Citizen or PR?",
+    "Q5 (SGC/PR path): Has the applicant applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
     "Q5A (if Q5 = Yes): What is the PDO status \u2014 processing/accepted, unable to assist, or unknown?",
-    "Q6 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$1,650, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
+    "Q6 (Means): Is the applicant's Per Capita Household Income (PCHI) \u2264 S$1,650, does the applicant have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
   ],
   "branching_logic": [
     "Q1: Is the offence a capital offence (punishable with death)?",
@@ -28,15 +28,15 @@
     "If Q2 = Yes \u2192 Route D (CLAS + Urgent concurrent \u2014 cross-reference GEN3-T06)",
     "If Q2 = No \u2192 Proceed to Q3",
     "If Q2 = Not Sure \u2192 Route D as precaution.",
-    "Q3: Has the caller been charged in court?",
+    "Q3: Has the applicant been charged in court?",
     "If Q3 = Yes \u2192 Proceed to Q4",
     "If Q3 = Not Sure \u2192 Route F (Escalate to PBSG Staff)",
     "If Q3 = No \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
-    "Q4: Is the caller a Singapore Citizen or PR?",
+    "Q4: Is the applicant a Singapore Citizen or PR?",
     "If Q4 = Yes \u2192 Proceed to Q5",
     "If Q4 = No (foreigner) \u2192 Proceed to Q6",
     "If Q4 = Not Sure \u2192 Clarify nationality/residency status; if still unclear, Route F (Escalate to PBSG Staff).",
-    "Q5 (SGC/PR path): Has the caller applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
+    "Q5 (SGC/PR path): Has the applicant applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
     "If Q5 = No / has not applied \u2192 Route B (Refer to PDO First)",
     "If Q5 = Yes \u2192 Ask Q5A before routing.",
     "Q5A (if Q5 = Yes): What is the PDO status \u2014 processing/accepted, unable to assist, or unknown?",
@@ -44,8 +44,8 @@
     "If Q5A = PDO unable to assist \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
     "If Q5A = Unknown / unclear \u2192 Route B and describe PDO.",
     "If Q5 = Not Sure \u2192 Route B and describe PDO.",
-    "Q6 (Means): Is the caller's Per Capita Household Income (PCHI) \u2264 S$1,650, does the caller have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the caller stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
-    "(PCHI = total monthly household income \u00f7 number of persons in household, including the caller and all dependants.)",
+    "Q6 (Means): Is the applicant's Per Capita Household Income (PCHI) \u2264 S$1,650, does the applicant have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
+    "(PCHI = total monthly household income \u00f7 number of persons in household, including the applicant and all dependants.)",
     "If Q6 = Yes \u2192 Route E (CLAS \u2014 Standard Intake)",
     "If Q6 = No \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
     "If Q6 = Not Sure \u2192 Walk through PCHI calculation live; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff)."
@@ -58,5 +58,5 @@
     "Route E (CLAS \u2014 Standard Intake):",
     "Route F (Escalate to PBSG Staff):"
   ],
-  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the caller; (b) apply the law to the caller's facts; (c) predict the outcome of a case; (d) tell the caller what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the caller insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect caller confidentiality. Do not discuss the caller outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
+  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

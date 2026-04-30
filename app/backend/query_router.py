@@ -51,7 +51,7 @@ OBVIOUS_IN_SCOPE_TERMS = frozenset(
         "legal",
         "lawyer",
         "applicant",
-        "caller",
+        "applicant",
         "triage",
         "representation",
         "criminal",

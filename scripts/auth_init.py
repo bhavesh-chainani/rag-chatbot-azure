@@ -71,6 +71,20 @@ async def create_or_update_application_with_secret(
 
     if object_id:
         print("Application already exists, not creating new one")
+        existing_app = await graph_client.applications.by_application_id(object_id).get()
+
+        if existing_app and request_app.web and request_app.web.redirect_uris:
+            existing_web_redirects = []
+            if existing_app.web and existing_app.web.redirect_uris:
+                existing_web_redirects = existing_app.web.redirect_uris
+            request_app.web.redirect_uris = sorted(set(request_app.web.redirect_uris + existing_web_redirects))
+
+        if existing_app and request_app.spa and request_app.spa.redirect_uris:
+            existing_spa_redirects = []
+            if existing_app.spa and existing_app.spa.redirect_uris:
+                existing_spa_redirects = existing_app.spa.redirect_uris
+            request_app.spa.redirect_uris = sorted(set(request_app.spa.redirect_uris + existing_spa_redirects))
+
         await graph_client.applications.by_application_id(object_id).patch(request_app)
     else:
         print("Creating application registration")

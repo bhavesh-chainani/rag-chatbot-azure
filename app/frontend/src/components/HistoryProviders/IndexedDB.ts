@@ -75,6 +75,24 @@ export class IndexedDBProvider implements IHistoryProvider {
         return loadedItems;
     }
 
+    async searchItems(query: string, count: number): Promise<HistoryMetaData[]> {
+        const db = await this.init();
+        const tx = db.transaction(this.storeName, "readonly");
+        const store = tx.objectStore(this.storeName);
+        const allItems = await store.getAll();
+        const normalizedQuery = query.trim().toLowerCase();
+
+        if (!normalizedQuery) {
+            return [];
+        }
+
+        return allItems
+            .filter(item => typeof item.title === "string" && item.title.toLowerCase().includes(normalizedQuery))
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, count)
+            .map(item => ({ id: item.id, title: item.title, timestamp: item.timestamp }));
+    }
+
     async addItem(id: string, answers: Answers, idToken?: string): Promise<void> {
         const timestamp = new Date().getTime();
         const db = await this.init();

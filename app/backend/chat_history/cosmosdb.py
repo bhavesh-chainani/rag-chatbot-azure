@@ -184,6 +184,63 @@ async def get_chat_history_sessions(auth_claims: dict[str, Any]):
         return error_response(error, "/chat_history/sessions")
 
 
+@chat_history_cosmosdb_bp.get("/chat_history/sessions/search")
+@authenticated
+async def search_chat_history_sessions(auth_claims: dict[str, Any]):
+    if not current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED]:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    container: ContainerProxy = current_app.config[CONFIG_COSMOS_HISTORY_CONTAINER]
+    if not container:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    entra_oid = auth_claims.get("oid")
+    if not entra_oid:
+        return jsonify({"error": "User OID not found"}), 401
+
+    try:
+        query_text = (request.args.get("q") or "").strip().lower()
+        if not query_text:
+            return jsonify({"sessions": []}), 200
+
+        count = int(request.args.get("count", 200))
+        count = max(1, min(count, 500))
+        escaped_query = query_text.replace("'", "''")
+
+        res = container.query_items(
+            query=(
+                "SELECT TOP @count c.id, c.entra_oid, c.title, c.timestamp "
+                "FROM c "
+                "WHERE c.entra_oid = @entra_oid "
+                "AND c.type = @type "
+                f"AND CONTAINS(LOWER(c.title), '{escaped_query}') "
+                "ORDER BY c.timestamp DESC"
+            ),
+            parameters=[
+                dict(name="@count", value=count),
+                dict(name="@entra_oid", value=entra_oid),
+                dict(name="@type", value="session"),
+            ],
+            partition_key=[entra_oid],
+        )
+
+        sessions = []
+        async for page in res.by_page():
+            async for item in page:
+                sessions.append(
+                    {
+                        "id": item.get("id"),
+                        "entra_oid": item.get("entra_oid"),
+                        "title": item.get("title", "untitled"),
+                        "timestamp": item.get("timestamp"),
+                    }
+                )
+
+        return jsonify({"sessions": sessions}), 200
+    except Exception as error:
+        return error_response(error, "/chat_history/sessions/search")
+
+
 @chat_history_cosmosdb_bp.get("/chat_history/sessions/<session_id>")
 @authenticated
 async def get_chat_history_session(auth_claims: dict[str, Any], session_id: str):

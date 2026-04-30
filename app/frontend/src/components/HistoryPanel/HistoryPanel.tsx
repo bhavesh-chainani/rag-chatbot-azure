@@ -1,6 +1,6 @@
 import { useMsal } from "@azure/msal-react";
 import { getToken, useLogin } from "../../authConfig";
-import { OverlayDrawer, DrawerHeader, DrawerHeaderTitle, DrawerBody, Spinner, Button } from "@fluentui/react-components";
+import { OverlayDrawer, DrawerHeader, DrawerHeaderTitle, DrawerBody, Spinner, Button, Input } from "@fluentui/react-components";
 import { Dismiss24Regular } from "@fluentui/react-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HistoryData, HistoryItem } from "../HistoryItem";
@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import styles from "./HistoryPanel.module.css";
 
 const HISTORY_COUNT_PER_LOAD = 20;
+const HISTORY_SEARCH_COUNT = 200;
 
 export const HistoryPanel = ({
     provider,
@@ -28,6 +29,8 @@ export const HistoryPanel = ({
     const [history, setHistory] = useState<HistoryMetaData[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [hasMoreHistory, setHasMoreHistory] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const isLoadingRef = useRef(false);
 
     const client = useLogin ? useMsal().instance : undefined;
 
@@ -41,14 +44,22 @@ export const HistoryPanel = ({
     }, [isOpen, notify]);
 
     const loadMoreHistory = async () => {
-        setIsLoading(() => true);
-        const token = client ? await getToken(client) : undefined;
-        const items = await historyManager.getNextItems(HISTORY_COUNT_PER_LOAD, token);
-        if (items.length === 0) {
-            setHasMoreHistory(false);
+        if (isLoadingRef.current) {
+            return;
         }
-        setHistory(prevHistory => [...prevHistory, ...items]);
-        setIsLoading(() => false);
+        isLoadingRef.current = true;
+        setIsLoading(() => true);
+        try {
+            const token = client ? await getToken(client) : undefined;
+            const items = await historyManager.getNextItems(HISTORY_COUNT_PER_LOAD, token);
+            if (items.length === 0) {
+                setHasMoreHistory(false);
+            }
+            setHistory(prevHistory => [...prevHistory, ...items]);
+        } finally {
+            isLoadingRef.current = false;
+            setIsLoading(() => false);
+        }
     };
 
     const handleSelect = async (id: string) => {
@@ -65,12 +76,51 @@ export const HistoryPanel = ({
         setHistory(prevHistory => prevHistory.filter(item => item.id !== id));
     };
 
-    const groupedHistory = useMemo(() => groupHistory(history), [history]);
+    const filteredHistory = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase();
+        if (!query) {
+            return history;
+        }
+        return history;
+    }, [history, searchQuery]);
+
+    const groupedHistory = useMemo(() => groupHistory(filteredHistory), [filteredHistory]);
+    const isSearching = searchQuery.trim().length > 0;
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const query = searchQuery.trim();
+        if (!query) return;
+
+        const timeoutId = setTimeout(async () => {
+            setIsLoading(true);
+            try {
+                const token = client ? await getToken(client) : undefined;
+                const items = await historyManager.searchItems(query, HISTORY_SEARCH_COUNT, token);
+                setHistory(items);
+                setHasMoreHistory(false);
+            } finally {
+                setIsLoading(false);
+            }
+        }, 250);
+
+        return () => clearTimeout(timeoutId);
+    }, [searchQuery, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (searchQuery.trim()) return;
+        if (history.length > 0) return;
+        if (isLoadingRef.current) return;
+        void loadMoreHistory();
+    }, [isOpen, searchQuery, history.length]);
 
     const { t } = useTranslation();
 
     const handleClose = () => {
         setHistory([]);
+        setSearchQuery("");
         setHasMoreHistory(true);
         historyManager.resetContinuationToken();
         onClose();
@@ -96,6 +146,14 @@ export const HistoryPanel = ({
                 </DrawerHeaderTitle>
             </DrawerHeader>
             <DrawerBody style={{ padding: "0px" }}>
+                <div className={styles.searchContainer}>
+                    <Input
+                        value={searchQuery}
+                        onChange={(_e, data) => setSearchQuery(data.value)}
+                        placeholder={t("history.searchPlaceholder")}
+                        aria-label={t("history.searchPlaceholder")}
+                    />
+                </div>
                 {Object.entries(groupedHistory).map(([group, items]) => (
                     <div key={group} className={styles.group}>
                         <p className={styles.groupLabel}>{t(group)}</p>
@@ -106,7 +164,8 @@ export const HistoryPanel = ({
                 ))}
                 {isLoading && <Spinner style={{ marginTop: "10px" }} />}
                 {history.length === 0 && !isLoading && <p>{t("history.noHistory")}</p>}
-                {hasMoreHistory && !isLoading && <InfiniteLoadingButton func={loadMoreHistory} />}
+                {history.length > 0 && filteredHistory.length === 0 && !isLoading && <p className={styles.emptySearch}>No matching chats</p>}
+                {hasMoreHistory && !isLoading && !isSearching && <InfiniteLoadingButton func={loadMoreHistory} />}
             </DrawerBody>
         </OverlayDrawer>
     );

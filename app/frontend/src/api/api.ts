@@ -163,6 +163,24 @@ export async function getChatHistoryListApi(count: number, continuationToken: st
     return dataResponse;
 }
 
+export async function searchChatHistoryListApi(query: string, count: number, idToken: string): Promise<HistoryListApiResponse> {
+    const headers = await getHeaders(idToken);
+    const encodedQuery = encodeURIComponent(query);
+    const url = `${BACKEND_URI}/chat_history/sessions/search?q=${encodedQuery}&count=${count}`;
+
+    const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { ...headers, "Content-Type": "application/json" }
+    });
+
+    if (!response.ok) {
+        throw new Error(`Searching chat histories failed: ${response.statusText}`);
+    }
+
+    const dataResponse: HistoryListApiResponse = await response.json();
+    return dataResponse;
+}
+
 export async function getChatHistoryApi(id: string, idToken: string): Promise<HistoryApiResponse> {
     const headers = await getHeaders(idToken);
     const response = await fetch(`/chat_history/sessions/${id}`, {

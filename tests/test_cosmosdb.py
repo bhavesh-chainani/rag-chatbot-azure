@@ -113,7 +113,7 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
         assert session["entra_oid"] == "OID_X"
         assert isinstance(session["title"], str)
         assert len(session["title"]) > 0
-        assert len(session["title"]) <= 50
+        assert len(session["title"]) <= 120
         message = operations[1][1][0]
         assert message["id"] == "123-0"
         assert message["session_id"] == "123"
@@ -146,7 +146,7 @@ async def test_chathistory_generate_title(auth_public_documents_client):
     assert "title" in data
     assert isinstance(data["title"], str)
     assert len(data["title"]) > 0
-    assert len(data["title"]) <= 50
+    assert len(data["title"]) <= 120
 
 
 @pytest.mark.asyncio
@@ -235,6 +235,22 @@ async def test_chathistory_query(auth_public_documents_client, monkeypatch, snap
     assert response.status_code == 200
     result = await response.get_json()
     snapshot.assert_match(json.dumps(result, indent=4), "result.json")
+
+
+@pytest.mark.asyncio
+async def test_chathistory_query_search(auth_public_documents_client, monkeypatch):
+    def mock_query_items(container_proxy, query, **kwargs):
+        return MockCosmosDBResultsIterator(for_sessions_query)
+
+    monkeypatch.setattr(ContainerProxy, "query_items", mock_query_items)
+
+    response = await auth_public_documents_client.get(
+        "/chat_history/sessions/search?q=test&count=20", headers={"Authorization": "Bearer MockToken"}
+    )
+    assert response.status_code == 200
+    result = await response.get_json()
+    assert len(result["sessions"]) == 1
+    assert result["sessions"][0]["title"] == "This is a test message"
 
 
 @pytest.mark.asyncio

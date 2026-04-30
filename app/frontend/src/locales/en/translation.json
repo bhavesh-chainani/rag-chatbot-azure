@@ -10,6 +10,7 @@
         "chatHistory": "Chat history",
         "openChatHistory": "Open chat history",
         "noHistory": "No chat history",
+        "searchPlaceholder": "Search past chats",
         "deleteModalTitle": "Delete chat history",
         "deleteModalDescription": "This action cannot be undone. Delete this chat history?",
         "deleteLabel": "Delete",

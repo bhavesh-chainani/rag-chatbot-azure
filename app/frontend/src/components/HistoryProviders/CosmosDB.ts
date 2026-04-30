@@ -1,5 +1,5 @@
 import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData } from "./IProvider";
-import { deleteChatHistoryApi, getChatHistoryApi, getChatHistoryListApi, postChatHistoryApi } from "../../api";
+import { deleteChatHistoryApi, getChatHistoryApi, getChatHistoryListApi, postChatHistoryApi, searchChatHistoryListApi } from "../../api";
 
 export class CosmosDBProvider implements IHistoryProvider {
     getProviderName = () => HistoryProviderOptions.CosmosDB;
@@ -23,6 +23,20 @@ export class CosmosDBProvider implements IHistoryProvider {
             if (!this.continuationToken) {
                 this.isItemEnd = true;
             }
+            return response.sessions.map(session => ({
+                id: session.id,
+                title: session.title,
+                timestamp: session.timestamp
+            }));
+        } catch (e) {
+            console.error(e);
+            return [];
+        }
+    }
+
+    async searchItems(query: string, count: number, idToken?: string): Promise<HistoryMetaData[]> {
+        try {
+            const response = await searchChatHistoryListApi(query, count, idToken || "");
             return response.sessions.map(session => ({
                 id: session.id,
                 title: session.title,

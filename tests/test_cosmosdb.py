@@ -111,7 +111,9 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
         assert session["id"] == "123"
         assert session["session_id"] == "123"
         assert session["entra_oid"] == "OID_X"
-        assert session["title"] == "This is a test message"
+        assert isinstance(session["title"], str)
+        assert len(session["title"]) > 0
+        assert len(session["title"]) <= 50
         message = operations[1][1][0]
         assert message["id"] == "123-0"
         assert message["session_id"] == "123"
@@ -130,6 +132,31 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
         },
     )
     assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_chathistory_generate_title(auth_public_documents_client):
+    response = await auth_public_documents_client.post(
+        "/chat_history/title",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"message": "Caller has mentioned that she's facing a divorce and her husband is taking the kids away"},
+    )
+    assert response.status_code == 200
+    data = await response.get_json()
+    assert "title" in data
+    assert isinstance(data["title"], str)
+    assert len(data["title"]) > 0
+    assert len(data["title"]) <= 50
+
+
+@pytest.mark.asyncio
+async def test_chathistory_generate_title_empty_message(auth_public_documents_client):
+    response = await auth_public_documents_client.post(
+        "/chat_history/title",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"message": ""},
+    )
+    assert response.status_code == 400
 
 
 @pytest.mark.asyncio

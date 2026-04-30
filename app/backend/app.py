@@ -128,11 +128,9 @@ async def index():
     return await bp.send_static_file("index.html")
 
 
-# Empty page is recommended for login redirect to work.
-# See https://github.com/AzureAD/microsoft-authentication-library-for-js/blob/dev/lib/msal-browser/docs/initialization.md#redirecturi-considerations for more information
 @bp.route("/redirect")
 async def redirect():
-    return ""
+    return await bp.send_static_file("redirect.html")
 
 
 @bp.route("/legalchat.ico")

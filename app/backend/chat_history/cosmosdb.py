@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 chat_history_cosmosdb_bp = Blueprint("chat_history_cosmos", __name__, static_folder="static")
 
 TITLE_GENERATION_PROMPT = (
-    "Generate a very short title (maximum 6 words) that summarizes the topic of the following message. "
-    "The title should be a concise phrase like a chat subject line. "
-    "Do NOT use quotes around the title. Just return the title text, nothing else."
+    "Generate a short chat title that summarizes the message topic. "
+    "Requirements: 5-15 words, concise summary of the message topic, no quotes. "
+    "Return title text only."
 )
 
 
@@ -37,7 +37,6 @@ async def generate_chat_title(message: str) -> str:
     openai_client: AsyncOpenAI = current_app.config[CONFIG_OPENAI_CLIENT]
     model = current_app.config[CONFIG_QUERY_ROUTER_MODEL]
     deployment = current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT)
-
     try:
         response = await openai_client.chat.completions.create(
             model=deployment or model,
@@ -45,16 +44,19 @@ async def generate_chat_title(message: str) -> str:
                 {"role": "system", "content": TITLE_GENERATION_PROMPT},
                 {"role": "user", "content": message[:500]},
             ],
-            max_tokens=20,
-            temperature=0.5,
+            max_completion_tokens=64,
+            reasoning_effort="minimal",
         )
-        title = (response.choices[0].message.content or "").strip().strip('"\'')
-        if title:
-            return title[:50]
+        title = (response.choices[0].message.content or "").strip().strip("\"'")
+        if not title:
+            raise ValueError("OpenAI returned an empty title")
+        words = title.split()
+        if len(words) > 15:
+            title = " ".join(words[:15])
+        return title[:120]
     except Exception as e:
         logger.warning("Failed to generate chat title: %s", e)
-
-    return message[:50] + ("..." if len(message) > 50 else "")
+        raise
 
 
 @chat_history_cosmosdb_bp.post("/chat_history/title")

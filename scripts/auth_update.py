@@ -30,20 +30,38 @@ async def main():
         client_object_id = await get_application(graph_client, client_app_id)
         if client_object_id:
             print(f"Updating redirect URIs for client app ID {client_app_id}...")
-            # Redirect URIs need to be relative to the deployed application
+            existing_app = await graph_client.applications.by_application_id(client_object_id).get()
+
+            existing_spa_redirects = []
+            if existing_app and existing_app.spa and existing_app.spa.redirect_uris:
+                existing_spa_redirects = existing_app.spa.redirect_uris
+
+            existing_web_redirects = []
+            if existing_app and existing_app.web and existing_app.web.redirect_uris:
+                existing_web_redirects = existing_app.web.redirect_uris
+
+            # Redirect URIs need to be relative to the deployed application.
+            # Preserve manually-added values (e.g. custom domains) to avoid
+            # deleting them on each `azd up`.
+            default_spa_redirects = [
+                "http://localhost:50505/redirect",
+                "http://localhost:5173/redirect",
+                f"{uri}/redirect",
+            ]
+            default_web_redirects = [
+                f"{uri}/.auth/login/aad/callback",
+            ]
+
+            merged_spa_redirects = sorted(set(default_spa_redirects + existing_spa_redirects))
+            merged_web_redirects = sorted(set(default_web_redirects + existing_web_redirects))
+
             app = Application(
                 public_client=PublicClientApplication(redirect_uris=[]),
                 spa=SpaApplication(
-                    redirect_uris=[
-                        "http://localhost:50505/redirect",
-                        "http://localhost:5173/redirect",
-                        f"{uri}/redirect",
-                    ]
+                    redirect_uris=merged_spa_redirects
                 ),
                 web=WebApplication(
-                    redirect_uris=[
-                        f"{uri}/.auth/login/aad/callback",
-                    ]
+                    redirect_uris=merged_web_redirects
                 ),
             )
             await graph_client.applications.by_application_id(client_object_id).patch(app)

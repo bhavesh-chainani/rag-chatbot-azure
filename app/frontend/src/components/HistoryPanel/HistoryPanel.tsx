@@ -129,7 +129,8 @@ export const HistoryPanel = ({
     return (
         <OverlayDrawer
             position="start"
-            style={{ width: "300px" }}
+            className={styles.drawer}
+            style={{ width: "320px" }}
             modalType="non-modal"
             open={isOpen}
             onOpenChange={(_ev: any, { open }: { open: boolean }) => {
@@ -138,16 +139,26 @@ export const HistoryPanel = ({
                 }
             }}
         >
-            <DrawerHeader>
+            <DrawerHeader className={styles.drawerHeader}>
                 <DrawerHeaderTitle
-                    action={<Button appearance="subtle" aria-label={t("labels.closeButton")} icon={<Dismiss24Regular />} onClick={handleClose} />}
+                    className={styles.drawerHeaderTitle}
+                    action={
+                        <Button
+                            className={styles.drawerCloseButton}
+                            appearance="subtle"
+                            aria-label={t("labels.closeButton")}
+                            icon={<Dismiss24Regular />}
+                            onClick={handleClose}
+                        />
+                    }
                 >
                     {t("history.chatHistory")}
                 </DrawerHeaderTitle>
             </DrawerHeader>
-            <DrawerBody style={{ padding: "0px" }}>
+            <DrawerBody className={styles.drawerBody}>
                 <div className={styles.searchContainer}>
                     <Input
+                        className={styles.searchInput}
                         value={searchQuery}
                         onChange={(_e, data) => setSearchQuery(data.value)}
                         placeholder={t("history.searchPlaceholder")}
@@ -157,14 +168,20 @@ export const HistoryPanel = ({
                 {Object.entries(groupedHistory).map(([group, items]) => (
                     <div key={group} className={styles.group}>
                         <p className={styles.groupLabel}>{t(group)}</p>
-                        {items.map(item => (
-                            <HistoryItem key={item.id} item={item} onSelect={handleSelect} onDelete={handleDelete} />
-                        ))}
+                        <ul className={styles.chatList} role="list">
+                            {items.map(item => (
+                                <li key={item.id} className={styles.chatListItem}>
+                                    <HistoryItem item={item} onSelect={handleSelect} onDelete={handleDelete} />
+                                </li>
+                            ))}
+                        </ul>
                     </div>
                 ))}
-                {isLoading && <Spinner style={{ marginTop: "10px" }} />}
-                {history.length === 0 && !isLoading && <p>{t("history.noHistory")}</p>}
-                {history.length > 0 && filteredHistory.length === 0 && !isLoading && <p className={styles.emptySearch}>No matching chats</p>}
+                {isLoading && <Spinner className={styles.spinner} />}
+                {history.length === 0 && !isLoading && <p className={styles.emptyState}>{t("history.noHistory")}</p>}
+                {history.length > 0 && filteredHistory.length === 0 && !isLoading && (
+                    <p className={styles.emptySearch}>No matching chats</p>
+                )}
                 {hasMoreHistory && !isLoading && !isSearching && <InfiniteLoadingButton func={loadMoreHistory} />}
             </DrawerBody>
         </OverlayDrawer>

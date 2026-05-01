@@ -70,7 +70,7 @@ When enabled, the app checks each user message for relevance to the bot’s scop
 * **Out-of-scope message**: `QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE` overrides the reply shown when the query is classified as out of scope.
 * **Bypass**: the frontend can send `overrides.skip_query_router: true` (e.g. from Developer Settings) to force RAG for that request.
 
-The router uses the same OpenAI chat model as the main app with a single short completion (low token count). On router failure the request is passed through to RAG (fail open).
+The current router implementation is heuristic-only (keyword and short-message checks), so there is no extra LLM call on the router path. It is designed to be fail-open for substantive user messages so legitimate legal queries still proceed to RAG.
 
 ## Triage approach (auto-extract)
 

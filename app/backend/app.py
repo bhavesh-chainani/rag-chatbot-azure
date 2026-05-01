@@ -305,7 +305,7 @@ async def chat(auth_claims: dict[str, Any]):
                         session_state=session_state,
                     )
                     return jsonify(result)
-                relevant = await is_query_relevant(
+                relevant = is_query_relevant(
                     client=current_app.config[CONFIG_OPENAI_CLIENT],
                     model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
                     deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),
@@ -364,7 +364,7 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     response.timeout = None  # type: ignore
                     response.mimetype = "application/json-lines"
                     return response
-                relevant = await is_query_relevant(
+                relevant = is_query_relevant(
                     client=current_app.config[CONFIG_OPENAI_CLIENT],
                     model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
                     deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),

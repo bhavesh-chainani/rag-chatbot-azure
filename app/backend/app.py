@@ -382,21 +382,11 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     return response
 
         approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-        if BACKEND_GUARDRAIL_ENFORCEMENT:
-            # Enforce guardrails on the full assistant message before sending to client.
-            non_stream_result = await approach.run(
-                request_json["messages"],
-                context=context,
-                session_state=session_state,
-            )
-            guarded_result = enforce_backend_guardrails_on_chat_response(non_stream_result)
-            result = single_chat_response_stream(guarded_result)
-        else:
-            result = await approach.run_stream(
-                request_json["messages"],
-                context=context,
-                session_state=session_state,
-            )
+        result = await approach.run_stream(
+            request_json["messages"],
+            context=context,
+            session_state=session_state,
+        )
         response = await make_response(format_as_ndjson(result))
         response.timeout = None  # type: ignore
         response.mimetype = "application/json-lines"

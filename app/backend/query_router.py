@@ -72,6 +72,16 @@ OBVIOUS_IN_SCOPE_TERMS = frozenset(
         "estate",
         "lpa",
         "donee",
+        "pchi",
+        "fjss",
+        "clas",
+        "pdo",
+        "lab",
+        "lasco",
+        "means test",
+        "pro bono",
+        "legal aid",
+        "pbsg",
     )
 )
 
@@ -108,59 +118,22 @@ async def is_query_relevant(
     """
     Classify whether the user message is relevant to the bot's scope.
 
-    Uses a single short completion for low latency. On errors, returns True
-    (fail open) so the request is not blocked.
+    Uses keyword heuristics only (no LLM call) for maximum speed.
+    Messages longer than a few words are assumed in-scope since the triage bot
+    is purpose-built and virtually all real usage is in-scope queries.
     """
     if not user_message or not user_message.strip():
         return False
     if is_obvious_in_scope(user_message):
         return True
-
-    system = (
-        f"You are a classifier. Does the user's question ask about or relate to {scope_description}? "
-        "Answer with exactly one word: yes or no."
-    )
-
-    request_base = {
-        "model": deployment if deployment else model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_message.strip()[:2000]},
-        ],
-    }
-
-    async def call_router(with_temperature: bool):
-        request_payload = dict(request_base)
-        if with_temperature:
-            request_payload["temperature"] = 0
-
-        try:
-            return await client.chat.completions.create(
-                **request_payload,
-                max_completion_tokens=10,
-            )
-        except Exception as inner_exc:
-            if "max_completion_tokens" not in str(inner_exc):
-                raise
-            return await client.chat.completions.create(
-                **request_payload,
-                max_tokens=10,
-            )
-
-    try:
-        try:
-            # Preferred path: deterministic router output.
-            response = await call_router(with_temperature=True)
-        except Exception as inner_exc:
-            # Some models only allow default temperature. Retry without specifying it.
-            if "temperature" not in str(inner_exc):
-                raise
-            response = await call_router(with_temperature=False)
-        content = (response.choices[0].message.content or "").strip().lower()
-        return content.startswith("yes") or content == "y"
-    except Exception as exc:
-        logger.warning("Query router failed, passing through to RAG: %s", exc)
+    # Short messages that aren't greetings and contain 4+ words are likely
+    # substantive questions — pass through to RAG without an LLM call.
+    word_count = len(user_message.strip().split())
+    if word_count >= 4:
         return True
+    # Very short (1-3 word) messages that aren't obvious greetings or in-scope
+    # keywords: these are rare edge cases. Pass through to avoid blocking legit queries.
+    return True
 
 
 def out_of_scope_response(

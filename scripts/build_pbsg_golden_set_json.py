@@ -56,6 +56,52 @@ def replace_caller_with_applicant(entry: dict) -> dict:
     return result
 
 
+def normalize_gen3_handoff_ids(entry: dict) -> dict:
+    """Map legacy placeholder ids from source documents to real per-id JSON filenames."""
+
+    def fix_text(text: str) -> str:
+        text = text.replace("GEN3-T-FAM", "GEN3-T03")
+        text = text.replace("GEN3-T-CIV", "GEN3-T04")
+        return text
+
+    result = {}
+    for key, value in entry.items():
+        if isinstance(value, str):
+            result[key] = fix_text(value)
+        elif isinstance(value, list):
+            result[key] = [fix_text(item) if isinstance(item, str) else item for item in value]
+        else:
+            result[key] = value
+    return result
+
+
+def normalize_gen3_t03_q4_not_sure(entry: dict) -> dict:
+    """Q4 is the foreigner-path Singaporean-child question; Not Sure must not ask to clarify caller nationality (Q2)."""
+    if entry.get("id") != "GEN3-T03":
+        return entry
+    bl = entry.get("branching_logic")
+    if not isinstance(bl, list):
+        return entry
+    replacement = (
+        "If Q4 = Not Sure → Clarify whether the applicant has at least one child who is a "
+        "Singapore Citizen and is below 21 years old (Q2 already established the applicant is not SGC/PR); "
+        "if still unclear, Route F (Escalate to PBSG Staff)."
+    )
+    new_bl: list[str] = []
+    for item in bl:
+        if (
+            isinstance(item, str)
+            and item.startswith("If Q4 = Not Sure")
+            and "nationality/residency" in item
+        ):
+            new_bl.append(replacement)
+        else:
+            new_bl.append(item)
+    out = dict(entry)
+    out["branching_logic"] = new_bl
+    return out
+
+
 def extract_between(text: str, start_marker: str, end_markers: list[str]) -> str:
     try:
         start = text.index(start_marker) + len(start_marker)
@@ -252,7 +298,9 @@ def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
         "routing": routing,
         "guardrail": guardrail,
     }
-    return replace_caller_with_applicant(entry)
+    return normalize_gen3_t03_q4_not_sure(
+        normalize_gen3_handoff_ids(replace_caller_with_applicant(entry))
+    )
 
 
 def docx_to_text(docx_path: Path) -> str:

@@ -57,12 +57,8 @@ async def main():
 
             app = Application(
                 public_client=PublicClientApplication(redirect_uris=[]),
-                spa=SpaApplication(
-                    redirect_uris=merged_spa_redirects
-                ),
-                web=WebApplication(
-                    redirect_uris=merged_web_redirects
-                ),
+                spa=SpaApplication(redirect_uris=merged_spa_redirects),
+                web=WebApplication(redirect_uris=merged_web_redirects),
             )
             await graph_client.applications.by_application_id(client_object_id).patch(app)
             print(f"Application update for client app id {client_app_id} complete.")

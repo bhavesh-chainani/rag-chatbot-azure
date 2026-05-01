@@ -197,9 +197,7 @@ class TestConversationBuildWithClarification:
             user_template_path="chat_answer.user.jinja2",
             user_template_variables={
                 "user_query": "what's a legal aid bureau?",
-                "text_sources": [
-                    'GEN3-T03.json: {"id": "GEN3-T03", "topic": "Matrimonial Stream Triage"}'
-                ],
+                "text_sources": ['GEN3-T03.json: {"id": "GEN3-T03", "topic": "Matrimonial Stream Triage"}'],
             },
             past_messages=[
                 {"role": "user", "content": "applicant wants to file for divorce, she is a singapore citizen"},
@@ -208,7 +206,7 @@ class TestConversationBuildWithClarification:
                     "content": (
                         "**Selected Entry:** GEN3-T03\n\n"
                         "Ask the applicant:\n\n"
-                        "> Q3: \"Have you applied to the Legal Aid Bureau (LAB) for help with this family matter yet?\""
+                        '> Q3: "Have you applied to the Legal Aid Bureau (LAB) for help with this family matter yet?"'
                     ),
                 },
             ],

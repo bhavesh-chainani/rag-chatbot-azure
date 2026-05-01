@@ -89,11 +89,7 @@ def normalize_gen3_t03_q4_not_sure(entry: dict) -> dict:
     )
     new_bl: list[str] = []
     for item in bl:
-        if (
-            isinstance(item, str)
-            and item.startswith("If Q4 = Not Sure")
-            and "nationality/residency" in item
-        ):
+        if isinstance(item, str) and item.startswith("If Q4 = Not Sure") and "nationality/residency" in item:
             new_bl.append(replacement)
         else:
             new_bl.append(item)
@@ -282,9 +278,7 @@ def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
         ["Guardrails", "LPA Guardrail"],
     )
     routing = extract_gen3_routing(routing_section)
-    guardrail = normalize_whitespace(
-        extract_between(body, "Guardrails", ["\n\n", "\n\f", "\f"])
-    )
+    guardrail = normalize_whitespace(extract_between(body, "Guardrails", ["\n\n", "\n\f", "\f"]))
 
     entry = {
         "id": entry_id,
@@ -298,9 +292,7 @@ def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
         "routing": routing,
         "guardrail": guardrail,
     }
-    return normalize_gen3_t03_q4_not_sure(
-        normalize_gen3_handoff_ids(replace_caller_with_applicant(entry))
-    )
+    return normalize_gen3_t03_q4_not_sure(normalize_gen3_handoff_ids(replace_caller_with_applicant(entry)))
 
 
 def docx_to_text(docx_path: Path) -> str:

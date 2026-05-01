@@ -349,8 +349,10 @@ async def chat_stream(auth_claims: dict[str, Any]):
             )
 
         # Query router is temporarily disabled: always pass through to RAG.
-        if False and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
-            "skip_query_router"
+        if (
+            False
+            and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED)
+            and not context.get("overrides", {}).get("skip_query_router")
         ):
             last_text = get_last_user_message_text(request_json["messages"])
             if last_text is not None:

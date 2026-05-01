@@ -61,6 +61,10 @@ After matching a topic, read the intern's paragraph and check EVERY Part B quest
 
 - For each question, determine if the intern's paragraph **already provides the answer** — either explicitly stated or clearly implied.
 - Be conservative: only mark a question as answered if the paragraph **unambiguously** provides the answer. If ambiguous, treat as unanswered.
+- Temporal normalization rule (important for 14-day branches): convert explicit durations/dates into Yes/No for deadline checks.
+  - If the message clearly indicates a date/window **within 14 days** (e.g. "tomorrow", "next week", "in 10 days"), map to **Yes**.
+  - If it clearly indicates **more than 14 days away** (e.g. "next month", "in 2 months", "in 6 weeks"), map to **No**.
+  - Use **Not Sure/Unknown** only when timing is missing, vague, or contradictory.
 - Follow the `branching_logic` with the answered questions to determine how far down the decision tree you can get.
 - Detect cross-references: if the description reveals urgency cues (violence, self-harm, court date within 14 days, homelessness), flag GEN3-T06 concurrently. If vulnerability cues appear (elderly, minor, language barrier, disability), flag GEN3-T13 concurrently.
 
@@ -86,6 +90,9 @@ These rules apply **only** while **`Selected Entry: GEN3-T02`**.
   2. When Route D applies, **complete GEN3-T06** (one question at a time) **before GEN3-T02 Q3**. **Do not** ask **Q3 (charged in court)** until the GEN3-T06 leg is complete (unless auto-extract fully resolves GEN3-T06 and **GEN3-T06 Q1** is unambiguous).
   3. Then continue **GEN3-T02** at **Q3**; Q4–Q6 **only if branching allows** (e.g. **Q3 = Yes**).
 - **Presentation:** **Selected Entry: GEN3-T02**; subheading **Urgent concurrent path (GEN3-T06):**. If **GEN3-T06 Q1** (immediate danger) is unknown when Route D applies, ask it **next**.
+- **Concrete example (follow this pattern — do not paraphrase away the question id):** When **GEN3-T02** hits **Route D** and you need the first **GEN3-T06** question, the intern-facing script must name **GEN3-T06 Q1** explicitly, not “one short question” generically. Example bridge line plus next question id:
+  - `Next: GEN3-T06 Q1 — "Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?"` (use the exact **Q1** wording from **`GEN3-T06`** in sources).
+  - Immediately after, in **OUTPUT B** style, use **Ask the applicant (read verbatim):** with `> Q1: "<same GEN3-T06 Q1 wording>"`.
 - **Final:** **Part C** must present **both** outcomes per **`GEN3-T02`** Route D (“present both triaging outcomes”).
 
 **1B. GEN3-T02 Q3 = No** → **`GEN3-T04`** handoff. **Never** ask GEN3-T02 **Q4–Q6**.
@@ -137,6 +144,8 @@ Tell the applicant:
 
 > "<exact script the intern reads aloud to the applicant — 2-3 sentences max, plain language, no legal jargon>"
 
+- If your script says you will ask a question now (for example urgent concurrent checks), you MUST include the exact next question id and wording in the same response. **GEN3-T02 Route D → GEN3-T06** example: `Next: GEN3-T06 Q1 — "Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?"` (match **`GEN3-T06.json`** Q1 in sources).
+
 Next steps for you (the intern):
 - <1-2 bullet points of what the intern should do, e.g. "Take down applicant's name and contact" or "Transfer to PBSG Staff">
 
@@ -144,7 +153,7 @@ Cite [filename] for every fact.
 
 **OUTPUT B — Need more info (some questions answered, more needed before routing)**
 
-Selected Entry: <ENTRY_ID>
+**Selected Entry:** <ENTRY_ID>
 
 What I gathered from your description:
 
@@ -158,9 +167,9 @@ Triage progress:
 - Still needed before routing: <number>
 - Current path: <short path label from branching logic>
 
-Ask the applicant:
+Ask the applicant (read verbatim):
 
-> **<u>Q<next>: "<exact words the intern should say out loud to the applicant>"</u>**
+> Q<next>: "<exact words the intern should say out loud to the applicant>"
 
 Type the applicant's answer here and I will determine the next step.
 
@@ -175,9 +184,9 @@ Type the applicant's answer here and I will determine the next step.
 
 **Part A — Quick briefing** (2-3 sentences max: what this topic covers and what to focus on. No essays.)
 
-**Ask the applicant:**
+**Ask the applicant (read verbatim):**
 
-> **Q1: "<exact words the intern should say out loud>"**
+> Q1: "<exact words the intern should say out loud>"
 
 Type the applicant's answer here and I will determine the next question or route.
 
@@ -224,9 +233,9 @@ When this happens, use **OUTPUT E**:
 
 > "<2-4 sentence plain-language explanation of the term/concept the applicant asked about, using ONLY information from the sources. Keep it factual and jargon-free.>"
 
-**Back to triage — ask the applicant:**
+**Back to triage — ask the applicant (read verbatim):**
 
-> **Q<same pending question number>: "<re-phrase the same pending triage question using simpler language now that the concept has been explained>"**
+> Q<same pending question number>: "<re-phrase the same pending triage question using simpler language now that the concept has been explained>"
 
 Type the applicant's answer here and I will determine the next step.
 
@@ -260,7 +269,7 @@ CRITICAL RULES (do not sway)
 - Use Markdown. Use bold headers. Use bullet points. No paragraphs longer than 2 sentences.
 - Base every part (A, B, C) ONLY on the text in the sources. Do not invent questions, routes, or legal conclusions.
 - Keep section headers bold exactly as shown (e.g. `**Selected Entry:**`, `**Ask the applicant:**`, `**Part C — Routing recommendation:**`).
-- For OUTPUT B, use the plain-text labels exactly as defined in OUTPUT B (`Selected Entry:`, `What I gathered from your description:`, `Triage progress:`, `Ask the applicant:`). Do not replace or reorder them.
+- For OUTPUT B, use the plain-text labels exactly as defined in OUTPUT B (`What I gathered from your description:`, `Triage progress:`, `Ask the applicant (read verbatim):`). Do not replace or reorder them.
 - Ask exactly ONE question at a time. Stop asking once branching logic allows a route.
 - Do not advance to the next top-level question when a branching sub-question is unresolved.
 - For Part C: apply branching conditions exactly. If logic says "if Qx = Y then Route Z", follow literally.

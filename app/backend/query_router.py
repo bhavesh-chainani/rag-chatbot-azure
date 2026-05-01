@@ -8,12 +8,8 @@ search/LLM calls.
 """
 
 import logging
-from dataclasses import asdict
+import re
 from typing import Any, Optional
-
-from openai import AsyncOpenAI
-
-from approaches.approach import DataPoints, ThoughtStep
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +47,6 @@ OBVIOUS_IN_SCOPE_TERMS = frozenset(
         "legal",
         "lawyer",
         "applicant",
-        "applicant",
         "triage",
         "representation",
         "criminal",
@@ -72,8 +67,36 @@ OBVIOUS_IN_SCOPE_TERMS = frozenset(
         "estate",
         "lpa",
         "donee",
+        "pchi",
+        "fjss",
+        "clas",
+        "pdo",
+        "lab",
+        "lasco",
+        "means test",
+        "pro bono",
+        "legal aid",
+        "pbsg",
     )
 )
+
+OBVIOUS_IN_SCOPE_PATTERN = re.compile(
+    "|".join(re.escape(term) for term in sorted(OBVIOUS_IN_SCOPE_TERMS, key=len, reverse=True))
+)
+
+OUT_OF_SCOPE_THOUGHTS = [
+    {
+        "title": "Query routed",
+        "description": "Question was classified as out of scope; no search was run.",
+        "props": None,
+    }
+]
+
+OUT_OF_SCOPE_CONTEXT = {
+    "thoughts": OUT_OF_SCOPE_THOUGHTS,
+    "data_points": {},
+    "followup_questions": None,
+}
 
 
 def is_obvious_non_query(text: str) -> bool:
@@ -94,73 +117,36 @@ def is_obvious_in_scope(text: str) -> bool:
     if not text or not text.strip():
         return False
     lowered = text.strip().lower()
-    return any(term in lowered for term in OBVIOUS_IN_SCOPE_TERMS)
+    return bool(OBVIOUS_IN_SCOPE_PATTERN.search(lowered))
 
 
-async def is_query_relevant(
+def is_query_relevant(
     *,
-    client: AsyncOpenAI,
-    model: str,
-    deployment: Optional[str],
     user_message: str,
-    scope_description: str = DEFAULT_SCOPE_DESCRIPTION,
+    client: Optional[Any] = None,
+    model: Optional[str] = None,
+    deployment: Optional[str] = None,
+    scope_description: Optional[str] = DEFAULT_SCOPE_DESCRIPTION,
 ) -> bool:
     """
     Classify whether the user message is relevant to the bot's scope.
 
-    Uses a single short completion for low latency. On errors, returns True
-    (fail open) so the request is not blocked.
+    Uses keyword heuristics only (no LLM call) for maximum speed.
+    Messages longer than a few words are assumed in-scope since the triage bot
+    is purpose-built and virtually all real usage is in-scope queries.
     """
     if not user_message or not user_message.strip():
         return False
     if is_obvious_in_scope(user_message):
         return True
-
-    system = (
-        f"You are a classifier. Does the user's question ask about or relate to {scope_description}? "
-        "Answer with exactly one word: yes or no."
-    )
-
-    request_base = {
-        "model": deployment if deployment else model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_message.strip()[:2000]},
-        ],
-    }
-
-    async def call_router(with_temperature: bool):
-        request_payload = dict(request_base)
-        if with_temperature:
-            request_payload["temperature"] = 0
-
-        try:
-            return await client.chat.completions.create(
-                **request_payload,
-                max_completion_tokens=10,
-            )
-        except Exception as inner_exc:
-            if "max_completion_tokens" not in str(inner_exc):
-                raise
-            return await client.chat.completions.create(
-                **request_payload,
-                max_tokens=10,
-            )
-
-    try:
-        try:
-            # Preferred path: deterministic router output.
-            response = await call_router(with_temperature=True)
-        except Exception as inner_exc:
-            # Some models only allow default temperature. Retry without specifying it.
-            if "temperature" not in str(inner_exc):
-                raise
-            response = await call_router(with_temperature=False)
-        content = (response.choices[0].message.content or "").strip().lower()
-        return content.startswith("yes") or content == "y"
-    except Exception as exc:
-        logger.warning("Query router failed, passing through to RAG: %s", exc)
+    # Short messages that aren't greetings and contain 4+ words are likely
+    # substantive questions — pass through to RAG without an LLM call.
+    word_count = len(user_message.strip().split())
+    if word_count >= 4:
         return True
+    # Very short (1-3 word) messages that aren't obvious greetings or in-scope
+    # keywords: these are rare edge cases. Pass through to avoid blocking legit queries.
+    return True
 
 
 def out_of_scope_response(
@@ -174,15 +160,9 @@ def out_of_scope_response(
     Matches the shape returned by ChatReadRetrieveReadApproach.run_without_streaming
     so the frontend behaves the same.
     """
-    data_points = DataPoints()
-    thoughts = [ThoughtStep("Query routed", "Question was classified as out of scope; no search was run.", None)]
     return {
         "message": {"content": message, "role": "assistant"},
-        "context": {
-            "thoughts": [{"title": t.title, "description": t.description, "props": t.props} for t in thoughts],
-            "data_points": {k: v for k, v in asdict(data_points).items() if v is not None},
-            "followup_questions": None,
-        },
+        "context": OUT_OF_SCOPE_CONTEXT,
         "session_state": session_state,
     }
 
@@ -197,13 +177,6 @@ async def out_of_scope_stream(
 
     Matches the shape used by ChatReadRetrieveReadApproach.run_with_streaming.
     """
-    data_points = DataPoints()
-    thoughts = [ThoughtStep("Query routed", "Question was classified as out of scope; no search was run.", None)]
-    extra_info = {
-        "thoughts": [{"title": t.title, "description": t.description, "props": t.props} for t in thoughts],
-        "data_points": {k: v for k, v in asdict(data_points).items() if v is not None},
-        "followup_questions": None,
-    }
-    yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
+    yield {"delta": {"role": "assistant"}, "context": OUT_OF_SCOPE_CONTEXT, "session_state": session_state}
     yield {"delta": {"content": message, "role": "assistant"}}
-    yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
+    yield {"delta": {"role": "assistant"}, "context": OUT_OF_SCOPE_CONTEXT, "session_state": session_state}

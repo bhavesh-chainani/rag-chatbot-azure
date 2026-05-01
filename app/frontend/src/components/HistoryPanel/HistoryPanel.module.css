@@ -1,22 +1,120 @@
+/* Pro Bono SG brand — matches Layout.module.css header (#9B2335) */
+.drawer {
+    --pbsg-brand: #9b2335;
+    --pbsg-brand-muted: rgba(155, 35, 53, 0.18);
+    --pbsg-brand-soft: rgba(155, 35, 53, 0.08);
+    --pbsg-panel-bg: #fdfbfc;
+    /* Lighter chrome than the global maroon header — reads as a nested panel */
+    --pbsg-drawer-header-bg: #faf3f5;
+
+    border-right: 2px solid rgba(155, 35, 53, 0.22);
+    box-shadow:
+        6px 0 18px rgba(0, 0, 0, 0.07),
+        1px 0 0 rgba(155, 35, 53, 0.12);
+}
+
+.drawerHeader {
+    background-color: var(--pbsg-drawer-header-bg);
+    color: var(--pbsg-brand);
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(155, 35, 53, 0.2);
+    /* Separate from the app bar: no full-bleed maroon strip */
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.drawerHeaderTitle {
+    color: var(--pbsg-brand);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0;
+}
+
+.drawerCloseButton {
+    color: var(--pbsg-brand) !important;
+    border: 1px solid rgba(155, 35, 53, 0.35) !important;
+    border-radius: 8px !important;
+}
+
+.drawerCloseButton:hover {
+    background-color: rgba(155, 35, 53, 0.1) !important;
+    color: var(--pbsg-brand) !important;
+}
+
+.drawerBody {
+    padding: 0 !important;
+    background: var(--pbsg-panel-bg);
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
 .searchContainer {
-    padding: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 14px 16px 12px;
+    background: #ffffff;
+    border-bottom: 1px solid rgba(155, 35, 53, 0.22);
+}
+
+.searchInput {
+    width: 100%;
+    max-width: 272px;
 }
 
 .group {
-    margin-top: 1rem;
+    padding: 12px 12px 8px;
 }
+
+.group + .group {
+    border-top: 1px solid rgba(155, 35, 53, 0.2);
+    margin-top: 4px;
+    padding-top: 16px;
+}
+
 .groupLabel {
-    font-size: 0.9rem;
-    font-weight: bold;
-    margin-top: 0.5rem;
-    margin-bottom: 0.2rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--pbsg-brand);
+    margin: 0 0 10px 4px;
+    padding-left: 8px;
+    border-left: 3px solid var(--pbsg-brand);
+}
+
+.chatList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.chatListItem {
+    margin: 0;
+    padding: 0;
+}
+
+.spinner {
+    margin: 16px auto;
+    align-self: center;
+}
+
+.emptyState,
+.emptySearch {
+    padding: 16px;
+    margin: 0;
+    font-size: 0.875rem;
+    color: #4b5563;
+    text-align: center;
 }
 
 .footer {
     display: flex;
     justify-content: space-between;
-}
-
-.emptySearch {
-    padding: 8px;
 }

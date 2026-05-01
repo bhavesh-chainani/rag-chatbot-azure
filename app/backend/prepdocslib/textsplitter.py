@@ -585,7 +585,8 @@ class SentenceTextSplitter(TextSplitter):
 
 # Golden-set / structured JSON entries are usually a few thousand characters; keep one chunk per
 # entry when possible (embedding models typically allow 8k+ tokens for text-embedding-3-*).
-DEFAULT_JSON_OBJECT_MAX_LENGTH = 16000
+# Sized above the largest GEN3 entry after prefix + json.dumps (~16k) so one file stays one chunk.
+DEFAULT_JSON_OBJECT_MAX_LENGTH = 20000
 
 
 class SimpleTextSplitter(TextSplitter):

@@ -305,7 +305,7 @@ async def chat(auth_claims: dict[str, Any]):
                         session_state=session_state,
                     )
                     return jsonify(result)
-                relevant = await is_query_relevant(
+                relevant = is_query_relevant(
                     client=current_app.config[CONFIG_OPENAI_CLIENT],
                     model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
                     deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),
@@ -349,8 +349,10 @@ async def chat_stream(auth_claims: dict[str, Any]):
             )
 
         # Query router is temporarily disabled: always pass through to RAG.
-        if False and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED) and not context.get("overrides", {}).get(
-            "skip_query_router"
+        if (
+            False
+            and current_app.config.get(CONFIG_QUERY_ROUTER_ENABLED)
+            and not context.get("overrides", {}).get("skip_query_router")
         ):
             last_text = get_last_user_message_text(request_json["messages"])
             if last_text is not None:
@@ -364,7 +366,7 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     response.timeout = None  # type: ignore
                     response.mimetype = "application/json-lines"
                     return response
-                relevant = await is_query_relevant(
+                relevant = is_query_relevant(
                     client=current_app.config[CONFIG_OPENAI_CLIENT],
                     model=current_app.config[CONFIG_QUERY_ROUTER_MODEL],
                     deployment=current_app.config.get(CONFIG_QUERY_ROUTER_DEPLOYMENT),
@@ -382,21 +384,11 @@ async def chat_stream(auth_claims: dict[str, Any]):
                     return response
 
         approach: Approach = cast(Approach, current_app.config[CONFIG_CHAT_APPROACH])
-        if BACKEND_GUARDRAIL_ENFORCEMENT:
-            # Enforce guardrails on the full assistant message before sending to client.
-            non_stream_result = await approach.run(
-                request_json["messages"],
-                context=context,
-                session_state=session_state,
-            )
-            guarded_result = enforce_backend_guardrails_on_chat_response(non_stream_result)
-            result = single_chat_response_stream(guarded_result)
-        else:
-            result = await approach.run_stream(
-                request_json["messages"],
-                context=context,
-                session_state=session_state,
-            )
+        result = await approach.run_stream(
+            request_json["messages"],
+            context=context,
+            session_state=session_state,
+        )
         response = await make_response(format_as_ndjson(result))
         response.timeout = None  # type: ignore
         response.mimetype = "application/json-lines"

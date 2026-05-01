@@ -235,7 +235,7 @@ class Approach(ABC):
     }
     # Set a higher token limit for GPT reasoning models
     RESPONSE_DEFAULT_TOKEN_LIMIT = 1024
-    RESPONSE_REASONING_DEFAULT_TOKEN_LIMIT = 8192
+    RESPONSE_REASONING_DEFAULT_TOKEN_LIMIT = 2048
     QUERY_REWRITE_NO_RESPONSE = "0"
 
     def __init__(

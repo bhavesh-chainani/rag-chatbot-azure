@@ -2,13 +2,21 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 4px 8px;
-    border-radius: 6px;
-    transition: background-color 0.2s;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background-color: #ffffff;
+    border: 1px solid rgba(155, 35, 53, 0.2);
+    box-shadow: 0 1px 2px rgba(155, 35, 53, 0.06);
+    transition:
+        background-color 0.2s,
+        border-color 0.2s,
+        box-shadow 0.2s;
 }
 
 .historyItem:hover {
-    background-color: #f3f4f6;
+    background-color: #fffafb;
+    border-color: rgba(155, 35, 53, 0.28);
+    box-shadow: 0 2px 8px rgba(155, 35, 53, 0.1);
 }
 
 .historyItemButton {
@@ -25,7 +33,8 @@
     font-size: 0.875rem;
     white-space: normal;
     overflow-wrap: anywhere;
-    line-height: 1.25rem;
+    line-height: 1.35rem;
+    color: #1f2937;
 }
 
 .deleteIcon {
@@ -41,7 +50,8 @@
     cursor: pointer;
     padding: 4px;
     border-radius: 9999px;
-    color: #6b7280;
+    color: #9b2335;
+    flex-shrink: 0;
 }
 
 .historyItem:hover .deleteButton,
@@ -50,7 +60,8 @@
 }
 
 .deleteButton:hover {
-    color: #111827;
+    color: #7a1c29;
+    background-color: rgba(155, 35, 53, 0.08);
 }
 
 .modalOverlay {

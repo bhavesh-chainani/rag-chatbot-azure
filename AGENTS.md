@@ -70,7 +70,7 @@ When enabled, the app checks each user message for relevance to the bot’s scop
 * **Out-of-scope message**: `QUERY_ROUTER_OUT_OF_SCOPE_MESSAGE` overrides the reply shown when the query is classified as out of scope.
 * **Bypass**: the frontend can send `overrides.skip_query_router: true` (e.g. from Developer Settings) to force RAG for that request.
 
-The router uses the same OpenAI chat model as the main app with a single short completion (low token count). On router failure the request is passed through to RAG (fail open).
+The current router implementation is heuristic-only (keyword and short-message checks), so there is no extra LLM call on the router path. It is designed to be fail-open for substantive user messages so legitimate legal queries still proceed to RAG.
 
 ## Triage approach (auto-extract)
 
@@ -85,6 +85,8 @@ The system prompt in `chat_answer.system.jinja2` implements an **auto-extract tr
    - **No matching entry** → Unclear handling (OUTPUT D)
 4. **Follow-up turns**: As the intern provides answers, the system updates its map and either asks the next required question or gives the final routing recommendation.
 5. **Multi-topic handling**: When a applicant's situation spans multiple legal areas (e.g. criminal charge AND divorce), the system identifies all matching entries, prioritizes them, and handles each sequentially. After completing routing for the first topic (OUTPUT A), it transitions automatically to the next topic, re-using any facts already gathered so it never re-asks known answers.
+
+**Workstream-specific binding flows** (STEP 2b in `chat_answer.system.jinja2`): **Route letters are not global** across golden entries. **GEN3-T02** (*CLAS + Urgent concurrent*): run **GEN3-T06** before **GEN3-T02 Q3**; **GEN3-T02 Q3 = No** → **GEN3-T04** (no T02 Q4–Q6). **GEN3-T03** (*FJSS + Urgent concurrent*): run **GEN3-T06** before **GEN3-T03 Q2**; **GEN3-T03 Q4 = No** (foreigner path) → **GEN3-T04** (no T03 Q5). When **GEN3-T06** is nested under T02 or T03 for those routes, **resume the parent** at the question stated in the parent’s `routing` text — do not treat GEN3-T06’s “return to GEN3-T01” as replacing that resume point. **GEN3-T01** hands off Route G → **GEN3-T02**, Route H → **GEN3-T03**, Route I → **GEN3-T04** (ids in `data/pbsg_golden_set_by_id/`).
 
 Design principles:
 - Every response must be **scannable in under 15 seconds** (applicant is right there)
@@ -112,7 +114,7 @@ By default that script reads **`data/2026.04.16 PBSG_Golden_Set_General_Enquirie
 python scripts/build_pbsg_golden_set_json.py --legacy
 ```
 
-(`--legacy` uses `data/PBSG_Golden_Set_Complete_v2.docx` and the `XXX-NN | topic` header layout.) The script requires macOS `textutil` to convert `.docx` to plain text.
+(`--legacy` uses `data/PBSG_Golden_Set_Complete_v2.docx` and the `XXX-NN | topic` header layout.) The script requires macOS `textutil` to convert `.docx` to plain text. It also normalizes known source typos (e.g. handoff ids `GEN3-T-FAM` / `GEN3-T-CIV` → `GEN3-T03` / `GEN3-T04`, and **GEN3-T03** Q4 Not Sure — foreigner path must clarify a **Singapore Citizen child under 21**, not the caller’s nationality, which **Q2** already covers).
 
 **Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip the golden-set source Word files so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). Skipped basenames include `PBSG_Golden_Set_Complete_v2.docx`, `2026_03_31_PBSG_Golden_Set_v3_MCA.docx`, and `2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`. For any other build-only `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
 

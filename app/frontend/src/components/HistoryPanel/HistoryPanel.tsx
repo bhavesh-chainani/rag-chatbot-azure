@@ -133,7 +133,6 @@ export const HistoryPanel = ({
         <OverlayDrawer
             position="start"
             className={styles.drawer}
-            style={{ width: "320px" }}
             modalType="non-modal"
             open={isOpen}
             onOpenChange={(_ev: any, { open }: { open: boolean }) => {

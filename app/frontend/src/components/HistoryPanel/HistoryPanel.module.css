@@ -1,5 +1,6 @@
 /* Pro Bono SG brand — matches Layout.module.css header (#9B2335) */
 .drawer {
+    width: min(100vw, 320px);
     --pbsg-brand: #9b2335;
     --pbsg-brand-muted: rgba(155, 35, 53, 0.18);
     --pbsg-brand-soft: rgba(155, 35, 53, 0.08);
@@ -62,7 +63,7 @@
 
 .searchInput {
     width: 100%;
-    max-width: 272px;
+    max-width: 100%;
 }
 
 .group {

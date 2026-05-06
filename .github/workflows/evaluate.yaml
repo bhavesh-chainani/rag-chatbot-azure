@@ -107,7 +107,7 @@ jobs:
     steps:
 
       - name: Comment on pull request
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.issues.createComment({
@@ -136,7 +136,7 @@ jobs:
           node-version: 22
 
       - name: Install azd
-        uses: Azure/setup-azd@v2.2.1
+        uses: Azure/setup-azd@v2.3.0
 
       - name: Login to Azure with az CLI
         uses: azure/login@v3
@@ -219,7 +219,7 @@ jobs:
           cat run-diff.md >> $GITHUB_STEP_SUMMARY
 
       - name: Comment on pull request
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

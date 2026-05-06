@@ -43,7 +43,7 @@ azure-core==1.38.0
     #   msrest
 azure-core-tracing-opentelemetry==1.0.0b11
     # via azure-monitor-opentelemetry
-azure-cosmos==4.9.0
+azure-cosmos==4.15.0
     # via -r requirements.in
 azure-functions==1.24.0
     # via -r requirements.in

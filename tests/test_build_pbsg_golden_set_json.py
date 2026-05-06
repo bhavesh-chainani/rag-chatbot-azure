@@ -51,7 +51,7 @@ Brief.
 Part B — Branching Questions
 Q5: Short question?
 	•	If Q5 = No → next
-Q6 (Means): Is the caller eligible on income?
+Q6 (Means): Is the applicant eligible on income?
 (PCHI = total monthly household income ÷ number of persons.)
 	•	If Q6 = Yes → Route E
 NOTE: Escalate if unclear.

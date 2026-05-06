@@ -5,7 +5,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       github-actions:
         patterns:
@@ -15,7 +15,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/app/frontend"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     # Ignore Vite 7.x for now: Vite >=7 requires Node >=20.19.0 while project engines.node is currently >=20.0.0
     ignore:
       - dependency-name: "vite"
@@ -26,7 +26,7 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       telemetry:
         patterns:

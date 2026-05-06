@@ -29,7 +29,7 @@
 
 .example:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    border-color: rgba(115, 118, 225, 0.6);
+    border-color: rgba(155, 35, 53, 0.5);
     transform: translateY(-2px);
 }
 

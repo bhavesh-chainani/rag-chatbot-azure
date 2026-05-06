@@ -141,7 +141,7 @@ class _ChunkBuilder:
 
     Notes:
     - Character limit is soft (exact enforcement + later normalization); token limit is hard.
-    - Token counts are computed by the caller and passed to `add`; this class stays agnostic of the encoder.
+    - Token counts are computed by the applicant and passed to `add`; this class stays agnostic of the encoder.
     """
 
     page_num: int
@@ -211,7 +211,7 @@ class SentenceTextSplitter(TextSplitter):
         Priority:
         1. Sentence-ending punctuation near midpoint (scan outward within central third).
         2. Word-break character near midpoint (space / punctuation) within same window.
-        3. Fallback: caller should use midpoint + overlap strategy.
+        3. Fallback: applicant should use midpoint + overlap strategy.
         """
         length = len(text)
         if length < 4:
@@ -585,7 +585,8 @@ class SentenceTextSplitter(TextSplitter):
 
 # Golden-set / structured JSON entries are usually a few thousand characters; keep one chunk per
 # entry when possible (embedding models typically allow 8k+ tokens for text-embedding-3-*).
-DEFAULT_JSON_OBJECT_MAX_LENGTH = 16000
+# Sized above the largest GEN3 entry after prefix + json.dumps (~16k) so one file stays one chunk.
+DEFAULT_JSON_OBJECT_MAX_LENGTH = 20000
 
 
 class SimpleTextSplitter(TextSplitter):

@@ -8,6 +8,9 @@ export class NoneProvider implements IHistoryProvider {
     async getNextItems(count: number): Promise<HistoryMetaData[]> {
         return [];
     }
+    async searchItems(query: string, count: number): Promise<HistoryMetaData[]> {
+        return [];
+    }
     async addItem(id: string, answers: Answers): Promise<void> {
         return;
     }

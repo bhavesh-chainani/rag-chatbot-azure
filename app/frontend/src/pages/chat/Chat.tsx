@@ -13,7 +13,7 @@ import {
 import { Dismiss24Regular } from "@fluentui/react-icons";
 import readNDJSONStream from "ndjson-readablestream";
 
-import appLogo from "../../assets/applogo.svg";
+import appLogo from "../../assets/pbsg_logo.png";
 import styles from "./Chat.module.css";
 
 import { chatApi, configApi, RetrievalMode, ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, ResponseMessage, SpeechConfig } from "../../api";
@@ -35,6 +35,28 @@ import { TokenClaimsDisplay } from "../../components/TokenClaimsDisplay";
 import { LoginContext } from "../../loginContext";
 import { LanguagePicker } from "../../i18n/LanguagePicker";
 import { Settings } from "../../components/Settings/Settings";
+
+function useCitationPanelIframeHeight(): string {
+    const [height, setHeight] = useState("810px");
+    useEffect(() => {
+        const update = () => {
+            if (window.matchMedia("(max-width: 991px)").matches) {
+                setHeight(`${Math.max(240, Math.round(window.innerHeight * 0.48))}px`);
+            } else {
+                setHeight("810px");
+            }
+        };
+        update();
+        const mq = window.matchMedia("(max-width: 991px)");
+        mq.addEventListener("change", update);
+        window.addEventListener("resize", update);
+        return () => {
+            mq.removeEventListener("change", update);
+            window.removeEventListener("resize", update);
+        };
+    }, []);
+    return height;
+}
 
 const Chat = () => {
     const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
@@ -564,6 +586,7 @@ const Chat = () => {
     };
 
     const { t, i18n } = useTranslation();
+    const citationPanelIframeHeight = useCitationPanelIframeHeight();
 
     return (
         <div className={styles.container}>
@@ -577,18 +600,21 @@ const Chat = () => {
                         <HistoryButton className={styles.commandButton} onClick={() => setIsHistoryPanelOpen(!isHistoryPanelOpen)} />
                     )}
                 </div>
-                <div className={styles.commandsContainer}>
+                <div className={`${styles.commandsContainer} ${styles.commandsContainerActions}`}>
                     <NewChatButton className={styles.commandButton} onClick={clearChat} disabled={isLoading} />
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                     {showUserUpload && <UploadFile className={styles.commandButton} disabled={!loggedIn} />}
-                    <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} />
+                    {/* <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} /> */}
                 </div>
             </div>
-            <div className={styles.chatRoot} style={{ marginLeft: isHistoryPanelOpen ? "300px" : "0" }}>
-                <div className={styles.chatContainer}>
+            <div
+                className={`${styles.chatRoot}${isHistoryPanelOpen ? ` ${styles.chatRootHistoryOpen}` : ""}`}
+            >
+                <div className={styles.chatMain}>
+                    <div className={styles.chatContainer}>
                     {!lastQuestionRef.current ? (
                         <div className={styles.chatEmptyState}>
-                            <img src={appLogo} alt="App logo" width="120" height="120" />
+                            <img src={appLogo} alt="Pro Bono SG" style={{ height: "100px", width: "auto" }} />
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
@@ -677,19 +703,20 @@ const Chat = () => {
                             initQuestion={restoredQuestion}
                         />
                     </div>
-                </div>
+                    </div>
 
-                {answers.length > 0 && activeAnalysisPanelTab && (
-                    <AnalysisPanel
-                        className={styles.chatAnalysisPanel}
-                        activeCitation={activeCitation}
-                        onActiveTabChanged={x => onToggleTab(x, selectedAnswer)}
-                        citationHeight="810px"
-                        answer={answers[selectedAnswer][1]}
-                        activeTab={activeAnalysisPanelTab}
-                        onCitationClicked={c => onShowCitation(c, selectedAnswer)}
-                    />
-                )}
+                    {answers.length > 0 && activeAnalysisPanelTab && (
+                        <AnalysisPanel
+                            className={styles.chatAnalysisPanel}
+                            activeCitation={activeCitation}
+                            onActiveTabChanged={x => onToggleTab(x, selectedAnswer)}
+                            citationHeight={citationPanelIframeHeight}
+                            answer={answers[selectedAnswer][1]}
+                            activeTab={activeAnalysisPanelTab}
+                            onCitationClicked={c => onShowCitation(c, selectedAnswer)}
+                        />
+                    )}
+                </div>
 
                 {((useLogin && showChatHistoryCosmos) || showChatHistoryBrowser) && (
                     <HistoryPanel
@@ -707,9 +734,9 @@ const Chat = () => {
 
                 <OverlayDrawer
                     position="end"
+                    className={styles.chatSettingsDrawer}
                     open={isConfigPanelOpen}
                     modalType="non-modal"
-                    style={{ width: "400px" }}
                     onOpenChange={(_ev: DialogOpenChangeEvent, { open }: DialogOpenChangeData) => {
                         if (!open) setIsConfigPanelOpen(false);
                     }}

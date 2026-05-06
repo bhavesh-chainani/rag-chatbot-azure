@@ -82,6 +82,13 @@
     object-fit: contain;
 }
 
+@media (max-width: 991px) {
+    .citationImg {
+        height: auto;
+        max-height: min(28.125rem, 45dvh);
+    }
+}
+
 .header {
     color: #123bb6;
     position: relative;

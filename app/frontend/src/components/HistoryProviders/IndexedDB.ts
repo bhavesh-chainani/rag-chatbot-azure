@@ -1,5 +1,6 @@
 import { IDBPDatabase, openDB } from "idb";
 import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData } from "./IProvider";
+import { generateChatTitleApi } from "../../api";
 
 export class IndexedDBProvider implements IHistoryProvider {
     getProviderName = () => HistoryProviderOptions.IndexedDB;
@@ -74,19 +75,40 @@ export class IndexedDBProvider implements IHistoryProvider {
         return loadedItems;
     }
 
-    async addItem(id: string, answers: Answers): Promise<void> {
-        const timestamp = new Date().getTime();
-        const db = await this.init(); // 自動的に初期化
-        const tx = db.transaction(this.storeName, "readwrite");
-        const current = await tx.objectStore(this.storeName).get(id);
-        if (current) {
-            await tx.objectStore(this.storeName).put({ ...current, id, timestamp, answers });
-        } else {
-            const title = answers[0][0].length > 50 ? answers[0][0].substring(0, 50) + "..." : answers[0][0];
-            await tx.objectStore(this.storeName).add({ id, title, timestamp, answers });
+    async searchItems(query: string, count: number): Promise<HistoryMetaData[]> {
+        const db = await this.init();
+        const tx = db.transaction(this.storeName, "readonly");
+        const store = tx.objectStore(this.storeName);
+        const allItems = await store.getAll();
+        const normalizedQuery = query.trim().toLowerCase();
+
+        if (!normalizedQuery) {
+            return [];
         }
-        await tx.done;
-        return;
+
+        return allItems
+            .filter(item => typeof item.title === "string" && item.title.toLowerCase().includes(normalizedQuery))
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, count)
+            .map(item => ({ id: item.id, title: item.title, timestamp: item.timestamp }));
+    }
+
+    async addItem(id: string, answers: Answers, idToken?: string): Promise<void> {
+        const timestamp = new Date().getTime();
+        const db = await this.init();
+
+        const existingItem = await db.get(this.storeName, id);
+        if (existingItem) {
+            await db.put(this.storeName, { ...existingItem, id, timestamp, answers });
+        } else {
+            let title: string;
+            try {
+                title = await generateChatTitleApi(answers[0][0], idToken || "");
+            } catch {
+                title = answers[0][0].length > 50 ? answers[0][0].substring(0, 50) + "..." : answers[0][0];
+            }
+            await db.add(this.storeName, { id, title, timestamp, answers });
+        }
     }
 
     async getItem(id: string): Promise<Answers | null> {

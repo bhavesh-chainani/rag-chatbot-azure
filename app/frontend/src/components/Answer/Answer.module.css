@@ -38,6 +38,17 @@ h2 {
     padding: 0.3125em;
 }
 
+/* Verbatim triage question (blockquoted Q1:, Q3A:, … per chat_answer prompt) */
+.answerText .applicantVerbatimQuestion {
+    border-left-color: #a4262c;
+}
+
+.answerText .applicantVerbatimQuestion p,
+.answerText p.applicantVerbatimQuestion {
+    color: #a4262c;
+    font-weight: 700;
+}
+
 .selected {
     outline: 0.125em solid #9B2335;
 }

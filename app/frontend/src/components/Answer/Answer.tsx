@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, isValidElement, type ReactNode, type ComponentPropsWithoutRef } from "react";
+import type { ExtraProps } from "react-markdown";
 import { Button } from "@fluentui/react-components";
 import { Copy24Regular, Checkmark24Regular, LightbulbFilament24Regular, ClipboardTextLtr24Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
@@ -13,6 +14,68 @@ import { parseAnswerToHtml } from "./AnswerParser";
 import { AnswerIcon } from "./AnswerIcon";
 import { SpeechOutputBrowser } from "./SpeechOutputBrowser";
 import { SpeechOutputAzure } from "./SpeechOutputAzure";
+
+/** Collect plain text from rendered markdown nodes (order matches reading order). */
+function collectPlainTextPrefix(children: ReactNode, maxLen = 160): string {
+    let out = "";
+    const walk = (n: ReactNode): void => {
+        if (n == null || typeof n === "boolean") return;
+        if (typeof n === "string" || typeof n === "number") {
+            out += String(n);
+            return;
+        }
+        if (Array.isArray(n)) {
+            n.forEach(walk);
+            return;
+        }
+        if (isValidElement(n)) {
+            const props = n.props as { children?: ReactNode };
+            if (props.children != null) {
+                walk(props.children);
+            }
+        }
+    };
+    walk(children);
+    return out.trimStart().slice(0, maxLen);
+}
+
+/** Q1: / Q3A: verbatim script; optional leading `>` when the model prints blockquote style without a blank line. */
+const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+[A-Za-z]*\s*:/;
+
+function isApplicantVerbatimQuestionLine(children: ReactNode): boolean {
+    const prefix = collectPlainTextPrefix(children);
+    const afterOptionalGt = prefix.replace(/^\s*>\s*/, "");
+    return APPLICANT_VERBATIM_QUESTION_BODY.test(afterOptionalGt);
+}
+
+type BlockquoteProps = ComponentPropsWithoutRef<"blockquote"> & Partial<ExtraProps>;
+
+function ApplicantQuestionBlockquote({ children, className, ...rest }: BlockquoteProps) {
+    const highlight = isApplicantVerbatimQuestionLine(children);
+    const mergedClass = [className, highlight ? styles.applicantVerbatimQuestion : undefined].filter(Boolean).join(" ") || undefined;
+    return (
+        <blockquote {...rest} className={mergedClass}>
+            {children}
+        </blockquote>
+    );
+}
+
+type ParagraphProps = ComponentPropsWithoutRef<"p"> & Partial<ExtraProps>;
+
+function ApplicantQuestionParagraph({ children, className, ...rest }: ParagraphProps) {
+    const highlight = isApplicantVerbatimQuestionLine(children);
+    const mergedClass = [className, highlight ? styles.applicantVerbatimQuestion : undefined].filter(Boolean).join(" ") || undefined;
+    return (
+        <p {...rest} className={mergedClass}>
+            {children}
+        </p>
+    );
+}
+
+const answerMarkdownComponents = {
+    blockquote: ApplicantQuestionBlockquote,
+    p: ApplicantQuestionParagraph
+};
 
 interface Props {
     answer: ChatAppResponse;
@@ -110,7 +173,12 @@ export const Answer = ({
 
             <div style={{ flexGrow: 1 }}>
                 <div className={styles.answerText}>
-                    <ReactMarkdown children={sanitizedAnswerHtml} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
+                    <ReactMarkdown
+                        children={sanitizedAnswerHtml}
+                        components={answerMarkdownComponents}
+                        rehypePlugins={[rehypeRaw]}
+                        remarkPlugins={[remarkGfm]}
+                    />
                 </div>
             </div>
 

@@ -1,8 +1,8 @@
 {
   "id": "GEN3-T13",
-  "category": "PBSG Hotline \u2014 General Enquiries (v3)",
-  "topic": "Vulnerable Applicant \u2014 Cue-Based Assessment & Escalation",
-  "user_query": "Applicant seems vulnerable \u2014 how do I assess this and adapt my response?",
+  "category": "PBSG Hotline — General Enquiries (v3)",
+  "topic": "Vulnerable Applicant — Cue-Based Assessment & Escalation",
+  "user_query": "Applicant seems vulnerable — how do I assess this and adapt my response?",
   "variations": [
     "Applicant is elderly and confused.",
     "Applicant speaks very little English.",
@@ -10,37 +10,51 @@
     "Applicant is under 18.",
     "Applicant has a disability that affects their ability to seek help."
   ],
-  "part_a_general_info": "Vulnerability affects (a) how you conduct the call (pace, language, patience) and (b) which scheme pathway is appropriate. You do NOT ask the applicant directly \"are you vulnerable?\" \u2014 you assess from cues and, where natural, use the sensitively-worded probes in Part B. If two or more factors are present, or any single severe factor (e.g., minor, ongoing violence, FSC-referred), treat as HIGH-vulnerability and escalate. Vulnerability factors to listen for: \u2022 Violence victim (current or recent) \u2022 Elderly applicant with apparent confusion or isolation \u2022 Technology-illiterate (cannot use email, apps, online forms) \u2022 Language barrier (limited English and no other listed language handled) \u2022 Minor (under 18) \u2022 Already engaged with an FSC social worker \u2022 Basic needs at risk (food, shelter, money) \u2022 Physical or cognitive disability affecting independent action Scheme implications: vulnerable applicants may qualify for the Community Law Centre (free legal consultation, usually by in-house team who can provide greater support). High-vulnerability cases should be escalated to PBSG Staff (Route F of GEN3-T01) for hand-holding.",
+  "part_a_general_info": "Vulnerability affects (a) how you conduct the call (pace, language, patience) and (b) which scheme pathway is appropriate. You do NOT ask the applicant directly \"are you vulnerable?\" — you assess from cues and, where natural, use the sensitively-worded probes in Part B. If two or more factors are present, or any single severe factor (e.g., minor, ongoing violence, FSC-referred), treat as HIGH-vulnerability and escalate. Vulnerability factors to listen for: • Violence victim (current or recent) • Elderly applicant with apparent confusion or isolation • Technology-illiterate (cannot use email, apps, online forms) • Language barrier (limited English and no other listed language handled) • Minor (under 18) • Already engaged with an FSC social worker • Basic needs at risk (food, shelter, money) • Physical or cognitive disability affecting independent action Scheme implications: vulnerable applicants may qualify for the Community Law Centre (free legal consultation, usually by in-house team who can provide greater support). High-vulnerability cases should be escalated to PBSG Staff (Route F of GEN3-T01) for hand-holding.",
   "triage_questions": [
-    "Q1: \"To make sure I understand your situation \u2014 are you speaking for yourself today, or did someone help you make this call?\" (Probes: caregiver involvement, third-party influence, language assistance.)",
-    "Q2: \"Is there anything about how we're speaking today that would make it easier for you \u2014 for example, would you prefer a different language, or should I speak more slowly?\"",
+    "Q1: \"To make sure I understand your situation — are you speaking for yourself today, or did someone help you make this call?\" (Probes: caregiver involvement, third-party influence, language assistance.)",
+    "Q2: \"Is there anything about how we're speaking today that would make it easier for you — for example, would you prefer a different language, or should I speak more slowly?\"",
     "Q3: \"Are you currently safe where you are, and do you have a safe place to stay tonight?\"",
     "Q4: \"Are you currently working with a social worker, counsellor, or case officer on anything?\"",
-    "Q5: \"Can I just check \u2014 are you 18 or older?\" (Only ask if age is genuinely unclear. Do not ask applicants who are obviously adult.)",
-    "Q6: \"Is there anything I should know that would help me help you better \u2014 any health, mobility, or access concerns?\""
+    "Q5: \"Can I just check — are you 18 or older?\" (Only ask if age is genuinely unclear. Do not ask applicants who are obviously adult.)",
+    "Q6: \"Is there anything I should know that would help me help you better — any health, mobility, or access concerns?\""
   ],
-  "branching_logic": [
-    "Q1: \"To make sure I understand your situation \u2014 are you speaking for yourself today, or did someone help you make this call?\" (Probes: caregiver involvement, third-party influence, language assistance.)",
-    "If applicant indicates a helper is present \u2192 note who; ask permission to continue with applicant directly.",
-    "Q2: \"Is there anything about how we're speaking today that would make it easier for you \u2014 for example, would you prefer a different language, or should I speak more slowly?\"",
-    "Record language preference. If not one PBSG handles, note for escalation to interpreter.",
-    "Q3: \"Are you currently safe where you are, and do you have a safe place to stay tonight?\"",
-    "If No or unclear \u2192 cross-reference GEN3-T06 (Urgent Matter) Route A/B.",
-    "Q4: \"Are you currently working with a social worker, counsellor, or case officer on anything?\"",
-    "If Yes \u2192 ask for the FSC or organisation name; treat as HIGH-vulnerability; coordinate rather than duplicate.",
-    "Q5: \"Can I just check \u2014 are you 18 or older?\" (Only ask if age is genuinely unclear. Do not ask applicants who are obviously adult.)",
-    "If applicant is under 18 \u2192 Route B (Minor \u2014 Special Handling).",
-    "Q6: \"Is there anything I should know that would help me help you better \u2014 any health, mobility, or access concerns?\"",
-    "Note any disclosed disability or accessibility need.",
-    "If \u22652 vulnerability cues detected OR any severe single factor (minor, active violence, FSC-referred) \u2192 Route A (High-Vulnerability \u2014 Escalate + Community Law Centre).",
-    "If 1 cue, non-severe \u2192 Route C (Low-Vulnerability \u2014 Standard Triage with Adaptations).",
-    "If minor confirmed \u2192 Route B.",
-    "If unclear/uncertain \u2192 Route A (Escalate to PBSG Staff for professional assessment)."
-  ],
+  "branching_logic": {
+    "Q1": {
+      "question": "\"To make sure I understand your situation — are you speaking for yourself today, or did someone help you make this call?\" (Probes: caregiver involvement, third-party influence, language assistance.)",
+      "if_helper_present": "Note who; ask permission to continue with applicant directly."
+    },
+    "Q2": {
+      "question": "\"Is there anything about how we're speaking today that would make it easier for you — for example, would you prefer a different language, or should I speak more slowly?\"",
+      "action": "Record language preference. If not one PBSG handles, note for escalation to interpreter."
+    },
+    "Q3": {
+      "question": "\"Are you currently safe where you are, and do you have a safe place to stay tonight?\"",
+      "if_no_or_unclear": "Cross-reference GEN3-T06 (Urgent Matter) Route A/B."
+    },
+    "Q4": {
+      "question": "\"Are you currently working with a social worker, counsellor, or case officer on anything?\"",
+      "if_yes": "Ask for the FSC or organisation name; treat as HIGH-vulnerability; coordinate rather than duplicate."
+    },
+    "Q5": {
+      "question": "\"Can I just check — are you 18 or older?\" (Only ask if age is genuinely unclear. Do not ask applicants who are obviously adult.)",
+      "if_under_18": "Route B (Minor — Special Handling)."
+    },
+    "Q6": {
+      "question": "\"Is there anything I should know that would help me help you better — any health, mobility, or access concerns?\"",
+      "action": "Note any disclosed disability or accessibility need."
+    },
+    "routing_rules": {
+      "if_2_or_more_cues_or_severe_single_factor": "Route A (High-Vulnerability — Escalate + Community Law Centre). Severe factors: minor, active violence, FSC-referred.",
+      "if_1_cue_non_severe": "Route C (Low-Vulnerability — Standard Triage with Adaptations).",
+      "if_minor_confirmed": "Route B (Minor — Special Handling).",
+      "if_unclear": "Route A (Escalate to PBSG Staff for professional assessment)."
+    }
+  },
   "routing": [
-    "Route A (High-Vulnerability \u2014 Escalate + Community Law Centre): Take down full intake particulars + vulnerability factors noted. Escalate to PBSG Staff for further assessment and active follow-up. If applicant is able to communicate their issue, proceed with standard triage (GEN3-T01) but note that routes may be adjusted by staff.",
-    "Route B (Minor \u2014 Special Handling): Do NOT continue the triage independently. Escalate immediately to PBSG Staff. Do not ask the minor for sensitive disclosures beyond what they have volunteered. If the minor indicates any immediate safety concern, follow GEN3-T06 Route A.",
-    "Route C (Low-Vulnerability \u2014 Standard Triage with Adaptations): Continue with GEN3-T01, but: (a) slow your pace; (b) repeat scheme names and URLs; (c) offer to email a summary after the call; (d) do not rush the applicant. Flag the call in the intake note with the cue observed, for staff awareness."
+    "Route A (High-Vulnerability — Escalate + Community Law Centre): Take down full intake particulars + vulnerability factors noted. Escalate to PBSG Staff for further assessment and active follow-up. If applicant is able to communicate their issue, proceed with standard triage (GEN3-T01) but note that routes may be adjusted by staff.",
+    "Route B (Minor — Special Handling): Do NOT continue the triage independently. Escalate immediately to PBSG Staff. Do not ask the minor for sensitive disclosures beyond what they have volunteered. If the minor indicates any immediate safety concern, follow GEN3-T06 Route A.",
+    "Route C (Low-Vulnerability — Standard Triage with Adaptations): Continue with GEN3-T01, but: (a) slow your pace; (b) repeat scheme names and URLs; (c) offer to email a summary after the call; (d) do not rush the applicant. Flag the call in the intake note with the cue observed, for staff awareness."
   ],
-  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
+  "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

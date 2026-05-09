@@ -155,5 +155,7 @@ app/functions/*/prepdocslib/
 app/functions/*/requirements.txt
 
 data/**/*.md5
+# Microsoft Office lock files while a document is open (~$Name.docx)
+**/~$*
 
 .DS_Store

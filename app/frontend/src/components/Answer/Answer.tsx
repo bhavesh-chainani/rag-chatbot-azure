@@ -42,16 +42,32 @@ function collectPlainTextPrefix(children: ReactNode, maxLen = 160): string {
 /** Q1: / Q3A: verbatim script; optional leading `>` when the model prints blockquote style without a blank line. */
 const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+[A-Za-z]*\s*:/;
 
-function isApplicantVerbatimQuestionLine(children: ReactNode): boolean {
+/** OUTPUT A routing script: intern reads quoted text aloud (after optional `>`). */
+const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;
+
+function shouldHighlightApplicantVerbatim(children: ReactNode): boolean {
     const prefix = collectPlainTextPrefix(children);
     const afterOptionalGt = prefix.replace(/^\s*>\s*/, "");
-    return APPLICANT_VERBATIM_QUESTION_BODY.test(afterOptionalGt);
+    if (APPLICANT_VERBATIM_QUESTION_BODY.test(afterOptionalGt)) return true;
+    if (APPLICANT_VERBATIM_QUOTED_SCRIPT.test(afterOptionalGt)) return true;
+    return false;
+}
+
+/**
+ * If the model puts "Tell the applicant:" / "Ask the applicant…" and `>` on one line, markdown
+ * keeps it as a single paragraph so the script is not blockquoted or highlighted. Force a break
+ * so `>` starts its own blockquote line (matches OUTPUT B/C layout).
+ */
+function ensureVerbatimBlockquoteNewline(markdown: string): string {
+    return markdown
+        .replace(/(\*\*Tell the applicant:\*\*|Tell the applicant:)\s+(>)/g, "$1\n\n$2")
+        .replace(/(\*\*Ask the applicant \(read verbatim\):\*\*|Ask the applicant \(read verbatim\):)\s+(>)/g, "$1\n\n$2");
 }
 
 type BlockquoteProps = ComponentPropsWithoutRef<"blockquote"> & Partial<ExtraProps>;
 
 function ApplicantQuestionBlockquote({ children, className, ...rest }: BlockquoteProps) {
-    const highlight = isApplicantVerbatimQuestionLine(children);
+    const highlight = shouldHighlightApplicantVerbatim(children);
     const mergedClass = [className, highlight ? styles.applicantVerbatimQuestion : undefined].filter(Boolean).join(" ") || undefined;
     return (
         <blockquote {...rest} className={mergedClass}>
@@ -63,7 +79,7 @@ function ApplicantQuestionBlockquote({ children, className, ...rest }: Blockquot
 type ParagraphProps = ComponentPropsWithoutRef<"p"> & Partial<ExtraProps>;
 
 function ApplicantQuestionParagraph({ children, className, ...rest }: ParagraphProps) {
-    const highlight = isApplicantVerbatimQuestionLine(children);
+    const highlight = shouldHighlightApplicantVerbatim(children);
     const mergedClass = [className, highlight ? styles.applicantVerbatimQuestion : undefined].filter(Boolean).join(" ") || undefined;
     return (
         <p {...rest} className={mergedClass}>
@@ -110,6 +126,7 @@ export const Answer = ({
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
+    const markdownForDisplay = useMemo(() => ensureVerbatimBlockquoteNewline(sanitizedAnswerHtml), [sanitizedAnswerHtml]);
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -174,7 +191,7 @@ export const Answer = ({
             <div style={{ flexGrow: 1 }}>
                 <div className={styles.answerText}>
                     <ReactMarkdown
-                        children={sanitizedAnswerHtml}
+                        children={markdownForDisplay}
                         components={answerMarkdownComponents}
                         rehypePlugins={[rehypeRaw]}
                         remarkPlugins={[remarkGfm]}

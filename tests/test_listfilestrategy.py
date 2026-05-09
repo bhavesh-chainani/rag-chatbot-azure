@@ -133,6 +133,21 @@ def test_locallistfilestrategy_checkmd5():
 
 
 @pytest.mark.asyncio
+async def test_locallistfilestrategy_skips_office_lock_files():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        for filename in ["real.pdf", "~$real.docx"]:
+            with open(os.path.join(tmpdirname, filename), "w") as f:
+                f.write("test")
+        local_list_strategy = LocalListFileStrategy(path_pattern=f"{tmpdirname}/*")
+        filepaths = sorted([path async for path in local_list_strategy.list_paths()])
+        assert filepaths == [os.path.join(tmpdirname, "real.pdf")]
+        files = [file async for file in local_list_strategy.list()]
+        assert len(files) == 1
+        assert files[0].filename() == "real.pdf"
+        files[0].close()
+
+
+@pytest.mark.asyncio
 async def test_locallistfilestrategy_exclude_basenames():
     with tempfile.TemporaryDirectory() as tmpdirname:
         for filename in ["keep.pdf", "skip.pdf"]:

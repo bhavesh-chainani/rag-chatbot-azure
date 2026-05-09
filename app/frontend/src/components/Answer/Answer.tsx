@@ -52,12 +52,13 @@ const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+[A-Za-z]*\s*:/;
 const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;
 
 /** Markdown labels before the script (must match chat_answer.system.jinja2 OUTPUT A/B/C/E). */
+/** Longer "Tell … (read verbatim)" before bare "Tell the applicant:" so the regex does not stop early. */
 const APPLICANT_INSTRUCTION_LABEL_MD =
-    "(?:\\*\\*Tell the applicant:\\*\\*|Tell the applicant:|\\*\\*Ask the applicant \\(read verbatim\\):\\*\\*|Ask the applicant \\(read verbatim\\):|\\*\\*Back to triage — ask the applicant \\(read verbatim\\):\\*\\*|Back to triage — ask the applicant \\(read verbatim\\):)";
+    "(?:\\*\\*Tell the applicant \\(read verbatim\\):\\*\\*|Tell the applicant \\(read verbatim\\):|\\*\\*Tell the applicant:\\*\\*|Tell the applicant:|\\*\\*Ask the applicant \\(read verbatim\\):\\*\\*|Ask the applicant \\(read verbatim\\):|\\*\\*Back to triage — ask the applicant \\(read verbatim\\):\\*\\*|Back to triage — ask the applicant \\(read verbatim\\):)";
 
 /** Plain-text label alternation after ReactMarkdown resolves bold (for highlight detection). */
 const PLAIN_APPLICANT_LABEL_ALT =
-    "Tell the applicant:|Ask the applicant \\(read verbatim\\):|Back to triage — ask the applicant \\(read verbatim\\):";
+    "Tell the applicant \\(read verbatim\\):|Tell the applicant:|Ask the applicant \\(read verbatim\\):|Back to triage — ask the applicant \\(read verbatim\\):";
 
 function applicantVerbatimBodyPrefix(children: ReactNode): string {
     let t = collectPlainTextPrefix(children);

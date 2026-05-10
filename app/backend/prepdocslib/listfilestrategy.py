@@ -104,7 +104,11 @@ class LocalListFileStrategy(ListFileStrategy):
                 async for p in self._list_paths(f"{path}/*"):
                     yield p
             else:
-                if os.path.basename(path) in self.exclude_basenames:
+                basename = os.path.basename(path)
+                if basename in self.exclude_basenames:
+                    continue
+                # Skip Microsoft Office lock files (e.g. ~$Document.docx) — not valid packages / corrupt when read.
+                if basename.startswith("~$"):
                     continue
                 # Only list files, not directories
                 yield path

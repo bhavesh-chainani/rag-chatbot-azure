@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -63,12 +64,13 @@ Guardrails
 """.strip()
     entry = pbsg_build.parse_gen3_entry("GEN3-T98", "Criminal sample", body)
     bl = entry["branching_logic"]
-    assert bl[0].startswith("Q5:")
-    assert bl[1].startswith("If Q5")
-    assert bl[2].startswith("Q6")
-    assert "PCHI" in bl[3]
-    assert bl[4].startswith("If Q6")
-    assert bl[5].startswith("NOTE")
+    assert isinstance(bl, dict)
+    assert "Q5" in bl and bl["Q5"]["question"].startswith("Short question")
+    assert bl["Q5"]["if_no"] == "next"
+    assert "Q6" in bl
+    assert "PCHI" in bl["Q6"].get("definition", "")
+    assert bl["Q6"]["if_yes"] == "Route E"
+    assert bl["note"].startswith("NOTE")
 
 
 def test_gen3_triage_questions_include_parenthetical_q_labels(pbsg_build):
@@ -118,5 +120,7 @@ Guardrails
 	•	G
 """.strip()
     entry = pbsg_build.parse_gen3_entry("GEN3-T97", "Test", body)
-    assert "see Part C routing" in "\n".join(entry["branching_logic"])
-    assert any("Q2:" in x for x in entry["branching_logic"])
+    bl = entry["branching_logic"]
+    flat = json.dumps(bl, ensure_ascii=False)
+    assert "see Part C routing" in flat
+    assert "Q2" in bl and "Second" in bl["Q2"]["question"]

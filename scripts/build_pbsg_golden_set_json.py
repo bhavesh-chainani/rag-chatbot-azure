@@ -2,7 +2,9 @@ import argparse
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
@@ -36,6 +38,17 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def apply_text_transform(obj: Any, fn: Callable[[str], str]) -> Any:
+    """Recursively apply a text transform function to all strings in a nested structure."""
+    if isinstance(obj, str):
+        return fn(obj)
+    if isinstance(obj, list):
+        return [apply_text_transform(item, fn) for item in obj]
+    if isinstance(obj, dict):
+        return {k: apply_text_transform(v, fn) for k, v in obj.items()}
+    return obj
+
+
 def replace_caller_with_applicant(entry: dict) -> dict:
     """Replace 'caller' with 'applicant' in all string fields (preserving case)."""
 
@@ -45,15 +58,7 @@ def replace_caller_with_applicant(entry: dict) -> dict:
         text = text.replace("CALLER", "APPLICANT")
         return text
 
-    result = {}
-    for key, value in entry.items():
-        if isinstance(value, str):
-            result[key] = replace_text(value)
-        elif isinstance(value, list):
-            result[key] = [replace_text(item) if isinstance(item, str) else item for item in value]
-        else:
-            result[key] = value
-    return result
+    return cast(dict, apply_text_transform(entry, replace_text))
 
 
 def normalize_gen3_handoff_ids(entry: dict) -> dict:
@@ -64,15 +69,7 @@ def normalize_gen3_handoff_ids(entry: dict) -> dict:
         text = text.replace("GEN3-T-CIV", "GEN3-T04")
         return text
 
-    result = {}
-    for key, value in entry.items():
-        if isinstance(value, str):
-            result[key] = fix_text(value)
-        elif isinstance(value, list):
-            result[key] = [fix_text(item) if isinstance(item, str) else item for item in value]
-        else:
-            result[key] = value
-    return result
+    return cast(dict, apply_text_transform(entry, fix_text))
 
 
 def normalize_gen3_t03_q4_not_sure(entry: dict) -> dict:
@@ -80,22 +77,29 @@ def normalize_gen3_t03_q4_not_sure(entry: dict) -> dict:
     if entry.get("id") != "GEN3-T03":
         return entry
     bl = entry.get("branching_logic")
-    if not isinstance(bl, list):
-        return entry
     replacement = (
-        "If Q4 = Not Sure → Clarify whether the applicant has at least one child who is a "
+        "Clarify whether the applicant has at least one child who is a "
         "Singapore Citizen and is below 21 years old (Q2 already established the applicant is not SGC/PR); "
         "if still unclear, Route F (Escalate to PBSG Staff)."
     )
-    new_bl: list[str] = []
-    for item in bl:
-        if isinstance(item, str) and item.startswith("If Q4 = Not Sure") and "nationality/residency" in item:
-            new_bl.append(replacement)
-        else:
-            new_bl.append(item)
-    out = dict(entry)
-    out["branching_logic"] = new_bl
-    return out
+    if isinstance(bl, dict):
+        q4 = bl.get("Q4", {})
+        for key, val in q4.items():
+            if isinstance(val, str) and "nationality/residency" in val:
+                q4[key] = replacement
+        return entry
+    if isinstance(bl, list):
+        full_replacement = "If Q4 = Not Sure → " + replacement
+        new_bl: list[str] = []
+        for item in bl:
+            if isinstance(item, str) and item.startswith("If Q4 = Not Sure") and "nationality/residency" in item:
+                new_bl.append(full_replacement)
+            else:
+                new_bl.append(item)
+        out = dict(entry)
+        out["branching_logic"] = new_bl
+        return out
+    return entry
 
 
 def extract_between(text: str, start_marker: str, end_markers: list[str]) -> str:
@@ -222,31 +226,107 @@ def extract_gen3_triage_questions(part_b: str) -> list[str]:
     return [normalize_whitespace(m.group(0)) for m in line_re.finditer(part_b)]
 
 
-def extract_gen3_branching_logic(part_b: str) -> list[str]:
+def extract_gen3_branching_logic(part_b: str) -> dict:
+    """Extract Part B branching questions into a structured dict keyed by question id.
+
+    Each question becomes a dict with 'question' and 'if_*' keys mapping conditions
+    to outcomes (Route or Proceed).
     """
-    Ordered Part B content for RAG: each triage question line, then bullets / notes / continuations
-    in source order. Avoid relying on bullets alone so definitions such as the PCHI parenthetical
-    under Q6 are not dropped.
-    """
-    out: list[str] = []
+    lines: list[str] = []
     for raw in part_b.splitlines():
         line = raw.strip()
         if not line:
             continue
         if re.match(r"^Q\d+", line):
-            out.append(normalize_whitespace(line))
-            continue
-        if line.startswith("("):
-            out.append(normalize_whitespace(line))
-            continue
-        if line.startswith("NOTE"):
-            out.append(normalize_whitespace(line))
-            continue
-        if line.startswith(("•", "◦")):
+            lines.append(normalize_whitespace(line))
+        elif line.startswith("("):
+            lines.append(normalize_whitespace(line))
+        elif line.startswith("NOTE"):
+            lines.append(normalize_whitespace(line))
+        elif line.startswith(("•", "◦")):
             bullet = line[1:].strip()
             if bullet:
-                out.append(normalize_whitespace(bullet).strip('"'))
-    return out
+                lines.append(normalize_whitespace(bullet).strip('"'))
+
+    return branching_lines_to_dict(lines)
+
+
+def condition_to_key(condition: str) -> str:
+    """Convert a branching condition like 'Yes', 'No (foreigner)', 'Not Sure' to a snake_case if_* key."""
+    c = condition.strip().rstrip(".")
+    paren_match = re.search(r"\(([^)]+)\)", c)
+    paren_suffix = ""
+    if paren_match:
+        paren_text = paren_match.group(1).strip()
+        short = re.sub(r"[^a-z0-9]", "_", paren_text.lower())
+        short = re.sub(r"_+", "_", short).strip("_")
+        if len(short) <= 20:
+            paren_suffix = f"_{short}"
+        c = re.sub(r"\s*\(.*?\)\s*", " ", c).strip()
+    c = c.lower()
+    c = c.replace("not sure", "not_sure")
+    c = c.replace("/", "_or_")
+    c = re.sub(r"[^a-z0-9_]", "_", c)
+    c = re.sub(r"_+", "_", c).strip("_")
+    c += paren_suffix
+    if len(c) > 60:
+        c = c[:60].rstrip("_")
+    return f"if_{c}"
+
+
+def branching_lines_to_dict(lines: list[str]) -> dict:
+    """Convert flat branching logic lines into a structured dict keyed by question id."""
+    result: dict = {}
+    current_q: str | None = None
+    q_header_re = re.compile(r"^(Q\d+[A-Z]?)(?:\s*\([^)]*\))?\s*[:\u2014]\s*(.+)$")
+    arrow = r"(?:\u2192|->)"
+    if_re = re.compile(rf"^If\s+(Q\d+[A-Z]?)\s*=\s*(.+?)\s*{arrow}\s*(.+)$")
+    short_if_re = re.compile(
+        rf"^If\s+(Yes|No|Not\s+Sure)\s*{arrow}\s*(.+)$",
+        re.IGNORECASE,
+    )
+
+    for line in lines:
+        q_match = q_header_re.match(line)
+        if q_match:
+            current_q = q_match.group(1)
+            question_text = q_match.group(2).strip()
+            if current_q not in result:
+                result[current_q] = {}
+            result[current_q]["question"] = question_text
+            continue
+
+        if_match = if_re.match(line)
+        if if_match:
+            q_id = if_match.group(1)
+            cond = if_match.group(2).strip()
+            outcome = if_match.group(3).strip()
+            key = condition_to_key(cond)
+            if q_id not in result:
+                result[q_id] = {}
+            if q_id != current_q and current_q and q_id not in result:
+                result[q_id] = {}
+            result[q_id][key] = outcome
+            continue
+
+        short_match = short_if_re.match(line)
+        if short_match and current_q:
+            word = short_match.group(1).lower().replace(" ", "_")
+            outcome = short_match.group(2).strip()
+            if current_q not in result:
+                result[current_q] = {}
+            result[current_q][f"if_{word}"] = outcome
+            continue
+
+        if line.startswith("(") and current_q and current_q in result:
+            result[current_q]["definition"] = line
+            continue
+
+        if line.startswith("NOTE"):
+            result["note"] = line
+            continue
+
+    return result
 
 
 def parse_gen3_entry(entry_id: str, topic: str, body: str) -> dict:
@@ -364,7 +444,7 @@ def main() -> None:
     for entry in entries:
         eid = entry["id"]
         out_path = OUTPUT_DIR / f"{eid}.json"
-        out_path.write_text(json.dumps(entry, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        out_path.write_text(json.dumps(entry, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"Wrote {len(entries)} files from {source.name} to {OUTPUT_DIR}")
 
 

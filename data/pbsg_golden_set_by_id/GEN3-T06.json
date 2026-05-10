@@ -1,7 +1,7 @@
 {
   "id": "GEN3-T06",
-  "category": "PBSG Hotline \u2014 General Enquiries (v3)",
-  "topic": "Urgent Matter \u2014 Emergency / FSC / Concurrent Legal Pathway",
+  "category": "PBSG Hotline — General Enquiries (v3)",
+  "topic": "Urgent Matter — Emergency / FSC / Concurrent Legal Pathway",
   "user_query": "Applicant appears to be in urgent distress or faces an imminent deadline. How do I respond?",
   "variations": [
     "Applicant says they are in danger right now.",
@@ -10,37 +10,45 @@
     "Applicant says they have no food or money for their family.",
     "Applicant mentioned self-harm."
   ],
-  "part_a_general_info": "Urgency in the PBSG context is BROADER than legal deadlines. It includes physical safety, basic needs, immigration status, child welfare, and mental health crises. Your response must be concurrent \u2014 emergency services + social services + legal pathway in parallel, NOT sequential. Urgency trigger list (any one qualifies): \u2022 Physical violence occurring or threatened (incl. family violence, workplace violence) \u2022 Self-harm or suicide risk (applicant or someone they are calling about) \u2022 Child abduction or imminent removal of a child \u2022 Immigration pass expiring within 14 days (or already expired) \u2022 Imminent homelessness, no food, no money for basic needs \u2022 Court date or legal deadline within 14 days \u2022 Applicant in police custody or detention (or their dependant is) \u2022 Medical emergency involving the applicant or a dependant Key numbers to have ready: \u2022 Police emergency: 999 \u2022 Ambulance / fire: 995 \u2022 National Mindline (24-hour national mental health hotline): 1771 \u2022 National Anti-Violence and Sexual Harassment Helpline (NAVH): 1800-777-0000 \u2022 SSO (Social Service Office for financial assistance) and FSC (Family Service Centre for social assistance) directories: https://www.msf.gov.sg/our-services/directories \u2022 PBSG Urgent Legal Consultation: same-day slots at the State Courts (see GEN3-I06)",
+  "part_a_general_info": "Urgency in the PBSG context is BROADER than legal deadlines. It includes physical safety, basic needs, immigration status, child welfare, and mental health crises. Your response must be concurrent — emergency services + social services + legal pathway in parallel, NOT sequential. Urgency trigger list (any one qualifies): • Physical violence occurring or threatened (incl. family violence, workplace violence) • Self-harm or suicide risk (applicant or someone they are calling about) • Child abduction or imminent removal of a child • Immigration pass expiring within 14 days (or already expired) • Imminent homelessness, no food, no money for basic needs • Court date or legal deadline within 14 days • Applicant in police custody or detention (or their dependant is) • Medical emergency involving the applicant or a dependant Key numbers to have ready: • Police emergency: 999 • Ambulance / fire: 995 • National Mindline (24-hour national mental health hotline): 1771 • National Anti-Violence and Sexual Harassment Helpline (NAVH): 1800-777-0000 • SSO (Social Service Office for financial assistance) and FSC (Family Service Centre for social assistance) directories: https://www.msf.gov.sg/our-services/directories • PBSG Urgent Legal Consultation: same-day slots at the State Courts (see GEN3-I06)",
   "triage_questions": [
     "Q1: Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
     "Q2: Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
     "Q3: Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
     "Q4: Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?"
   ],
-  "branching_logic": [
-    "Q1: Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
-    "If Q1 = Yes \u2192 Route A (Emergency Services \u2014 IMMEDIATE)",
-    "If Q1 = Not Sure \u2192 Route A as a precaution",
-    "If Q1 = No \u2192 Proceed to Q2",
-    "Q2: Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
-    "If Q2 = Yes \u2192 Route B (SSO / FSC \u2014 PRIMARY)",
-    "If Q2 = No \u2192 Proceed to Q3",
-    "If Q2 = Not Sure \u2192 Route B as primary AND proceed to Q3 (concurrent)",
-    "Q3: Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
-    "If Q3 = Yes \u2192 Route C (Urgent Legal Consultation \u2014 Same-Day State Courts Slot)",
-    "If Q3 = No \u2192 Proceed to Q4",
-    "If Q3 = Not Sure \u2192 Route C AND proceed to Q4 (concurrent)",
-    "Q4: Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?",
-    "If Q4 = Yes \u2192 Route D (Return to GEN3-T01 for main triage)",
-    "If Q4 = No \u2192 Route E (Document urgency intake and close)",
-    "If Q4 = Not Sure \u2192 Route D (Return to GEN3-T01 for main triage)"
-  ],
+  "branching_logic": {
+    "Q1": {
+      "question": "Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
+      "if_yes": "Route A (Emergency Services — IMMEDIATE)",
+      "if_no": "Proceed to Q2",
+      "if_not_sure": "Route A as a precaution"
+    },
+    "Q2": {
+      "question": "Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
+      "if_yes": "Route B (SSO / FSC — PRIMARY)",
+      "if_no": "Proceed to Q3",
+      "if_not_sure": "Route B as primary AND proceed to Q3 (concurrent)"
+    },
+    "Q3": {
+      "question": "Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
+      "if_yes": "Route C (Urgent Legal Consultation — Same-Day State Courts Slot)",
+      "if_no": "Proceed to Q4",
+      "if_not_sure": "Route C AND proceed to Q4 (concurrent)"
+    },
+    "Q4": {
+      "question": "Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?",
+      "if_yes": "Route D (Return to GEN3-T01 for main triage)",
+      "if_no": "Route E (Document urgency intake and close)",
+      "if_not_sure": "Route D (Return to GEN3-T01 for main triage)"
+    }
+  },
   "routing": [
-    "Route A (Emergency Services \u2014 IMMEDIATE): Say to the applicant: \"The most important thing right now is your safety. Please call 999 for police or 995 for ambulance.\" After the call, note the incident, escalate to PBSG Staff (Route F of GEN3-T01) and, if the applicant still has a legal matter, arrange a call-back to triage through GEN3-T06 starting from Q2.",
-    "Route B (SSO / FSC \u2014 PRIMARY): Direct the applicant to the nearest Social Service Office (SSO) and Family Service Centre (FSC). Say: \"There are officers at Social Service Officers and social workers at Family Service Centres who may be able to help you. Let me help you find your nearest centre.\" Look up the SSO and FSC directory live: https://www.msf.gov.sg/our-services/directories \u2014 filter by the applicant's postal code. Provide the name, address, and phone number of the nearest SSO and FSC. If the applicant also has a legal issue, proceed concurrently to Route C or Route D as appropriate.",
-    "Route C (Return to GEN3-T01 and Escalate for Urgent Legal Consultation Assessment): Return to the main triage questions at GEN3-T01 to identify the appropriate scheme. If eligible for PBSG schemes, inform applicant, \"Your matter sounds like it may be urgent. Let me check how best we can assist you. I will try to call you back by the end of today.\u201d Take down: applicant name, contact, deadline date, brief matter, and answers to Q1-5 in GEN3-T01. Escalate to PBSG Staff immediately to check if applicant is eligible for Urgent Legal Consultation (same or next-day legal consultation). Refer intern to GEN3-I06 for full scheme details.",
+    "Route A (Emergency Services — IMMEDIATE): Say to the applicant: \"The most important thing right now is your safety. Please call 999 for police or 995 for ambulance.\" After the call, note the incident, escalate to PBSG Staff (Route F of GEN3-T01) and, if the applicant still has a legal matter, arrange a call-back to triage through GEN3-T06 starting from Q2.",
+    "Route B (SSO / FSC — PRIMARY): Direct the applicant to the nearest Social Service Office (SSO) and Family Service Centre (FSC). Say: \"There are officers at Social Service Officers and social workers at Family Service Centres who may be able to help you. Let me help you find your nearest centre.\" Look up the SSO and FSC directory live: https://www.msf.gov.sg/our-services/directories — filter by the applicant's postal code. Provide the name, address, and phone number of the nearest SSO and FSC. If the applicant also has a legal issue, proceed concurrently to Route C or Route D as appropriate.",
+    "Route C (Return to GEN3-T01 and Escalate for Urgent Legal Consultation Assessment): Return to the main triage questions at GEN3-T01 to identify the appropriate scheme. If eligible for PBSG schemes, inform applicant, \"Your matter sounds like it may be urgent. Let me check how best we can assist you. I will try to call you back by the end of today.” Take down: applicant name, contact, deadline date, brief matter, and answers to Q1-5 in GEN3-T01. Escalate to PBSG Staff immediately to check if applicant is eligible for Urgent Legal Consultation (same or next-day legal consultation). Refer intern to GEN3-I06 for full scheme details.",
     "Route D (Return to GEN3-T01): Once the urgent concern is addressed (or pathway confirmed), return to the main triage questions at GEN3-T01 to identify the appropriate scheme for the underlying legal matter.",
-    "Route E (Document and Close): Record the urgent intake in the system with a clear note of the concern raised and the pathway given. Inform applicant that they may call back if a legal matter emerges later. Resources to share with the applicant: SupportGoWhere \u2014 social and financial assistance PBSG YouTube channel \u2014 webinars on common legal issues Singapore Legal Advice \u2014 directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore \u2014 directory of lawyers Legal Services Regulatory Authority e-Services \u2014 search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
+    "Route E (Document and Close): Record the urgent intake in the system with a clear note of the concern raised and the pathway given. Inform applicant that they may call back if a legal matter emerges later. Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
   ],
-  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
+  "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

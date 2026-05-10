@@ -45,8 +45,8 @@ function collectPlainTextPrefix(children: ReactNode, maxLen = 160): string {
     return collectPlainTextFromNodes(children, maxLen);
 }
 
-/** Q1: / Q3A: verbatim script; optional leading `>` when the model prints blockquote style without a blank line. */
-const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+[A-Za-z]*\s*:/;
+/** Q1: / Q3A: / Q2 follow-up: verbatim script; optional leading `>` when the model prints blockquote style without a blank line. */
+const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+(?:[A-Za-z]+(?:\s+[-\w]+)*|(?:\s+[-\w]+)+)?\s*:/;
 
 /** OUTPUT A routing script: intern reads quoted text aloud (after optional `>`). */
 const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;

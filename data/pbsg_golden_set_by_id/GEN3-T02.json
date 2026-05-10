@@ -1,7 +1,7 @@
 {
   "id": "GEN3-T02",
-  "category": "PBSG Hotline \u2014 General Enquiries (v3)",
-  "topic": "Criminal Stream Triage \u2014 CLAS Eligibility",
+  "category": "PBSG Hotline — General Enquiries (v3)",
+  "topic": "Criminal Stream Triage — CLAS Eligibility",
   "user_query": "Applicant has a criminal matter (arrest, charge, police investigation). How do I triage this?",
   "variations": [
     "Applicant has been charged in State Courts.",
@@ -9,50 +9,62 @@
     "Applicant needs criminal representation.",
     "Applicant is a foreigner facing a criminal charge."
   ],
-  "part_a_general_info": "This entry runs after the applicant has been routed here from GEN3-T01 Route G. The Criminal Stream is governed primarily by the Criminal Legal Aid Scheme (CLAS), administered by Pro Bono SG. CLAS eligibility: \u2022 Applicant is a foreigner. \u2022 Applicant is charged with a non-capital offence (i.e., NOT punishable with death). Capital cases (e.g., murder, drug trafficking above statutory thresholds) will qualify for LASCO (Legal Assistance Scheme for Capital Offences), which is a separate scheme. Applicant must already have been charged in court. \u2022 Offence is one that CLAS covers (https://www.probono.sg/get-legal-help/legal-representation/). If unsure \u2192 escalate. \u2022 Applicant meets means test (https://www.probono.sg/get-legal-help/legal-representation/), financial documents will need to be submitted upon application. \u2022 Applicant passes merits test (legal assessment on whether the case warrants representation, this will be done after application is submitted, intern/volunteer taking triaging call is NOT to reject based on their own assessment, no matter how unmeritorious the case appears to be). Singapore Citizens / PRs should be advised to apply to the Public Defender\u2019s Office (PDO) FIRST for criminal legal aid. Only if PDO is unable to assist, does PBSG become the primary route for SGC/PR. PBSG may be able to provide legal guidance and assess suitability for any further assistance, such as representation, on an exceptional basis. Foreigners are not eligible for PDO; CLAS is their first port of call.",
+  "part_a_general_info": "This entry runs after the applicant has been routed here from GEN3-T01 Route G. The Criminal Stream is governed primarily by the Criminal Legal Aid Scheme (CLAS), administered by Pro Bono SG. CLAS eligibility: • Applicant is a foreigner. • Applicant is charged with a non-capital offence (i.e., NOT punishable with death). Capital cases (e.g., murder, drug trafficking above statutory thresholds) will qualify for LASCO (Legal Assistance Scheme for Capital Offences), which is a separate scheme. Applicant must already have been charged in court. • Offence is one that CLAS covers (https://www.probono.sg/get-legal-help/legal-representation/). If unsure → escalate. • Applicant meets means test (https://www.probono.sg/get-legal-help/legal-representation/), financial documents will need to be submitted upon application. • Applicant passes merits test (legal assessment on whether the case warrants representation, this will be done after application is submitted, intern/volunteer taking triaging call is NOT to reject based on their own assessment, no matter how unmeritorious the case appears to be). Singapore Citizens / PRs should be advised to apply to the Public Defender’s Office (PDO) FIRST for criminal legal aid. Only if PDO is unable to assist, does PBSG become the primary route for SGC/PR. PBSG may be able to provide legal guidance and assess suitability for any further assistance, such as representation, on an exceptional basis. Foreigners are not eligible for PDO; CLAS is their first port of call.",
   "triage_questions": [
     "Q1: Is the offence a capital offence (punishable with death)?",
     "Q2: Is there a court date/deadline within 14 days?",
     "Q3: Has the applicant been charged in court?",
     "Q4: Is the applicant a Singapore Citizen or PR?",
-    "Q5 (SGC/PR path): Has the applicant applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
-    "Q6 (Means): Is the applicant's Per Capita Household Income (PCHI) \u2264 S$1,650, does the applicant have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
+    "Q5 (SGC/PR path): Has the applicant applied to, or been told about, the Public Defender’s Office (PDO)?",
+    "Q6 (Means): Is the applicant's Per Capita Household Income (PCHI) ≤ S$1,650, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"
   ],
-  "branching_logic": [
-    "Q1: Is the offence a capital offence (punishable with death)?",
-    "If Q1 = Yes \u2192 Route A (LASCO)",
-    "If Q1 = Not Sure \u2192 Route F (Escalate to PBSG Staff)",
-    "If Q1 = No \u2192 Proceed to Q2",
-    "Q2: Is there a court date/deadline within 14 days?",
-    "If Q2 = Yes \u2192 Route D (CLAS + Urgent concurrent \u2014 cross-reference GEN3-T06)",
-    "If Q2 = No \u2192 Proceed to Q3",
-    "If Q2 = Not Sure \u2192 Route D as precaution.",
-    "Q3: Has the applicant been charged in court?",
-    "If Q3 = Yes \u2192 Proceed to Q4",
-    "If Q3 = Not Sure \u2192 Route F (Escalate to PBSG Staff)",
-    "If Q3 = No \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
-    "Q4: Is the applicant a Singapore Citizen or PR?",
-    "If Q4 = Yes \u2192 Proceed to Q5",
-    "If Q4 = No (foreigner) \u2192 Proceed to Q6",
-    "If Q4 = Not Sure \u2192 Clarify nationality/residency status; if still unclear, Route F (Escalate to PBSG Staff).",
-    "Q5 (SGC/PR path): Has the applicant applied to, or been told about, the Public Defender\u2019s Office (PDO)?",
-    "If Q5 = No / has not applied \u2192 Route B (Refer to PDO First)",
-    "If Q5 = Yes, passed PDO or PDO is processing \u2192 Route C (PDO is handling \u2014 PBSG not needed)",
-    "If Q5 = Yes, and PDO is unable to assist \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
-    "If Q5 = Not Sure \u2192 Route B and describe PDO.",
-    "Q6 (Means): Is the applicant's Per Capita Household Income (PCHI) \u2264 S$1,650, does the applicant have savings of \u2264 $10,000 if younger than 60 years old (or \u2264 $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
-    "(PCHI = total monthly household income \u00f7 number of persons in household, including the applicant and all dependants.)",
-    "If Q6 = Yes \u2192 Route E (CLAS \u2014 Standard Intake)",
-    "If Q6 = No \u2192 Proceed to GEN3-T04 \u2014 Civil and Guidance Stream Triage",
-    "If Q6 = Not Sure \u2192 Walk through PCHI calculation live; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff)."
-  ],
+  "branching_logic": {
+    "Q1": {
+      "question": "Is the offence a capital offence (punishable with death)?",
+      "if_yes": "Route A (LASCO)",
+      "if_no": "Proceed to Q2",
+      "if_not_sure": "Route F (Escalate to PBSG Staff)"
+    },
+    "Q2": {
+      "question": "Is there a court date/deadline within 14 days?",
+      "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+      "if_no": "Proceed to Q3",
+      "if_not_sure": "Route D as precaution."
+    },
+    "Q3": {
+      "question": "Has the applicant been charged in court?",
+      "if_yes": "Proceed to Q4",
+      "if_no": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
+      "if_not_sure": "Route F (Escalate to PBSG Staff)"
+    },
+    "Q4": {
+      "question": "Is the applicant a Singapore Citizen or PR?",
+      "if_yes": "Proceed to Q5",
+      "if_no_foreigner": "Proceed to Q6",
+      "if_not_sure": "Clarify nationality/residency status; if still unclear, Route F (Escalate to PBSG Staff)."
+    },
+    "Q5": {
+      "question": "(SGC/PR path) Has the applicant applied to, or been told about, the Public Defender’s Office (PDO)?",
+      "if_no_or_has_not_applied": "Route B (Refer to PDO First)",
+      "if_yes_passed_or_processing": "Route C (PDO is handling — PBSG not needed)",
+      "if_yes_pdo_unable_to_assist": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
+      "if_not_sure": "Route B and describe PDO."
+    },
+    "Q6": {
+      "question": "(Means) Is the applicant's Per Capita Household Income (PCHI) ≤ S$1,650, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?",
+      "pchi_definition": "PCHI = total monthly household income ÷ number of persons in household, including the applicant and all dependants.",
+      "if_yes": "Route E (CLAS — Standard Intake)",
+      "if_no": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
+      "if_not_sure": "Walk through PCHI calculation live; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff)."
+    }
+  },
   "routing": [
     "Route A (LASCO): Inform the applicant that capital cases are handled under the Legal Assistance Scheme for Capital Offences (LASCO), which is not managed by PBSG. Inform applicant to apply for LASCO through the court.",
-    "Route B (Refer to PDO First): Describe the Public Defender\u2019s Office: \"PDO is the government's legal aid office for low-income Singapore Citizens and PRs who have been charged with a criminal offence. As you are a Singapore Citizen/PR, you should apply to PDO first. These are their eligibility criteria: https://pdo.mlaw.gov.sg/criminal-defence-aid/qualifying-for-help/. If PDO is unable to assist and you are unable to afford paid legal services, you can come back to us with your PDO rejection letter/reasons for us to assess whether we are able to assist. If you are able to afford a lawyer, we are unfortunately not likely able to assist but can provide you with directories of lawyers and some self-help resources for your consideration.\" Provide PDO contact: https://pdo.mlaw.gov.sg/ | 1800 2255 529 | 1 Havelock Square #B1-18 State Courts, Singapore 059724 (Mondays to Fridays: 9:00am to 12:00pm, 2:00pm to 5:00pm). Resources to share with the applicant: SupportGoWhere \u2014 social and financial assistance PBSG YouTube channel \u2014 webinars on common legal issues Singapore Legal Advice \u2014 directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore \u2014 directory of lawyers Legal Services Regulatory Authority e-Services \u2014 search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\"",
-    "Route C (PDO is Handling): Inform the applicant that they should direct any queries on their ongoing PDO application to PDO. Provide PDO contact: https://pdo.mlaw.gov.sg/ | 1800 2255 529 | 1 Havelock Square #B1-18 State Courts, Singapore 059724 (Mondays to Fridays: 9:00am to 12:00pm, 2:00pm to 5:00pm). Resources to share with the applicant: SupportGoWhere \u2014 social and financial assistance PBSG YouTube channel \u2014 webinars on common legal issues Singapore Legal Advice \u2014 directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore \u2014 directory of lawyers Legal Services Regulatory Authority e-Services \u2014 search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\"",
+    "Route B (Refer to PDO First): Describe the Public Defender’s Office: \"PDO is the government's legal aid office for low-income Singapore Citizens and PRs who have been charged with a criminal offence. As you are a Singapore Citizen/PR, you should apply to PDO first. These are their eligibility criteria: https://pdo.mlaw.gov.sg/criminal-defence-aid/qualifying-for-help/. If PDO is unable to assist and you are unable to afford paid legal services, you can come back to us with your PDO rejection letter/reasons for us to assess whether we are able to assist. If you are able to afford a lawyer, we are unfortunately not likely able to assist but can provide you with directories of lawyers and some self-help resources for your consideration.\" Provide PDO contact: https://pdo.mlaw.gov.sg/ | 1800 2255 529 | 1 Havelock Square #B1-18 State Courts, Singapore 059724 (Mondays to Fridays: 9:00am to 12:00pm, 2:00pm to 5:00pm). Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\"",
+    "Route C (PDO is Handling): Inform the applicant that they should direct any queries on their ongoing PDO application to PDO. Provide PDO contact: https://pdo.mlaw.gov.sg/ | 1800 2255 529 | 1 Havelock Square #B1-18 State Courts, Singapore 059724 (Mondays to Fridays: 9:00am to 12:00pm, 2:00pm to 5:00pm). Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\"",
     "Route D (CLAS + Urgent Concurrent): Proceed to GEN3-T06, following which, regardless of triage outcome of GEN3-T06, proceed to Q3 of GEN3-T02. Present both triaging outcomes to applicant.",
-    "Route E (CLAS \u2014 Standard Intake): Share about CLAS (GEN3-I03 \u2014 Information Card \u2014 Criminal Legal Aid Scheme (CLAS)) and inform applicant that they may be eligible. Inform applicant to apply for CLAS: https://www.probono.sg/get-legal-help/legal-representation. If applicant is unable to self-apply, inform applicant to go to PBSG Counter at State Courts Help Centre (1 Havelock Square, #B1-18 State Courts, Singapore 059724) with documents needed. If applicant has difficulties going to PBSG, proceed to Route F.",
-    "Route F (Escalate to PBSG Staff): Take down: full name, contact number, email (if any), brief matter description including charge details and answers to Q1-Q6, any urgency/vulnerability factors noted. Inform the applicant that PBSG Staff will call back within 1\u20132 working days. Email information to PBSG Staff on the same day. Do NOT attempt to advise further."
+    "Route E (CLAS — Standard Intake): Share about CLAS (GEN3-I03 — Information Card — Criminal Legal Aid Scheme (CLAS)) and inform applicant that they may be eligible. Inform applicant to apply for CLAS: https://www.probono.sg/get-legal-help/legal-representation. If applicant is unable to self-apply, inform applicant to go to PBSG Counter at State Courts Help Centre (1 Havelock Square, #B1-18 State Courts, Singapore 059724) with documents needed. If applicant has difficulties going to PBSG, proceed to Route F.",
+    "Route F (Escalate to PBSG Staff): Take down: full name, contact number, email (if any), brief matter description including charge details and answers to Q1-Q6, any urgency/vulnerability factors noted. Inform the applicant that PBSG Staff will call back within 1–2 working days. Email information to PBSG Staff on the same day. Do NOT attempt to advise further."
   ],
-  "guardrail": "\u2022 Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. \u2022 You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. \u2022 If the applicant insists on legal advice, respond: \u201cI\u2019m an intern/volunteer and I\u2019m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\u201d \u2022 If in doubt at any point \u2014 escalate to PBSG Staff. \u2022 Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
+  "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

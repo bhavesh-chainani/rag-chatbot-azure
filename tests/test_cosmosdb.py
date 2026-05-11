@@ -1,5 +1,6 @@
 import copy
 import json
+from typing import Any
 
 import pytest
 from azure.cosmos.aio import ContainerProxy
@@ -132,6 +133,50 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
         },
     )
     assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_chathistory_newitem_persists_user_sent_at(auth_public_documents_client, monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def mock_execute_item_batch(container_proxy, **kwargs):
+        operations = kwargs["batch_operations"]
+        captured["message"] = operations[1][1][0]
+
+    monkeypatch.setattr(ContainerProxy, "execute_item_batch", mock_execute_item_batch)
+
+    ts = 1_700_000_000_000
+    response = await auth_public_documents_client.post(
+        "/chat_history",
+        headers={"Authorization": "Bearer MockToken"},
+        json={
+            "id": "123",
+            "answers": [["Hello", "Hi there", ts]],
+        },
+    )
+    assert response.status_code == 201
+    assert captured["message"]["user_sent_at"] == ts
+
+
+@pytest.mark.asyncio
+async def test_chathistory_getitem_restores_user_sent_at(auth_public_documents_client, monkeypatch):
+    pair_with_ts = copy.deepcopy(for_message_pairs_query[0][0])
+    pair_with_ts["user_sent_at"] = 1_700_000_000_001
+
+    def mock_query_items(container_proxy, query, **kwargs):
+        return MockCosmosDBResultsIterator([[pair_with_ts]])
+
+    monkeypatch.setattr(ContainerProxy, "query_items", mock_query_items)
+
+    response = await auth_public_documents_client.get(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+    )
+    assert response.status_code == 200
+    result = await response.get_json()
+    assert len(result["answers"]) == 1
+    assert len(result["answers"][0]) == 3
+    assert result["answers"][0][2] == 1_700_000_000_001
 
 
 @pytest.mark.asyncio

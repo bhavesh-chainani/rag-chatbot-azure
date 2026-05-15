@@ -25,6 +25,31 @@ logger = logging.getLogger(__name__)
 
 chat_history_cosmosdb_bp = Blueprint("chat_history_cosmos", __name__, static_folder="static")
 
+
+def _optional_user_sent_at_ms(message_pair: list[Any]) -> int | None:
+    """Third element from the client is epoch ms when the user sent the message (optional)."""
+    if len(message_pair) <= 2:
+        return None
+    raw = message_pair[2]
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return int(raw.strip())
+    return None
+
+
+def _cosmos_message_pair_to_answer_row(item: dict[str, Any]) -> list[Any]:
+    row: list[Any] = [item["question"], item["response"]]
+    uat = item.get("user_sent_at")
+    if uat is not None:
+        try:
+            row.append(int(uat))
+        except (TypeError, ValueError):
+            pass
+    return row
+
 TITLE_GENERATION_PROMPT = (
     "Generate a short chat title that summarizes the message topic. "
     "Requirements: 5-15 words, concise summary of the message topic, no quotes. "
@@ -110,17 +135,19 @@ async def post_chat_history(auth_claims: dict[str, Any]):
         message_pair_items = []
         # Now insert a message item for each question/response pair:
         for ind, message_pair in enumerate(message_pairs):
-            message_pair_items.append(
-                {
-                    "id": f"{session_id}-{ind}",
-                    "version": current_app.config[CONFIG_COSMOS_HISTORY_VERSION],
-                    "session_id": session_id,
-                    "entra_oid": entra_oid,
-                    "type": "message_pair",
-                    "question": message_pair[0],
-                    "response": message_pair[1],
-                }
-            )
+            doc: dict[str, Any] = {
+                "id": f"{session_id}-{ind}",
+                "version": current_app.config[CONFIG_COSMOS_HISTORY_VERSION],
+                "session_id": session_id,
+                "entra_oid": entra_oid,
+                "type": "message_pair",
+                "question": message_pair[0],
+                "response": message_pair[1],
+            }
+            sent_at = _optional_user_sent_at_ms(message_pair)
+            if sent_at is not None:
+                doc["user_sent_at"] = sent_at
+            message_pair_items.append(doc)
 
         batch_operations = [("upsert", (session_item,))] + [
             ("upsert", (message_pair_item,)) for message_pair_item in message_pair_items
@@ -265,7 +292,7 @@ async def get_chat_history_session(auth_claims: dict[str, Any], session_id: str)
         message_pairs = []
         async for page in res.by_page():
             async for item in page:
-                message_pairs.append([item["question"], item["response"]])
+                message_pairs.append(_cosmos_message_pair_to_answer_row(item))
 
         return (
             jsonify(

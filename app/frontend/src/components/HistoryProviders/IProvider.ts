@@ -1,7 +1,8 @@
 import { ChatAppResponse } from "../../api";
 
 export type HistoryMetaData = { id: string; title: string; timestamp: number };
-export type Answers = [user: string, response: ChatAppResponse][];
+/** Optional `sentAt` is epoch ms when the user sent the message (UI only; omitted in older saved chats). */
+export type Answers = [user: string, response: ChatAppResponse, sentAt?: number][];
 
 export const enum HistoryProviderOptions {
     None = "none",

@@ -23,7 +23,7 @@ import { ExampleList } from "../../components/Example";
 import { UserChatMessage } from "../../components/UserChatMessage";
 import { AnalysisPanel, AnalysisPanelTabs } from "../../components/AnalysisPanel";
 import { HistoryPanel } from "../../components/HistoryPanel";
-import { HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
+import { Answers, HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
 import { HistoryButton } from "../../components/HistoryButton";
 import { SettingsButton } from "../../components/SettingsButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
@@ -99,8 +99,9 @@ const Chat = () => {
     const [activeAnalysisPanelTab, setActiveAnalysisPanelTab] = useState<AnalysisPanelTabs | undefined>(undefined);
 
     const [selectedAnswer, setSelectedAnswer] = useState<number>(0);
-    const [answers, setAnswers] = useState<[user: string, response: ChatAppResponse][]>([]);
-    const [streamedAnswers, setStreamedAnswers] = useState<[user: string, response: ChatAppResponse][]>([]);
+    const [answers, setAnswers] = useState<Answers>([]);
+    const [streamedAnswers, setStreamedAnswers] = useState<Answers>([]);
+    const [pendingQuestionSentAt, setPendingQuestionSentAt] = useState<number | null>(null);
     const [speechUrls, setSpeechUrls] = useState<(string | null)[]>([]);
 
     const [showMultimodalOptions, setShowMultimodalOptions] = useState<boolean>(false);
@@ -180,7 +181,13 @@ const Chat = () => {
         });
     };
 
-    const handleAsyncRequest = async (question: string, answers: [string, ChatAppResponse][], responseBody: ReadableStream<any>, signal: AbortSignal) => {
+    const handleAsyncRequest = async (
+        question: string,
+        answers: Answers,
+        responseBody: ReadableStream<any>,
+        signal: AbortSignal,
+        questionSentAt: number
+    ) => {
         let answer: string = "";
         let askResponse: ChatAppResponse = {
             message: { content: "", role: "assistant" },
@@ -197,7 +204,7 @@ const Chat = () => {
                         ...askResponse,
                         message: { content: answer, role: askResponse.message.role }
                     };
-                    setStreamedAnswers([...answers, [question, latestResponse]]);
+                    setStreamedAnswers([...answers, [question, latestResponse, questionSentAt]]);
                     resolve(null);
                 }, 33);
             });
@@ -282,6 +289,8 @@ const Chat = () => {
         const controller = new AbortController();
         setAbortController(controller);
         lastQuestionRef.current = question;
+        const questionSentAt = Date.now();
+        setPendingQuestionSentAt(questionSentAt);
 
         error && setError(undefined);
         setRestoredQuestion("");
@@ -338,28 +347,37 @@ const Chat = () => {
                 throw Error(`Request failed with status ${response.status}`);
             }
             if (shouldStream) {
-                const parsedResponse: ChatAppResponse = await handleAsyncRequest(question, answers, response.body, controller.signal);
+                const parsedResponse: ChatAppResponse = await handleAsyncRequest(
+                    question,
+                    answers,
+                    response.body,
+                    controller.signal,
+                    questionSentAt
+                );
                 // Only add to answers if we got content, otherwise restore question to input
                 if (parsedResponse.message.content) {
-                    setAnswers([...answers, [question, parsedResponse]]);
+                    setAnswers([...answers, [question, parsedResponse, questionSentAt]]);
+                    setPendingQuestionSentAt(null);
                     if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                         const token = client ? await getToken(client) : undefined;
-                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse]], token);
+                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse, questionSentAt]], token);
                     }
                 } else {
                     // Stopped before any content arrived - restore question to input
                     lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
                     setRestoredQuestion(question);
+                    setPendingQuestionSentAt(null);
                 }
             } else {
                 const parsedResponse: ChatAppResponseOrError = await response.json();
                 if (parsedResponse.error) {
                     throw Error(parsedResponse.error);
                 }
-                setAnswers([...answers, [question, parsedResponse as ChatAppResponse]]);
+                setAnswers([...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]]);
+                setPendingQuestionSentAt(null);
                 if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                     const token = client ? await getToken(client) : undefined;
-                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse]], token);
+                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]], token);
                 }
             }
             setSpeechUrls([...speechUrls, null]);
@@ -369,6 +387,7 @@ const Chat = () => {
                 if (!clearingForNewChatRef.current) {
                     lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
                     setRestoredQuestion(question);
+                    setPendingQuestionSentAt(null);
                 }
             } else {
                 setError(e);
@@ -383,7 +402,7 @@ const Chat = () => {
         clearingForNewChatRef.current = true;
         // Capture current conversation to save to history before clearing
         const hasStreaming = streamedAnswers.length > 0;
-        const toSave: [user: string, response: ChatAppResponse][] = hasStreaming
+        const toSave: Answers = hasStreaming
             ? [...streamedAnswers]
             : [...answers];
         const lastResponse = toSave.length > 0 ? toSave[toSave.length - 1][1] : null;
@@ -416,6 +435,7 @@ const Chat = () => {
         setAnswers([]);
         setSpeechUrls([]);
         setStreamedAnswers([]);
+        setPendingQuestionSentAt(null);
         setIsLoading(false);
         setIsStreaming(false);
         setRestoredQuestion("");
@@ -627,7 +647,7 @@ const Chat = () => {
                             {isStreaming &&
                                 streamedAnswers.map((streamedAnswer, index) => (
                                     <div key={index}>
-                                        <UserChatMessage message={streamedAnswer[0]} />
+                                        <UserChatMessage message={streamedAnswer[0]} sentAt={streamedAnswer[2]} />
                                         <div className={styles.chatMessageGpt}>
                                             <Answer
                                                 isStreaming={true}
@@ -650,7 +670,7 @@ const Chat = () => {
                             {!isStreaming &&
                                 answers.map((answer, index) => (
                                     <div key={index}>
-                                        <UserChatMessage message={answer[0]} />
+                                        <UserChatMessage message={answer[0]} sentAt={answer[2]} />
                                         <div className={styles.chatMessageGpt}>
                                             <Answer
                                                 isStreaming={false}
@@ -672,7 +692,7 @@ const Chat = () => {
                                 ))}
                             {isLoading && (
                                 <>
-                                    <UserChatMessage message={lastQuestionRef.current} />
+                                    <UserChatMessage message={lastQuestionRef.current} sentAt={pendingQuestionSentAt ?? undefined} />
                                     <div className={styles.chatMessageGptMinWidth}>
                                         <AnswerLoading />
                                     </div>
@@ -680,7 +700,7 @@ const Chat = () => {
                             )}
                             {error ? (
                                 <>
-                                    <UserChatMessage message={lastQuestionRef.current} />
+                                    <UserChatMessage message={lastQuestionRef.current} sentAt={pendingQuestionSentAt ?? undefined} />
                                     <div className={styles.chatMessageGptMinWidth}>
                                         <AnswerError error={error.toString()} onRetry={() => makeApiRequest(lastQuestionRef.current)} />
                                     </div>
@@ -727,6 +747,7 @@ const Chat = () => {
                         onChatSelected={answers => {
                             if (answers.length === 0) return;
                             setAnswers(answers);
+                            setPendingQuestionSentAt(null);
                             lastQuestionRef.current = answers[answers.length - 1][0];
                         }}
                     />

@@ -6,6 +6,21 @@
     margin-left: auto;
 }
 
+.bubbleColumn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+    max-width: 100%;
+}
+
+.timestamp {
+    font-size: 0.75rem;
+    line-height: 1.2;
+    color: #616161;
+    padding-right: 0.125rem;
+}
+
 .message {
     padding: 1.25em;
     background: #e8ebfa;

@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 
 import styles from "./Answer.module.css";
-import { ChatAppResponse, getCitationFilePath, SpeechConfig } from "../../api";
+import { ChatAppResponse, getCitationFilePath, QuickReply, SpeechConfig } from "../../api";
 import { parseAnswerToHtml } from "./AnswerParser";
 import { AnswerIcon } from "./AnswerIcon";
 import { SpeechOutputBrowser } from "./SpeechOutputBrowser";
@@ -200,6 +200,79 @@ const answerMarkdownComponents = {
     p: ApplicantQuestionParagraph
 };
 
+interface QuickReplyOptionsProps {
+    quickReply: QuickReply;
+    onQuickReplyClicked: (value: string) => void;
+}
+
+function QuickReplyOptions({ quickReply, onQuickReplyClicked }: QuickReplyOptionsProps) {
+    const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
+    const [submitted, setSubmitted] = useState(false);
+    const isMultiSelect = quickReply.mode === "multi";
+
+    const sendValue = (value: string) => {
+        setSubmitted(true);
+        onQuickReplyClicked(value);
+    };
+
+    const toggleMultiSelectOption = (optionId: string) => {
+        const option = quickReply.options.find(x => x.id === optionId);
+        const isNoneOption = option?.label.toLowerCase().startsWith("none of") ?? false;
+        setSelectedOptionIds(current => {
+            if (current.includes(optionId)) {
+                return current.filter(x => x !== optionId);
+            }
+            if (isNoneOption) {
+                return [optionId];
+            }
+            const withoutNoneOptions = current.filter(id => {
+                const currentOption = quickReply.options.find(x => x.id === id);
+                return !currentOption?.label.toLowerCase().startsWith("none of");
+            });
+            return [...withoutNoneOptions, optionId];
+        });
+    };
+
+    const submitMultiSelect = () => {
+        const selectedValues = quickReply.options.filter(option => selectedOptionIds.includes(option.id)).map(option => option.value);
+        if (selectedValues.length) {
+            sendValue(selectedValues.join(", "));
+        }
+    };
+
+    return (
+        <div className={styles.quickReplyContainer} aria-label="Quick reply options">
+            <div className={styles.quickReplyList}>
+                {quickReply.options.map(option => {
+                    const isSelected = selectedOptionIds.includes(option.id);
+                    return (
+                        <Button
+                            key={option.id}
+                            appearance={isSelected ? "primary" : "secondary"}
+                            className={styles.quickReplyButton}
+                            disabled={submitted}
+                            onClick={() => {
+                                if (isMultiSelect) {
+                                    toggleMultiSelectOption(option.id);
+                                } else {
+                                    sendValue(option.value);
+                                }
+                            }}
+                        >
+                            {option.label}
+                        </Button>
+                    );
+                })}
+                {isMultiSelect && (
+                    <Button appearance="primary" disabled={submitted || selectedOptionIds.length === 0} onClick={submitMultiSelect}>
+                        Submit
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 interface Props {
     answer: ChatAppResponse;
     index: number;
@@ -210,7 +283,9 @@ interface Props {
     onThoughtProcessClicked: () => void;
     onSupportingContentClicked: () => void;
     onFollowupQuestionClicked?: (question: string) => void;
+    onQuickReplyClicked?: (value: string) => void;
     showFollowupQuestions?: boolean;
+    showQuickReplies?: boolean;
     showSpeechOutputBrowser?: boolean;
     showSpeechOutputAzure?: boolean;
 }
@@ -225,11 +300,14 @@ export const Answer = ({
     onThoughtProcessClicked,
     onSupportingContentClicked,
     onFollowupQuestionClicked,
+    onQuickReplyClicked,
     showFollowupQuestions,
+    showQuickReplies,
     showSpeechOutputAzure,
     showSpeechOutputBrowser
 }: Props) => {
     const followupQuestions = answer.context?.followup_questions;
+    const quickReply = answer.context?.quick_reply;
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
@@ -345,6 +423,10 @@ export const Answer = ({
                         })}
                     </div>
                 </div>
+            )}
+
+            {quickReply?.options?.length && showQuickReplies && onQuickReplyClicked && !isStreaming && (
+                <QuickReplyOptions quickReply={quickReply} onQuickReplyClicked={onQuickReplyClicked} />
             )}
 
             {!!followupQuestions?.length && showFollowupQuestions && onFollowupQuestionClicked && (

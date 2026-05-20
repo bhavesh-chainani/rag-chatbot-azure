@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import AsyncGenerator, Awaitable
 from dataclasses import asdict
@@ -18,6 +19,8 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from approaches.approach import (
     Approach,
     ExtraInfo,
+    QuickReply,
+    QuickReplyOption,
     ThoughtStep,
 )
 from approaches.promptmanager import PromptManager
@@ -138,6 +141,122 @@ class ChatReadRetrieveReadApproach(Approach):
             return content, []
         return content.split("<<")[0], re.findall(r"<<([^>>]+)>>", content)
 
+    def extract_golden_set_entries(self, text_sources: Optional[list[str]]) -> dict[str, dict[str, Any]]:
+        entries: dict[str, dict[str, Any]] = {}
+        for source in text_sources or []:
+            json_start = source.find("{")
+            json_end = source.rfind("}")
+            if json_start < 0 or json_end <= json_start:
+                continue
+            try:
+                entry = json.loads(source[json_start : json_end + 1])
+            except json.JSONDecodeError:
+                continue
+            entry_id = entry.get("id")
+            if isinstance(entry_id, str) and isinstance(entry.get("branching_logic"), dict):
+                entries[entry_id] = entry
+        return entries
+
+    def extract_quick_reply_target(self, content: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+        if not content:
+            return None, None
+
+        selected_entry_match = re.search(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
+        selected_entry_id = selected_entry_match.group(1) if selected_entry_match else None
+
+        ask_markers = [
+            "Ask the applicant (read verbatim):",
+            "Back to triage",
+        ]
+        question_region = content
+        marker_positions = [content.rfind(marker) for marker in ask_markers]
+        marker_position = max(marker_positions)
+        if marker_position >= 0:
+            question_region = content[marker_position:]
+        elif "Route " in content:
+            return selected_entry_id, None
+
+        question_matches = re.findall(r"(?:(GEN3-[A-Z0-9-]+)\s+)?(Q\d+[A-Z]?)\s*:", question_region)
+        if not question_matches:
+            question_matches = re.findall(r"(?:(GEN3-[A-Z0-9-]+)\s+)?(Q\d+[A-Z]?)\b", question_region)
+        if not question_matches:
+            return selected_entry_id, None
+
+        entry_id, question_id = question_matches[-1]
+        return entry_id or selected_entry_id, question_id
+
+    def label_from_branch_key(self, branch_key: str) -> str:
+        labels = {
+            "yes": "Yes",
+            "no": "No",
+            "not_sure": "Not sure",
+            "not_sure_or_both": "Not sure or both",
+            "no_foreigner": "No, foreigner",
+            "criminal": "Criminal",
+            "matrimonial": "Matrimonial",
+            "civil_or_others": "Civil or others",
+            "guidance": "Guidance",
+            "representation": "Representation",
+            "yes_and_nonprofit": "Yes, nonprofit",
+            "yes_and_for_profit": "Yes, for-profit business",
+            "calling_on_behalf_and_able_to_self_help": "Calling on behalf, can self-help",
+            "self_or_calling_on_behalf_and_unable_to_self_help": "Self, or cannot self-help",
+            "yes_passed_or_processing": "Yes, passed or processing",
+            "yes_failed_means_test": "Yes, failed means test",
+            "yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
+            "no_or_has_not_applied": "No, or has not applied",
+            "no_marginal": "No, marginal",
+            "no_well_over": "No, well over",
+            "yes_lab_unable_to_assist": "Yes, LAB unable to assist",
+            "yes_lab_able_or_not_sure": "Yes, LAB able or not sure",
+            "no_marginal_or_exceptional": "No, marginal or exceptional",
+            "no_well_over_no_exceptions": "No, well over, no exceptions",
+        }
+        suffix = branch_key.removeprefix("if_")
+        if suffix in labels:
+            return labels[suffix]
+        return suffix.replace("_", " ").capitalize()
+
+    def quick_reply_outcome_is_supported(self, outcome: Any) -> bool:
+        if not isinstance(outcome, str):
+            return False
+        normalized = outcome.lower()
+        unsupported_phrases = [
+            "walk through",
+            "describe both",
+            "ask for the",
+            "note who",
+            "coordinate rather than duplicate",
+        ]
+        return not any(phrase in normalized for phrase in unsupported_phrases)
+
+    def build_quick_reply(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[QuickReply]:
+        entry_id, question_id = self.extract_quick_reply_target(content)
+        if not entry_id or not question_id:
+            return None
+
+        entries = self.extract_golden_set_entries(extra_info.data_points.text)
+        entry = entries.get(entry_id)
+        if not entry:
+            return None
+
+        branching_logic = entry.get("branching_logic")
+        question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict):
+            return None
+
+        branch_keys = [key for key in question_node if key.startswith("if_")]
+        if not 1 < len(branch_keys) <= 5:
+            return None
+        if not all(self.quick_reply_outcome_is_supported(question_node.get(key)) for key in branch_keys):
+            return None
+
+        options = [
+            QuickReplyOption(id=key, label=self.label_from_branch_key(key), value=self.label_from_branch_key(key))
+            for key in branch_keys
+        ]
+        return QuickReply(mode="single", entryId=entry_id, questionId=question_id, options=options)
+
     def get_search_query(self, chat_completion: ChatCompletion, default_query: str) -> str:
         """Read the optimized search query from a chat completion tool call."""
         try:
@@ -173,6 +292,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if overrides.get("suggest_followup_questions"):
             content, followup_questions = self.extract_followup_questions(content)
             extra_info.followup_questions = followup_questions
+        extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
         # TODO: Update for agentic? This isn't still true?
         if self.include_token_usage and extra_info.thoughts and chat_completion_response.usage:
@@ -185,6 +305,7 @@ class ChatReadRetrieveReadApproach(Approach):
                     key: value for key, value in asdict(extra_info.data_points).items() if value is not None
                 },
                 "followup_questions": extra_info.followup_questions,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
             },
             "session_state": session_state,
         }
@@ -215,6 +336,7 @@ class ChatReadRetrieveReadApproach(Approach):
             if overrides.get("suggest_followup_questions"):
                 content, followup_questions = self.extract_followup_questions(content)
                 extra_info.followup_questions = followup_questions
+            extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
             if self.include_token_usage and extra_info.thoughts and chat_result.usage:
                 extra_info.thoughts[-1].update_token_usage(chat_result.usage)
@@ -234,6 +356,7 @@ class ChatReadRetrieveReadApproach(Approach):
             return
 
         chat_result = cast(AsyncStream[ChatCompletionChunk], chat_result)
+        streamed_content = ""
 
         async for event_chunk in chat_result:
             # "2023-07-01-preview" API version has a bug where first response has empty choices
@@ -256,11 +379,13 @@ class ChatReadRetrieveReadApproach(Approach):
                     earlier_content = delta_content[: delta_content.index("<<")]
                     if earlier_content:
                         completion["delta"]["content"] = earlier_content
+                        streamed_content += earlier_content
                         yield completion
                     followup_content += delta_content[delta_content.index("<<") :]
                 elif followup_questions_started:
                     followup_content += delta_content
                 else:
+                    streamed_content += delta_content
                     yield completion
             else:
                 # Final chunk at end of streaming should contain usage
@@ -271,10 +396,14 @@ class ChatReadRetrieveReadApproach(Approach):
 
         if followup_content:
             _, followup_questions = self.extract_followup_questions(followup_content)
+            extra_info.followup_questions = followup_questions
             yield {
                 "delta": {"role": "assistant"},
                 "context": {"context": extra_info, "followup_questions": followup_questions},
             }
+        if streamed_content:
+            extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
+            yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
 
     async def run(
         self,

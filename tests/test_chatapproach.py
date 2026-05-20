@@ -191,6 +191,157 @@ def test_extract_followup_questions_no_pre_content(chat_approach):
     assert followup_questions == ["What is the dress code?"]
 
 
+def test_build_quick_reply_from_selected_entry_and_question(chat_approach):
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant currently represented by a lawyer on this same matter?",
+                "if_yes": "Route A (Already Represented)",
+                "if_no": "Proceed to Q2",
+                "if_not_sure": "Clarify: ask whether a lawyer has filed documents.",
+            }
+        },
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> Q1: "Are you currently represented by a lawyer on this same matter?"
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert quick_reply.entryId == "GEN3-T01"
+    assert quick_reply.questionId == "Q1"
+    assert quick_reply.mode == "single"
+    assert [(option.id, option.label, option.value) for option in quick_reply.options] == [
+        ("if_yes", "Yes", "Yes"),
+        ("if_no", "No", "No"),
+        ("if_not_sure", "Not sure", "Not sure"),
+    ]
+
+
+def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
+    parent_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q1": {
+                "question": "Has the applicant been charged with a capital offence?",
+                "if_yes": "Route A (LASCO)",
+                "if_no": "Proceed to Q2",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is there an immediate threat to life or safety right now?",
+                "if_yes": "Route A (Emergency Services)",
+                "if_no": "Proceed to Q2",
+                "if_not_sure": "Route A as a precaution",
+            }
+        },
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(parent_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        )
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert quick_reply.entryId == "GEN3-T06"
+    assert quick_reply.questionId == "Q1"
+    assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
+
+
+def test_build_quick_reply_skips_unsupported_walkthrough(chat_approach):
+    entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q6": {
+                "question": "Does the applicant meet the means criteria?",
+                "if_yes": "Route E (CLAS)",
+                "if_no": "Proceed to GEN3-T04",
+                "if_not_sure": "Walk through PCHI calculation live; if still unclear, take down figures.",
+            }
+        },
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T02.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> Q6: "Do you meet the means criteria?"
+"""
+
+    assert chat_approach.build_quick_reply(content, extra_info) is None
+
+
+def test_build_quick_reply_returns_none_without_pending_question(chat_approach):
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant currently represented?",
+                "if_yes": "Route A",
+                "if_no": "Proceed to Q2",
+            }
+        },
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T01
+
+**Part C - Routing recommendation:** Route A
+"""
+
+    assert chat_approach.build_quick_reply(content, extra_info) is None
+
+
+def test_create_chat_completion_uses_max_completion_tokens_for_gpt5_variants(chat_approach):
+    captured_kwargs = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            return "completion"
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    chat_approach.openai_client = FakeOpenAIClient()
+
+    completion = chat_approach.create_chat_completion(
+        chatgpt_deployment=None,
+        chatgpt_model="gpt-5-chat",
+        messages=[],
+        overrides={},
+        response_token_limit=123,
+    )
+
+    assert completion == "completion"
+    assert captured_kwargs["max_completion_tokens"] == 123
+    assert "max_tokens" not in captured_kwargs
+    assert "reasoning_effort" not in captured_kwargs
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "minimum_search_score,minimum_reranker_score,expected_result_count",

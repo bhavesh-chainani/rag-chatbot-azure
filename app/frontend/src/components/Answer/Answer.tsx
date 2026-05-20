@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 
 import styles from "./Answer.module.css";
-import { ChatAppResponse, getCitationFilePath, SpeechConfig } from "../../api";
+import { ChatAppResponse, getCitationFilePath, QuickReply, SpeechConfig } from "../../api";
 import { parseAnswerToHtml } from "./AnswerParser";
 import { AnswerIcon } from "./AnswerIcon";
 import { SpeechOutputBrowser } from "./SpeechOutputBrowser";
@@ -45,8 +45,9 @@ function collectPlainTextPrefix(children: ReactNode, maxLen = 160): string {
     return collectPlainTextFromNodes(children, maxLen);
 }
 
-/** Q1: / Q3A: / Q2 follow-up: verbatim script; optional leading `>` when the model prints blockquote style without a blank line. */
-const APPLICANT_VERBATIM_QUESTION_BODY = /^\s*Q\d+(?:[A-Za-z]+(?:\s+[-\w]+)*|(?:\s+[-\w]+)+)?\s*:/;
+/** Q1: / Q3A: / Q2 follow-up: / Clarification Q: verbatim script. */
+const VERBATIM_QUESTION_ID = "Q\\d+(?:[A-Za-z]+(?:\\s+[-\\w]+)*|(?:\\s+[-\\w]+)+)?|Clarification Q";
+const APPLICANT_VERBATIM_QUESTION_BODY = new RegExp(`^\\s*(?:${VERBATIM_QUESTION_ID})\\s*:`, "i");
 
 /** OUTPUT A routing script: intern reads quoted text aloud (after optional `>`). */
 const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;
@@ -55,6 +56,8 @@ const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;
 /** Longer "Tell … (read verbatim)" before bare "Tell the applicant:" so the regex does not stop early. */
 const APPLICANT_INSTRUCTION_LABEL_MD =
     "(?:\\*\\*Tell the applicant \\(read verbatim\\):\\*\\*|Tell the applicant \\(read verbatim\\):|\\*\\*Tell the applicant:\\*\\*|Tell the applicant:|\\*\\*Ask the applicant \\(read verbatim\\):\\*\\*|Ask the applicant \\(read verbatim\\):|\\*\\*Back to triage — ask the applicant \\(read verbatim\\):\\*\\*|Back to triage — ask the applicant \\(read verbatim\\):)";
+const APPLICANT_QUESTION_LABEL_MD =
+    "(?:\\*\\*Ask the applicant \\(read verbatim\\):\\*\\*|Ask the applicant \\(read verbatim\\):|\\*\\*Back to triage — ask the applicant \\(read verbatim\\):\\*\\*|Back to triage — ask the applicant \\(read verbatim\\):)";
 
 /** Plain-text label alternation after ReactMarkdown resolves bold (for highlight detection). */
 const PLAIN_APPLICANT_LABEL_ALT =
@@ -105,6 +108,38 @@ function trySplitApplicantLabelAndScript(full: string): { label: string; script:
     return { label, script: rest };
 }
 
+function normalizeQuestionId(questionId: string): string {
+    return /^clarification(?:\s+q)?$/i.test(questionId.trim()) ? "Clarification Q" : questionId.trim();
+}
+
+function addMissingQuestionIdsToApplicantQuotes(markdown: string): string {
+    const lines = markdown.split("\n");
+    let currentQuestionId: string | undefined;
+    let previousNonEmptyLine = "";
+    const applicantQuestionLabelLine = new RegExp(`^\\s*(?:${APPLICANT_QUESTION_LABEL_MD})\\s*$`, "i");
+
+    return lines
+        .map(line => {
+            const nextQuestionMatch = line.match(new RegExp(`Next question:\\s*(${VERBATIM_QUESTION_ID}|Clarification)\\b`, "i"));
+            if (nextQuestionMatch) {
+                currentQuestionId = normalizeQuestionId(nextQuestionMatch[1]);
+            }
+
+            const isAfterApplicantQuestionLabel = applicantQuestionLabelLine.test(previousNonEmptyLine);
+            const bareQuoteMatch = line.match(/^(\s*>\s*)(\*\*)?(".*)$/);
+            if (isAfterApplicantQuestionLabel && currentQuestionId && bareQuoteMatch) {
+                const [, blockquotePrefix, boldPrefix = "", quoteText] = bareQuoteMatch;
+                line = `${blockquotePrefix}${boldPrefix}${currentQuestionId}: ${quoteText}`;
+            }
+
+            if (line.trim()) {
+                previousNonEmptyLine = line;
+            }
+            return line;
+        })
+        .join("\n");
+}
+
 /**
  * If the model compresses "Tell / Ask the applicant…" and the script onto one line, markdown keeps
  * one paragraph so the script is not blockquoted or highlighted. Insert a break and a blockquote
@@ -117,7 +152,7 @@ function ensureVerbatimBlockquoteNewline(markdown: string): string {
     s = s.replace(new RegExp(`(${label})${h}*(>)`, "g"), "$1\n\n$2");
     s = s.replace(new RegExp(`(${label})${h}*(")`, "g"), "$1\n\n> $2");
     s = s.replace(new RegExp(`(${label})${h}*(Q\\d)`, "g"), "$1\n\n> $2");
-    return s;
+    return addMissingQuestionIdsToApplicantQuotes(s);
 }
 
 type BlockquoteProps = ComponentPropsWithoutRef<"blockquote"> & Partial<ExtraProps>;
@@ -138,12 +173,16 @@ function ApplicantQuestionParagraph({ children, className, ...rest }: ParagraphP
     const fullText = collectPlainTextFromNodes(children);
     const labelScriptSplit = trySplitApplicantLabelAndScript(fullText);
 
-    if (labelScriptSplit && isPlainTextOnlyChildren(children)) {
+    if (labelScriptSplit) {
         return (
-            <p {...rest} className={className}>
-                <span className={styles.applicantInstructionLabel}>{labelScriptSplit.label}</span>
-                <span className={styles.applicantVerbatimScript}>{labelScriptSplit.script}</span>
-            </p>
+            <>
+                <p {...rest} className={className}>
+                    <span className={styles.applicantInstructionLabel}>{labelScriptSplit.label}</span>
+                </p>
+                <blockquote className={styles.applicantVerbatimQuestion}>
+                    <p>{labelScriptSplit.script}</p>
+                </blockquote>
+            </>
         );
     }
 
@@ -161,6 +200,79 @@ const answerMarkdownComponents = {
     p: ApplicantQuestionParagraph
 };
 
+interface QuickReplyOptionsProps {
+    quickReply: QuickReply;
+    onQuickReplyClicked: (value: string) => void;
+}
+
+function QuickReplyOptions({ quickReply, onQuickReplyClicked }: QuickReplyOptionsProps) {
+    const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
+    const [submitted, setSubmitted] = useState(false);
+    const isMultiSelect = quickReply.mode === "multi";
+
+    const sendValue = (value: string) => {
+        setSubmitted(true);
+        onQuickReplyClicked(value);
+    };
+
+    const toggleMultiSelectOption = (optionId: string) => {
+        const option = quickReply.options.find(x => x.id === optionId);
+        const isNoneOption = option?.label.toLowerCase().startsWith("none of") ?? false;
+        setSelectedOptionIds(current => {
+            if (current.includes(optionId)) {
+                return current.filter(x => x !== optionId);
+            }
+            if (isNoneOption) {
+                return [optionId];
+            }
+            const withoutNoneOptions = current.filter(id => {
+                const currentOption = quickReply.options.find(x => x.id === id);
+                return !currentOption?.label.toLowerCase().startsWith("none of");
+            });
+            return [...withoutNoneOptions, optionId];
+        });
+    };
+
+    const submitMultiSelect = () => {
+        const selectedValues = quickReply.options.filter(option => selectedOptionIds.includes(option.id)).map(option => option.value);
+        if (selectedValues.length) {
+            sendValue(selectedValues.join(", "));
+        }
+    };
+
+    return (
+        <div className={styles.quickReplyContainer} aria-label="Quick reply options">
+            <div className={styles.quickReplyList}>
+                {quickReply.options.map(option => {
+                    const isSelected = selectedOptionIds.includes(option.id);
+                    return (
+                        <Button
+                            key={option.id}
+                            appearance={isSelected ? "primary" : "secondary"}
+                            className={styles.quickReplyButton}
+                            disabled={submitted}
+                            onClick={() => {
+                                if (isMultiSelect) {
+                                    toggleMultiSelectOption(option.id);
+                                } else {
+                                    sendValue(option.value);
+                                }
+                            }}
+                        >
+                            {option.label}
+                        </Button>
+                    );
+                })}
+                {isMultiSelect && (
+                    <Button appearance="primary" disabled={submitted || selectedOptionIds.length === 0} onClick={submitMultiSelect}>
+                        Submit
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 interface Props {
     answer: ChatAppResponse;
     index: number;
@@ -171,7 +283,9 @@ interface Props {
     onThoughtProcessClicked: () => void;
     onSupportingContentClicked: () => void;
     onFollowupQuestionClicked?: (question: string) => void;
+    onQuickReplyClicked?: (value: string) => void;
     showFollowupQuestions?: boolean;
+    showQuickReplies?: boolean;
     showSpeechOutputBrowser?: boolean;
     showSpeechOutputAzure?: boolean;
 }
@@ -186,11 +300,14 @@ export const Answer = ({
     onThoughtProcessClicked,
     onSupportingContentClicked,
     onFollowupQuestionClicked,
+    onQuickReplyClicked,
     showFollowupQuestions,
+    showQuickReplies,
     showSpeechOutputAzure,
     showSpeechOutputBrowser
 }: Props) => {
     const followupQuestions = answer.context?.followup_questions;
+    const quickReply = answer.context?.quick_reply;
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
@@ -306,6 +423,10 @@ export const Answer = ({
                         })}
                     </div>
                 </div>
+            )}
+
+            {quickReply?.options?.length && showQuickReplies && onQuickReplyClicked && !isStreaming && (
+                <QuickReplyOptions quickReply={quickReply} onQuickReplyClicked={onQuickReplyClicked} />
             )}
 
             {!!followupQuestions?.length && showFollowupQuestions && onFollowupQuestionClicked && (

@@ -525,6 +525,90 @@ def test_chat_followup_nonstreaming(page: Page, live_server_url: str):
     expect(page.get_by_text("The capital of France is Paris.")).to_have_count(2)
 
 
+def test_chat_quick_reply_streaming(page: Page, live_server_url: str):
+    request_count = 0
+
+    def handle(route: Route):
+        nonlocal request_count
+        request_count += 1
+        post_data = route.request.post_data_json
+
+        if request_count == 1:
+            assert post_data["messages"][-1]["content"] == "Start triage"
+            answer = (
+                "**Selected Entry:** GEN3-T01\n\n"
+                "**Ask the applicant (read verbatim):**\n\n"
+                '> Q1: "Are you currently represented by a lawyer on this same matter?"'
+            )
+            quick_reply_context = {
+                "data_points": {"text": [], "images": [], "citations": []},
+                "thoughts": [],
+                "followup_questions": None,
+                "quick_reply": {
+                    "mode": "single",
+                    "entryId": "GEN3-T01",
+                    "questionId": "Q1",
+                    "options": [
+                        {"id": "if_yes", "label": "Yes", "value": "Yes"},
+                        {"id": "if_no", "label": "No", "value": "No"},
+                    ],
+                },
+            }
+            jsonl = "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "delta": {"role": "assistant"},
+                            "context": {
+                                "data_points": {"text": [], "images": [], "citations": []},
+                                "thoughts": [],
+                                "followup_questions": None,
+                            },
+                            "session_state": None,
+                        }
+                    ),
+                    json.dumps({"delta": {"content": answer, "role": "assistant"}}),
+                    json.dumps({"delta": {"role": "assistant"}, "context": quick_reply_context, "session_state": None}),
+                ]
+            )
+            route.fulfill(body=jsonl, status=200, headers={"Transfer-encoding": "Chunked"})
+            return
+
+        assert post_data["messages"][-1]["content"] == "No"
+        jsonl = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "delta": {"role": "assistant"},
+                        "context": {
+                            "data_points": {"text": [], "images": [], "citations": []},
+                            "thoughts": [],
+                            "followup_questions": None,
+                            "quick_reply": None,
+                        },
+                        "session_state": None,
+                    }
+                ),
+                json.dumps({"delta": {"content": "Next question would appear here.", "role": "assistant"}}),
+            ]
+        )
+        route.fulfill(body=jsonl, status=200, headers={"Transfer-encoding": "Chunked"})
+
+    page.route("*/**/chat/stream", handle)
+
+    page.goto(live_server_url)
+    page.get_by_placeholder("Type a new question (e.g. does my plan cover annual eye exams?)").fill("Start triage")
+    page.get_by_label("Submit question").click()
+
+    expect(page.get_by_role("button", name="No")).to_be_visible()
+    expect(page.get_by_placeholder("Type a new question (e.g. does my plan cover annual eye exams?)")).to_be_visible()
+
+    page.get_by_role("button", name="No").click()
+
+    expect(page.get_by_text("Next question would appear here.")).to_be_visible()
+    assert request_count == 2
+
+
 def test_upload_hidden(page: Page, live_server_url: str):
 
     def handle_auth_setup(route: Route):

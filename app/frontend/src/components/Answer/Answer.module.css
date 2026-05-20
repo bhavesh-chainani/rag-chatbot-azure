@@ -49,10 +49,14 @@ h2 {
     font-weight: 700;
 }
 
+.answerText .applicantVerbatimQuestion :global(.citationBadgeContainer) {
+    display: none;
+}
+
 /* Label vs script on separate lines; only the script is emphasized (OUTPUT A one-line compression). */
 .answerText .applicantInstructionLabel {
     display: block;
-    font-weight: 400;
+    font-weight: 700;
     color: inherit;
 }
 
@@ -110,6 +114,20 @@ h2 {
     font-style: italic;
     text-decoration: none;
     cursor: pointer;
+}
+
+.quickReplyContainer {
+    margin-top: 0.625em;
+}
+
+.quickReplyList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+}
+
+.quickReplyButton {
+    min-width: fit-content;
 }
 
 .supContainer {

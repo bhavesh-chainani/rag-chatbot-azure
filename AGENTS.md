@@ -96,6 +96,7 @@ Design principles:
 - Never asks a question whose answer is already known
 - Stops asking questions the moment branching logic allows a valid route
 - When multiple topics are detected, handles higher-priority topics first (capital offences > urgent matters > criminal > matrimonial > civil > other)
+- When the current pending `branching_logic` question has a small finite answer set, the backend may attach `context.quick_reply` metadata so the frontend can render selectable response buttons. The assistant markdown stays unchanged for eval compatibility; button clicks are sent back as normal user messages, and free-text input remains available.
 
 The four output formats (A/B/C/D) all preserve the `**Selected Entry:**` anchor and `Route <letter>` labels needed by the eval script (`evals/pbsg_golden_set_eval.py`).
 

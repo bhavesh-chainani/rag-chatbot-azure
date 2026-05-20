@@ -96,6 +96,7 @@ OUT_OF_SCOPE_CONTEXT = {
     "thoughts": OUT_OF_SCOPE_THOUGHTS,
     "data_points": {},
     "followup_questions": None,
+    "quick_reply": None,
 }
 
 

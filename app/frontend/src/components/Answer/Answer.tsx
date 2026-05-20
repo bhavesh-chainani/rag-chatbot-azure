@@ -173,7 +173,7 @@ function ApplicantQuestionParagraph({ children, className, ...rest }: ParagraphP
     const fullText = collectPlainTextFromNodes(children);
     const labelScriptSplit = trySplitApplicantLabelAndScript(fullText);
 
-    if (labelScriptSplit && isPlainTextOnlyChildren(children)) {
+    if (labelScriptSplit) {
         return (
             <>
                 <p {...rest} className={className}>

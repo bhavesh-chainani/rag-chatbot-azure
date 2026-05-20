@@ -52,7 +52,7 @@ h2 {
 /* Label vs script on separate lines; only the script is emphasized (OUTPUT A one-line compression). */
 .answerText .applicantInstructionLabel {
     display: block;
-    font-weight: 400;
+    font-weight: 700;
     color: inherit;
 }
 

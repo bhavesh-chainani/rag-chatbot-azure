@@ -269,6 +269,96 @@ def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
     assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
 
 
+def test_normalize_asked_question_text_uses_selected_entry_question(chat_approach):
+    criminal_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+                "if_no": "Proceed to Q3",
+                "if_not_sure": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {
+            "Q3": {
+                "question": "Is there a specific legal deadline within 14 days?",
+                "if_yes": "Route C",
+                "if_no": "Route D",
+            }
+        },
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(criminal_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        )
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?"**
+"""
+
+    normalized = chat_approach.normalize_asked_question_text(content, extra_info)
+
+    assert normalized is not None
+    assert '> **Q2: "Is there a court date/deadline within 14 days?"**' in normalized
+    assert "specific legal deadline within 14 days" not in normalized
+
+
+def test_normalize_asked_question_text_keeps_explicit_nested_entry_question(chat_approach):
+    parent_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+                "if_no": "Proceed to Q3",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is there an immediate threat to life or physical safety right now?",
+                "if_yes": "Route A (Emergency Services)",
+                "if_no": "Proceed to Q2",
+                "if_not_sure": "Route A as a precaution",
+            }
+        },
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(parent_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        )
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+Triage progress:
+- Last answered: Q2 = Yes → Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)
+- Next question: GEN3-T06 Q1 (Urgent concurrent path)
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"**
+"""
+
+    normalized = chat_approach.normalize_asked_question_text(content, extra_info)
+
+    assert normalized == content
+
+
 def test_build_quick_reply_skips_unsupported_walkthrough(chat_approach):
     entry = {
         "id": "GEN3-T02",

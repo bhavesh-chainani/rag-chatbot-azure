@@ -161,8 +161,8 @@ class ChatReadRetrieveReadApproach(Approach):
         if not content:
             return None, None
 
-        selected_entry_match = re.search(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
-        selected_entry_id = selected_entry_match.group(1) if selected_entry_match else None
+        selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
+        selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
 
         ask_markers = [
             "Ask the applicant (read verbatim):",
@@ -184,6 +184,81 @@ class ChatReadRetrieveReadApproach(Approach):
 
         entry_id, question_id = question_matches[-1]
         return entry_id or selected_entry_id, question_id
+
+    def convert_question_to_second_person(self, question: str) -> str:
+        question = re.sub(r"^\([^)]*\)\s*", "", question).strip()
+        replacements = [
+            (r"\bIs the applicant's\b", "Is your"),
+            (r"\bDoes the applicant's\b", "Does your"),
+            (r"\bHas the applicant's\b", "Has your"),
+            (r"\bIs the applicant\b", "Are you"),
+            (r"\bHas the applicant\b", "Have you"),
+            (r"\bDoes the applicant\b", "Do you"),
+            (r"\bthe applicant's\b", "your"),
+            (r"\bthe applicant\b", "you"),
+            (r"\bapplicant's\b", "your"),
+            (r"\bapplicant\b", "you"),
+        ]
+        for pattern, replacement in replacements:
+            question = re.sub(pattern, replacement, question, flags=re.IGNORECASE)
+        return question
+
+    def normalize_asked_question_text(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
+        if not content:
+            return content
+
+        selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
+        selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
+        if not selected_entry_id:
+            return content
+
+        entries = self.extract_golden_set_entries(extra_info.data_points.text)
+        selected_entry = entries.get(selected_entry_id)
+        branching_logic = selected_entry.get("branching_logic") if selected_entry else None
+        if not isinstance(branching_logic, dict):
+            return content
+
+        ask_markers = [
+            "Ask the applicant (read verbatim):",
+            "Back to triage",
+        ]
+        marker_positions = [content.rfind(marker) for marker in ask_markers]
+        marker_position = max(marker_positions)
+        if marker_position < 0:
+            return content
+
+        ask_region = content[marker_position:]
+        question_pattern = re.compile(
+            r"(?P<prefix>>?\s*\**(?:(?P<entry>GEN3-[A-Z0-9-]+)\s+)?(?P<question>Q\d+[A-Z]?)\s*:\s*)"
+            r"(?P<quote>[\"“])(?P<text>[^\"“”\n]*)(?P<closing_quote>[\"”])(?P<suffix>\**)",
+            flags=re.IGNORECASE,
+        )
+        matches = list(question_pattern.finditer(ask_region))
+        if not matches:
+            return content
+
+        match = matches[-1]
+        explicit_entry_id = match.group("entry")
+        if explicit_entry_id and explicit_entry_id != selected_entry_id:
+            return content
+
+        question_id = match.group("question")
+        question_node = branching_logic.get(question_id)
+        if not isinstance(question_node, dict):
+            return content
+
+        canonical_question = question_node.get("question")
+        if not isinstance(canonical_question, str) or not canonical_question:
+            return content
+
+        normalized_question = self.convert_question_to_second_person(canonical_question)
+        replacement = (
+            f"{match.group('prefix')}{match.group('quote')}{normalized_question}"
+            f"{match.group('closing_quote')}{match.group('suffix')}"
+        )
+        start = marker_position + match.start()
+        end = marker_position + match.end()
+        return content[:start] + replacement + content[end:]
 
     def label_from_branch_key(self, branch_key: str) -> str:
         labels = {
@@ -292,6 +367,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if overrides.get("suggest_followup_questions"):
             content, followup_questions = self.extract_followup_questions(content)
             extra_info.followup_questions = followup_questions
+        content = self.normalize_asked_question_text(content, extra_info)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
         # TODO: Update for agentic? This isn't still true?
@@ -336,6 +412,7 @@ class ChatReadRetrieveReadApproach(Approach):
             if overrides.get("suggest_followup_questions"):
                 content, followup_questions = self.extract_followup_questions(content)
                 extra_info.followup_questions = followup_questions
+            content = self.normalize_asked_question_text(content, extra_info)
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
             if self.include_token_usage and extra_info.thoughts and chat_result.usage:
@@ -402,6 +479,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 "context": {"context": extra_info, "followup_questions": followup_questions},
             }
         if streamed_content:
+            streamed_content = self.normalize_asked_question_text(streamed_content, extra_info) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
             yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
 

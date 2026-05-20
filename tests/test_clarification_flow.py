@@ -144,6 +144,222 @@ class TestSystemPromptClarificationOutput:
         decision_section = content[decision_section_idx:]
         assert "OUTPUT E" in decision_section
 
+    def test_system_prompt_does_not_treat_proceed_to_question_as_route_script(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T03.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Use OUTPUT B whenever the matched `branching_logic` outcome is **Proceed to Q<next>**" in content
+        assert "The next question appears exactly once" in content
+        assert "Tell the applicant` is for terminal Route scripts only" in content
+        assert "Do not include Part C" in content
+
+    def test_system_prompt_locks_proceed_to_question_to_selected_entry(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json", "GEN3-T04.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Active stream lock" in content
+        assert "Q` numbers are local to each Golden Set entry, not global" in content
+        assert "every `Proceed to Q<n>` transition MUST resolve `Q<n>` from that same entry" in content
+        assert "Do not use `GEN3-T01` questions unless `Selected Entry` is `GEN3-T01`" in content
+        assert "Selected Entry` controls the lookup source" in content
+        assert "Never show raw paths like `.branching_logic.` in staff-facing output" in content
+        assert "Next question: Q4 (Means) from GEN3-T04" in content
+
+    def test_system_prompt_keeps_followups_inside_selected_topic_stream(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json", "GEN3-T04.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Topic Stream Authority" in content
+        assert "Selected Entry` is the active state authority across turns" in content
+        assert "do not re-run `GEN3-T01` first-contact questions" in content
+        assert "do not ask `GEN3-T01 Q1`" in content
+        assert "or `GEN3-T01 Q5`" in content
+        assert "`GEN3-T04 Q1 = Yes` means `Proceed to Q2`" in content
+
+    def test_system_prompt_fresh_stream_starts_at_q1(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T02.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Fresh Stream Start Rule" in content
+        assert "the current question is that stream's `Q1`" in content
+        assert "Later-question facts may be remembered as background" in content
+        assert "must not be displayed as answered triage state or used for routing" in content
+        assert "charged in state courts" in content
+        assert "only background until `GEN3-T02 Q1` and `GEN3-T02 Q2` have been answered" in content
+
+    def test_system_prompt_contains_gen3_t02_charged_message_starts_at_q1_example(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T02.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert 'fresh GEN3-T02 message says "caller has been charged in state courts"' in content
+        assert "This identifies the topic as `GEN3-T02`" in content
+        assert "Current question: Q1 from GEN3-T02" in content
+        assert "Background noted: charged in court, but Q3 is not yet validated" in content
+        assert "Next question: Q1 from GEN3-T02" in content
+        assert "Is the offence a capital offence (punishable with death)?" in content
+        assert "Do NOT show `Q3: charged in court -> Yes`" in content
+        assert "Do NOT ask `GEN3-T02 Q3` first" in content
+
+    def test_system_prompt_contains_gen3_t02_q1_no_to_q2_example(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T02.json", "GEN3-T06.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Same-Topic Transition Rule" in content
+        assert "Cross-Reference Gate Rule" in content
+        assert "Example — GEN3-T02 Q1 = No" in content
+        assert "GEN3-T02.branching_logic.Q1.if_no" in content
+        assert "Proceed to Q2" in content
+        assert "GEN3-T02.branching_logic.Q2.question" in content
+        assert "Is there a court date/deadline within 14 days?" in content
+        assert "Do NOT ask \"Is there a specific legal deadline within 14 days" in content
+        assert "That is `GEN3-T06 Q3`, and `GEN3-T06` has not been invoked yet" in content
+
+    def test_system_prompt_contains_gen3_t02_route_d_to_nested_gen3_t06_q1_example(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T02.json", "GEN3-T06.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Example — GEN3-T02 Q2 = Yes" in content
+        assert "GEN3-T02.branching_logic.Q2.if_yes" in content
+        assert "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)" in content
+        assert "Now, and only now, start the nested urgent leg" in content
+        assert "Nested `GEN3-T06` starts at `GEN3-T06 Q1`" in content
+        assert "Next question: GEN3-T06 Q1 (Urgent concurrent path)" in content
+        assert "GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"" in content
+
+    def test_system_prompt_forbids_later_question_state_before_prerequisites(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T02.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Prerequisite-state display rule" in content
+        assert "`What I gathered` may include a short `Background noted` line" in content
+        assert "do not list those later questions as answered" in content
+        assert "do not show `Q3: charged in court -> Yes` in `GEN3-T02`" in content
+        assert "until after `GEN3-T02 Q1` and `GEN3-T02 Q2` are resolved" in content
+
+    def test_system_prompt_contains_gen3_t04_yes_to_representation_guidance_example(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T04.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Example — GEN3-T04 Q1 = Yes" in content
+        assert "GEN3-T04.branching_logic.Q1.if_yes" in content
+        assert "GEN3-T04.branching_logic.Q2.question" in content
+        assert "Last answered: Q1 = Yes → Proceed to Q2 (SGC/PR path)" in content
+        assert "Next question: Q2 (SGC/PR path) from GEN3-T04" in content
+        assert "Are you seeking representation (a lawyer to act for you) or guidance (initial advice)?" in content
+        assert "Do NOT ask \"Are you currently represented by a lawyer on this same matter?\"" in content
+        assert "That is `GEN3-T01 Q1`" in content
+
+    def test_system_prompt_contains_gen3_t04_foreigner_to_means_question_example(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T04.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Example — GEN3-T04 Q1 = No, foreigner" in content
+        assert "GEN3-T04.branching_logic.Q1.if_no_foreigner" in content
+        assert "GEN3-T04.branching_logic.Q4.question" in content
+        assert "Per Capita Household Income (PCHI) ≤ S$5,000" in content
+        assert "Last answered: Q1 = No, foreigner → Proceed to Q4 (Means)" in content
+        assert "Next question: Q4 (Means) from GEN3-T04" in content
+        assert "Next question: Q4 from `GEN3-T04.branching_logic.Q4.question`" not in content
+        assert "Do NOT ask \"What type of matter are you facing?\"" in content
+        assert "That is `GEN3-T01 Q5`" in content
+
+    def test_system_prompt_visible_output_uses_friendly_question_labels(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T04.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "Next question: Q<next> (<short label, if any>) from <ENTRY_ID>" in content
+        assert "Do not expose raw lookup paths like `.branching_logic.` in visible text" in content
+        assert "Derive the short label from the parenthetical label in `triage_questions`" in content
+        assert "Q3 (Representation, SGC/PR)" in content
+
     def test_system_prompt_clarification_does_not_break_other_outputs(self):
         rendered = self.prompt_manager.build_system_prompt(
             "chat_answer.system.jinja2",

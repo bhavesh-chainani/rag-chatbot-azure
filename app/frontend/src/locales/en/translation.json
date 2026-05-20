@@ -40,7 +40,7 @@
     "defaultExamples": {
         "1": "New applicant asking for legal help. How should I start triaging this call?",
         "2": "Applicant has a criminal matter and says they were charged in court. What should I ask first?",
-        "3": "Applicant says this is a personal contract dispute and wants legal assistance. How do I triage?",
+        "3": "Applicant has a landlord-tenant dispute and requires help. How do I triage?",
         "placeholder": "Type the applicant's situation (e.g. applicant already has a lawyer, criminal charge, divorce, or civil dispute)"
     },
     "askTitle": "Enter applicant's situation",

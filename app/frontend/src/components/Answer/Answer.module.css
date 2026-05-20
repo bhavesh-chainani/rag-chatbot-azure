@@ -112,6 +112,20 @@ h2 {
     cursor: pointer;
 }
 
+.quickReplyContainer {
+    margin-top: 0.625em;
+}
+
+.quickReplyList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+}
+
+.quickReplyButton {
+    min-width: fit-content;
+}
+
 .supContainer {
     text-decoration: none;
     cursor: pointer;

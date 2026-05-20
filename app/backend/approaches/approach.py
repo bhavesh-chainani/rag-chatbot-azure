@@ -188,10 +188,26 @@ class DataPoints:
 
 
 @dataclass
+class QuickReplyOption:
+    id: str
+    label: str
+    value: str
+
+
+@dataclass
+class QuickReply:
+    mode: str
+    entryId: str
+    questionId: str
+    options: list[QuickReplyOption]
+
+
+@dataclass
 class ExtraInfo:
     data_points: DataPoints
     thoughts: list[ThoughtStep] = field(default_factory=list)
     followup_questions: Optional[list[Any]] = None
+    quick_reply: Optional[QuickReply] = None
     answer: Optional[str] = None  # Only when web knowledge source is used
 
 
@@ -917,10 +933,13 @@ class Approach(ABC):
             return {"override_prompt": override_prompt}
 
     def get_response_token_limit(self, model: str, default_limit: int) -> int:
-        if model in self.GPT_REASONING_MODELS:
+        if self.model_uses_max_completion_tokens(model):
             return self.RESPONSE_REASONING_DEFAULT_TOKEN_LIMIT
 
         return default_limit
+
+    def model_uses_max_completion_tokens(self, model: str) -> bool:
+        return model in self.GPT_REASONING_MODELS or bool(re.match(r"^(?:o\d|o\d-|gpt-5)", model))
 
     def get_lowest_reasoning_effort(self, model: str) -> ChatCompletionReasoningEffort:
         """
@@ -945,18 +964,19 @@ class Approach(ABC):
         n: Optional[int] = None,
         reasoning_effort: Optional[ChatCompletionReasoningEffort] = None,
     ) -> Awaitable[ChatCompletion] | Awaitable[AsyncStream[ChatCompletionChunk]]:
-        if chatgpt_model in self.GPT_REASONING_MODELS:
+        if self.model_uses_max_completion_tokens(chatgpt_model):
             params: dict[str, Any] = {
                 # max_tokens is not supported
                 "max_completion_tokens": response_token_limit
             }
 
             # Adjust parameters for reasoning models
-            supported_features = self.GPT_REASONING_MODELS[chatgpt_model]
-            if supported_features.streaming and should_stream:
-                params["stream"] = True
-                params["stream_options"] = {"include_usage": True}
-            params["reasoning_effort"] = reasoning_effort or overrides.get("reasoning_effort") or self.reasoning_effort
+            supported_features = self.GPT_REASONING_MODELS.get(chatgpt_model)
+            if supported_features:
+                if supported_features.streaming and should_stream:
+                    params["stream"] = True
+                    params["stream_options"] = {"include_usage": True}
+                params["reasoning_effort"] = reasoning_effort or overrides.get("reasoning_effort") or self.reasoning_effort
 
         else:
             # Include parameters that may not be supported for reasoning models

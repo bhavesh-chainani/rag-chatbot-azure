@@ -81,8 +81,22 @@ export type DataPoints = {
 export type ResponseContext = {
     data_points: DataPoints;
     followup_questions: string[] | null;
+    quick_reply?: QuickReply | null;
     thoughts: Thoughts[];
     answer?: string;
+};
+
+export type QuickReplyOption = {
+    id: string;
+    label: string;
+    value: string;
+};
+
+export type QuickReply = {
+    mode: "single" | "multi";
+    entryId: string;
+    questionId: string;
+    options: QuickReplyOption[];
 };
 
 export type ChatAppResponseOrError = {

@@ -209,6 +209,7 @@ class ExtraInfo:
     followup_questions: Optional[list[Any]] = None
     quick_reply: Optional[QuickReply] = None
     answer: Optional[str] = None  # Only when web knowledge source is used
+    deterministic_transition: Optional[Any] = None
 
 
 @dataclass

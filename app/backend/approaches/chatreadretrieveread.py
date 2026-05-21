@@ -18,6 +18,7 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from approaches.approach import (
     Approach,
+    DataPoints,
     ExtraInfo,
     QuickReply,
     QuickReplyOption,
@@ -25,9 +26,17 @@ from approaches.approach import (
 )
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
+    PBSGDeterministicResult,
+    PBSGRoutingEngine,
+    PBSGTransition,
     build_triage_state,
     format_state_prompt,
+    label_from_branch_key,
+    load_golden_set_entries,
+    parse_transition_outcome,
+    resolve_expected_transition,
     safe_escalation_response,
+    validate_response_transition,
     validate_response_questions,
 )
 from prepdocslib.blobmanager import AdlsBlobManager, BlobManager
@@ -141,6 +150,8 @@ class ChatReadRetrieveReadApproach(Approach):
         self.use_sharepoint_source = use_sharepoint_source
         self.retrieval_reasoning_effort = retrieval_reasoning_effort
         self.enforce_access_control = enforce_access_control
+        self.pbsg_golden_set_entries = load_golden_set_entries()
+        self.pbsg_routing_engine = PBSGRoutingEngine(self.pbsg_golden_set_entries)
 
     def extract_followup_questions(self, content: Optional[str]):
         if content is None:
@@ -267,36 +278,7 @@ class ChatReadRetrieveReadApproach(Approach):
         return content[:start] + replacement + content[end:]
 
     def label_from_branch_key(self, branch_key: str) -> str:
-        labels = {
-            "yes": "Yes",
-            "no": "No",
-            "not_sure": "Not sure",
-            "not_sure_or_both": "Not sure or both",
-            "no_foreigner": "No, foreigner",
-            "criminal": "Criminal",
-            "matrimonial": "Matrimonial",
-            "civil_or_others": "Civil or others",
-            "guidance": "Guidance",
-            "representation": "Representation",
-            "yes_and_nonprofit": "Yes, nonprofit",
-            "yes_and_for_profit": "Yes, for-profit business",
-            "calling_on_behalf_and_able_to_self_help": "Calling on behalf, can self-help",
-            "self_or_calling_on_behalf_and_unable_to_self_help": "Self, or cannot self-help",
-            "yes_passed_or_processing": "Yes, passed or processing",
-            "yes_failed_means_test": "Yes, failed means test",
-            "yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
-            "no_or_has_not_applied": "No, or has not applied",
-            "no_marginal": "No, marginal",
-            "no_well_over": "No, well over",
-            "yes_lab_unable_to_assist": "Yes, LAB unable to assist",
-            "yes_lab_able_or_not_sure": "Yes, LAB able or not sure",
-            "no_marginal_or_exceptional": "No, marginal or exceptional",
-            "no_well_over_no_exceptions": "No, well over, no exceptions",
-        }
-        suffix = branch_key.removeprefix("if_")
-        if suffix in labels:
-            return labels[suffix]
-        return suffix.replace("_", " ").capitalize()
+        return label_from_branch_key(branch_key)
 
     def quick_reply_outcome_is_supported(self, outcome: Any) -> bool:
         if not isinstance(outcome, str):
@@ -338,15 +320,232 @@ class ChatReadRetrieveReadApproach(Approach):
         ]
         return QuickReply(mode="single", entryId=entry_id, questionId=question_id, options=options)
 
+    def render_deterministic_question_response(
+        self, transition: PBSGTransition, entries: dict[str, dict[str, Any]]
+    ) -> Optional[str]:
+        if transition.transition_type not in {"proceed_question", "nested_stream"}:
+            return None
+        if not transition.target_entry_id or not transition.target_question_id:
+            return None
+        entry = entries.get(transition.target_entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(transition.target_question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict):
+            return None
+        question = question_node.get("question")
+        if not isinstance(question, str):
+            return None
+
+        next_label = f"{transition.target_question_id} from {transition.target_entry_id}"
+        question_prefix = transition.target_question_id
+        if transition.transition_type == "nested_stream":
+            next_label = f"{transition.target_entry_id} {transition.target_question_id} (Urgent concurrent path)"
+            question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
+
+        return "\n".join(
+            [
+                f"**Selected Entry:** {transition.entry_id}",
+                "",
+                "What I gathered from your description:",
+                "",
+                f"- {transition.question_id}: {self.label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.question_id} = {self.label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
+                f"- Next question: {next_label}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **{question_prefix}: "{self.convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+            ]
+        )
+
     def apply_triage_response_guard(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
         entries = self.extract_golden_set_entries(extra_info.data_points.text)
         if not content or not entries:
             return content
 
         is_valid, reason = validate_response_questions(content, entries)
+        if not is_valid:
+            return safe_escalation_response(content, entries, reason or "unknown transition error")
+
+        expected_transition = extra_info.deterministic_transition
+        is_valid, reason = validate_response_transition(content, entries, expected_transition)
         if is_valid:
             return content
+        if isinstance(expected_transition, PBSGTransition):
+            deterministic_response = self.render_deterministic_question_response(expected_transition, entries)
+            if deterministic_response:
+                return deterministic_response
         return safe_escalation_response(content, entries, reason or "unknown transition error")
+
+    def golden_set_data_points(self, entries: dict[str, dict[str, Any]]) -> DataPoints:
+        return DataPoints(
+            text=[f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}" for entry_id, entry in sorted(entries.items())],
+            citations=[f"{entry_id}.json" for entry_id in sorted(entries)],
+        )
+
+    def build_deterministic_chat_response(
+        self,
+        deterministic_result: PBSGDeterministicResult,
+        session_state: Any = None,
+    ) -> dict[str, Any]:
+        extra_info = ExtraInfo(
+            data_points=self.golden_set_data_points(deterministic_result.entries),
+            deterministic_transition=deterministic_result.transition,
+        )
+        content = self.apply_triage_response_guard(deterministic_result.content, extra_info)
+        extra_info.quick_reply = self.build_quick_reply(content, extra_info)
+        extra_info.thoughts.append(
+            ThoughtStep(
+                "Deterministic PBSG routing",
+                "Answered from Golden Set branching logic without retrieval or LLM generation.",
+                {
+                    "mode": deterministic_result.state.mode,
+                    "entry_id": deterministic_result.transition.entry_id,
+                    "question_id": deterministic_result.transition.question_id,
+                    "branch_key": deterministic_result.transition.branch_key,
+                    "transition_type": deterministic_result.transition.transition_type,
+                },
+            )
+        )
+        return {
+            "message": {"content": content, "role": "assistant"},
+            "context": {
+                "thoughts": extra_info.thoughts,
+                "data_points": {
+                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+                },
+                "followup_questions": extra_info.followup_questions,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(deterministic_result.state),
+            },
+            "session_state": session_state,
+        }
+
+    def try_deterministic_locked_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
+        if not deterministic_result:
+            return None
+        return self.build_deterministic_chat_response(deterministic_result, session_state)
+
+    async def try_structured_llm_locked_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        overrides: dict[str, Any],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not self.openai_client or not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
+            return None
+        entry = self.pbsg_golden_set_entries.get(triage_state.pending_entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = (
+            branching_logic.get(triage_state.current_question_id) if isinstance(branching_logic, dict) else None
+        )
+        if not isinstance(question_node, dict):
+            return None
+        branch_keys = [key for key in question_node if key.startswith("if_")]
+        if not branch_keys:
+            return None
+
+        classifier_messages: list[ChatCompletionMessageParam] = [
+            {
+                "role": "system",
+                "content": (
+                    "Classify the latest user message as an answer to one PBSG triage question. "
+                    "Return compact JSON only with keys classification, branch_key, confidence. "
+                    "classification must be one of branch, clarification, ambiguous, contradiction. "
+                    "Only choose branch_key from the allowed branch keys. Do not write user-facing routing advice."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "entry_id": triage_state.pending_entry_id,
+                        "question_id": triage_state.current_question_id,
+                        "question": question_node.get("question"),
+                        "allowed_branch_keys": branch_keys,
+                        "allowed_branch_labels": {key: label_from_branch_key(key) for key in branch_keys},
+                        "latest_user_message": latest_content,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        completion = await cast(
+            Awaitable[ChatCompletion],
+            self.create_chat_completion(
+                self.chatgpt_deployment,
+                self.chatgpt_model,
+                classifier_messages,
+                overrides,
+                self.get_response_token_limit(self.chatgpt_model, 200),
+                should_stream=False,
+                temperature=0.0,
+            ),
+        )
+        classifier_content = completion.choices[0].message.content or "{}"
+        try:
+            payload = json.loads(classifier_content)
+        except json.JSONDecodeError:
+            return None
+        if payload.get("classification") != "branch":
+            return None
+        branch_key = payload.get("branch_key")
+        confidence = payload.get("confidence")
+        if branch_key not in branch_keys or not isinstance(confidence, (int, float)) or confidence < 0.75:
+            return None
+        outcome = question_node.get(branch_key)
+        if not isinstance(outcome, str):
+            return None
+        transition = parse_transition_outcome(
+            self.pbsg_golden_set_entries,
+            triage_state.pending_entry_id,
+            triage_state.current_question_id,
+            branch_key,
+            outcome,
+        )
+        content = self.pbsg_routing_engine.render_transition(transition)
+        if not content:
+            return None
+        result = PBSGDeterministicResult(
+            content=content,
+            state=triage_state,
+            transition=transition,
+            entries=self.pbsg_golden_set_entries,
+        )
+        response = self.build_deterministic_chat_response(result, session_state)
+        response["context"]["thoughts"].append(
+            self.format_thought_step_for_chatcompletion(
+                title="Structured PBSG answer classification",
+                messages=classifier_messages,
+                overrides=overrides,
+                model=self.chatgpt_model,
+                deployment=self.chatgpt_deployment,
+                usage=completion.usage,
+            )
+        )
+        return response
 
     def get_search_query(self, chat_completion: ChatCompletion, default_query: str) -> str:
         """Read the optimized search query from a chat completion tool call."""
@@ -374,6 +573,13 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
+        if deterministic_response:
+            return deterministic_response
+        structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
+        if structured_response:
+            return structured_response
+
         extra_info, chat_coroutine = await self.run_until_final_call(
             messages, overrides, auth_claims, should_stream=False
         )
@@ -411,6 +617,19 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
+        if deterministic_response:
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            return
+        structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
+        if structured_response:
+            yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": structured_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
+            return
+
         extra_info, chat_coroutine = await self.run_until_final_call(
             messages, overrides, auth_claims, should_stream=True
         )
@@ -573,6 +792,9 @@ class ChatReadRetrieveReadApproach(Approach):
         if isinstance(original_user_query, str) and golden_set_entries:
             triage_state = build_triage_state(messages[:-1], golden_set_entries, original_user_query)
             triage_state_prompt = format_state_prompt(triage_state)
+            extra_info.deterministic_transition = resolve_expected_transition(
+                golden_set_entries, triage_state, original_user_query
+            )
 
         system_template_variables = self.get_system_prompt_variables(overrides.get("prompt_template"))
         system_template_variables.setdefault("injected_prompt", "")

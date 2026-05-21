@@ -524,7 +524,9 @@ class ChatReadRetrieveReadApproach(Approach):
                     "or {branch_key, confidence}. new_topics is a list of {entry_id, evidence, confidence}. "
                     "correction is {affects_prior_answer, reason}. clarification_answer may be a short plain-language "
                     "answer if the user asked a clarification question. Only choose branch_key from allowed branches "
-                    "and entry_id from available entries. Do not write user-facing routing advice."
+                    "and entry_id from available entries. Do not choose the next question, route letter, resume target, "
+                    "or final recommendation. The backend deterministic workflow graph owns all route execution. "
+                    "Do not write user-facing routing advice."
                 ),
             },
             {

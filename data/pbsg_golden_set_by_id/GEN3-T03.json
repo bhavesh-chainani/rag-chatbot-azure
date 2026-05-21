@@ -62,6 +62,78 @@
     "Route F (Escalate to PBSG Staff): Take down: full name, contact number, email (if any), brief matter description including answers to Q1-Q5, any urgency/vulnerability factors noted. Inform the applicant that PBSG Staff will call back within 1–2 working days. Email information to PBSG Staff on the same day. Do NOT attempt to advise further."
   ],
   "routing_structured": {
+    "Route A": {
+      "name": "FJSS + Urgent Concurrent",
+      "script": "Your family matter may also involve urgency, such as violence or a deadline. I need to check the urgent issue first, then I will continue the FJSS questions after that.",
+      "needs_to_know": [
+        "GEN3-T06 urgent triage must be completed before continuing to GEN3-T03 Q2.",
+        "The urgent route and matrimonial stream outcome should both be presented where applicable."
+      ],
+      "access": [],
+      "prepare": [
+        "Court date or deadline details",
+        "Any family violence or safety concerns"
+      ],
+      "intern_steps": [
+        "Proceed to GEN3-T06 Q1 before asking GEN3-T03 Q2.",
+        "After the urgent leg is complete, resume GEN3-T03 at Q2.",
+        "Present both the urgent triage outcome and matrimonial stream outcome where applicable."
+      ],
+      "caveats": [
+        "Do not let GEN3-T06's standalone return-to-GEN3-T01 wording override the parent resume point."
+      ]
+    },
+    "Route B": {
+      "name": "Refer to LAB First",
+      "script": "Because you are a Singapore Citizen or PR facing a family or matrimonial matter, you should apply to the Legal Aid Bureau first. LAB is the government's legal aid office for low-income Singapore Citizens and PRs facing civil and family proceedings. If LAB is unable to assist and you cannot afford paid legal services, you can come back to PBSG with your LAB rejection letter or reasons so we can assess whether we may be able to help.",
+      "needs_to_know": [
+        "LAB should be the first port of call for eligible Singapore Citizens or PRs seeking family or civil representation.",
+        "If the applicant can afford a lawyer, PBSG is not likely able to assist but can share lawyer directories and self-help resources."
+      ],
+      "access": [
+        "Website: https://lab.mlaw.gov.sg/",
+        "Eligibility criteria: https://lab.mlaw.gov.sg/legal-services/do-i-qualify/",
+        "Means test information: https://lab.mlaw.gov.sg/legal-services/taking-the-means-test/",
+        "Phone: 1800 2255 529",
+        "Address: 45 Maxwell Road #07-11, The URA Centre (East Wing), Singapore 069118",
+        "Opening hours / appointment instructions: Appointment needed through LAB's website or hotline"
+      ],
+      "prepare": [
+        "LAB rejection letter or reasons, if LAB is unable to assist",
+        "Financial documents for LAB's means test",
+        "Family or matrimonial matter documents"
+      ],
+      "intern_steps": [
+        "Share LAB's website, eligibility criteria, means test information, phone number, and appointment instructions.",
+        "If the applicant later receives a LAB rejection or reasons, tell them they may return to PBSG for assessment."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
+    "Route C": {
+      "name": "LAB is Handling",
+      "script": "Because LAB is already handling your application, you should direct questions about that application to LAB. I can share LAB's contact details with you.",
+      "needs_to_know": [
+        "PBSG is not needed while LAB is handling or processing the application."
+      ],
+      "access": [
+        "Website: https://lab.mlaw.gov.sg/",
+        "Phone: 1800 2255 529",
+        "Address: 45 Maxwell Road #07-11, The URA Centre (East Wing), Singapore 069118",
+        "Opening hours / appointment instructions: Appointment needed through LAB's website or hotline"
+      ],
+      "prepare": [
+        "LAB application reference or correspondence, if any"
+      ],
+      "intern_steps": [
+        "Share LAB's contact details.",
+        "Do not advise on the ongoing LAB application."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
     "Route D": {
       "name": "FJSS Pro Bono — Standard Intake",
       "script": "You may be eligible for FJSS Pro Bono. Please apply through Pro Bono SG's legal representation application page. If you cannot self-apply, you may go to the PBSG Counter at the State Courts Help Centre with the required documents.",
@@ -110,7 +182,7 @@
     },
     "Route F": {
       "name": "Escalate to PBSG Staff",
-      "script": "I need to check this with PBSG Staff before going further. Let me take down your details and have PBSG Staff follow up.",
+      "script": "I need to check this with PBSG Staff before going further. Let me collect your details and have PBSG Staff follow up.",
       "needs_to_know": [
         "PBSG Staff will call back within 1-2 working days."
       ],

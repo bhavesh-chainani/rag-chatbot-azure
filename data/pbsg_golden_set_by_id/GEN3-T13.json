@@ -59,7 +59,7 @@
   "routing_structured": {
     "Route A": {
       "name": "High-Vulnerability — Escalate + Community Law Centre",
-      "script": "I want to make sure we handle this carefully. Let me take down the key details and have PBSG Staff assess the best way to follow up with you.",
+      "script": "I want to make sure we handle this carefully. Let me collect the key details and have PBSG Staff assess the best way to follow up with you.",
       "needs_to_know": [
         "Use this route when there are two or more vulnerability factors, or one severe factor such as a minor, active violence, or FSC-referred applicant.",
         "PBSG Staff may assess whether the Community Law Centre or another supported pathway is appropriate."

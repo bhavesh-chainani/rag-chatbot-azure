@@ -269,6 +269,52 @@ def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
     assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
 
 
+def test_build_quick_reply_works_for_structured_nested_urgent_card(chat_approach):
+    parent_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is there an immediate threat to life or safety right now?",
+                "if_yes": "Route A (Emergency Services)",
+                "if_no": "Proceed to Q2",
+                "if_not_sure": "Route A as a precaution",
+            }
+        },
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(parent_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        )
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Active stream:** GEN3-T06 urgent concurrent path
+
+**Ask the applicant (read verbatim):**
+
+**GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"**
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert quick_reply.entryId == "GEN3-T06"
+    assert quick_reply.questionId == "Q1"
+    assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
+
+
 def test_normalize_asked_question_text_uses_selected_entry_question(chat_approach):
     criminal_entry = {
         "id": "GEN3-T02",

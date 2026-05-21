@@ -35,6 +35,9 @@ class PBSGTriageState:
     )
     repair_required: bool = False
     escalation_required: bool = False
+    parent_workflow: str | None = None
+    resume_question_id: str | None = None
+    triggered_overlays: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -51,6 +54,14 @@ class PBSGTransition:
     resume_entry_id: str | None = None
     resume_question_id: str | None = None
     clarification_text: str | None = None
+
+
+@dataclass
+class PBSGWorkflowEdge:
+    entry_id: str
+    question_id: str
+    branch_key: str
+    transition: PBSGTransition
 
 
 @dataclass
@@ -372,6 +383,9 @@ def label_from_branch_key(branch_key: str) -> str:
         "yes_lab_able_or_not_sure": "Yes, LAB able or not sure",
         "no_marginal_or_exceptional": "No, marginal or exceptional",
         "no_well_over_no_exceptions": "No, well over, no exceptions",
+        "helper_present": "Helper present",
+        "no_or_unclear": "No or unclear",
+        "under_18": "Under 18",
     }
     suffix = branch_key.removeprefix("if_")
     if suffix in labels:
@@ -467,6 +481,9 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
         (r"\b(criminal|charge|charged|arrest|police)\b", "if_criminal"),
         (r"\b(divorce|matrimonial|family|custody|maintenance)\b", "if_matrimonial"),
         (r"\b(civil|employment|contract|property|estate|neighbou?r|others?)\b", "if_civil_or_others"),
+        (r"\b(helper|caregiver|someone helped|calling for)\b", "if_helper_present"),
+        (r"\b(unsafe|not safe|no shelter|no place|homeless)\b", "if_no_or_unclear"),
+        (r"\b(under 18|minor|child|17|16|15)\b", "if_under_18"),
     ]
     for pattern, branch_key in keyword_rules:
         if branch_key in branch_keys and re.search(pattern, normalized_query):
@@ -546,6 +563,15 @@ def concurrent_monitors_from_flags(flags: dict[str, bool]) -> list[str]:
     if flags.get("representation"):
         monitors.append("representation conflict")
     return monitors
+
+
+def triggered_overlays_from_flags(flags: dict[str, bool]) -> list[str]:
+    overlays: list[str] = []
+    if flags.get("urgent"):
+        overlays.append("GEN3-T06")
+    if flags.get("vulnerable"):
+        overlays.append("GEN3-T13")
+    return overlays
 
 
 def detect_candidate_topics(
@@ -667,6 +693,8 @@ def build_triage_state(
         for workflow_id in topic_workflows
         if workflow_id != active_workflow and workflow_id not in completed_workflows
     ]
+    parent_workflow = selected_entry_id if pending_entry_id == "GEN3-T06" and selected_entry_id != "GEN3-T06" else None
+    resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
 
     return PBSGTriageState(
         mode=mode,
@@ -686,6 +714,9 @@ def build_triage_state(
         contradiction_signals=contradiction_signals,
         active_monitors=flags,
         repair_required=bool(contradiction_signals),
+        parent_workflow=parent_workflow,
+        resume_question_id=resume_question_id,
+        triggered_overlays=triggered_overlays_from_flags(flags),
     )
 
 
@@ -1119,6 +1150,106 @@ def parse_transition_outcome(
     )
 
 
+class PBSGWorkflowGraph:
+    def __init__(self, entries: dict[str, dict[str, Any]]):
+        self.entries = entries
+        self.edges = self.build_edges(entries)
+
+    def build_edges(self, entries: dict[str, dict[str, Any]]) -> dict[tuple[str, str, str], PBSGWorkflowEdge]:
+        edges: dict[tuple[str, str, str], PBSGWorkflowEdge] = {}
+        for entry_id, entry in entries.items():
+            branching_logic = entry.get("branching_logic")
+            if not isinstance(branching_logic, dict):
+                continue
+            for question_id, question_node in branching_logic.items():
+                if not isinstance(question_node, dict):
+                    continue
+                for branch_key, outcome in question_node.items():
+                    if not branch_key.startswith("if_") or not isinstance(outcome, str):
+                        continue
+                    transition = parse_transition_outcome(entries, entry_id, question_id, branch_key, outcome)
+                    edges[(entry_id, question_id, branch_key)] = PBSGWorkflowEdge(
+                        entry_id=entry_id,
+                        question_id=question_id,
+                        branch_key=branch_key,
+                        transition=transition,
+                    )
+        return edges
+
+    def edge_for(self, entry_id: str | None, question_id: str | None, branch_key: str | None) -> PBSGWorkflowEdge | None:
+        if not entry_id or not question_id or not branch_key:
+            return None
+        return self.edges.get((entry_id, question_id, branch_key))
+
+    def transition_for(self, entry_id: str | None, question_id: str | None, branch_key: str | None) -> PBSGTransition | None:
+        edge = self.edge_for(entry_id, question_id, branch_key)
+        return edge.transition if edge else None
+
+    def transitions(self) -> list[PBSGTransition]:
+        return [edge.transition for edge in self.edges.values()]
+
+
+def gen3_t13_cues(text: str) -> set[str]:
+    lowered = text.lower()
+    cues: set[str] = set()
+    if re.search(r"\b(minor|under 18|child is calling|17|16|15)\b", lowered):
+        cues.add("minor")
+    if re.search(r"\b(violence|abuse|unsafe|not safe|danger|self[- ]?harm)\b", lowered):
+        cues.add("active_safety")
+    if re.search(r"\b(no shelter|safe place|homeless|no food|no money|basic needs)\b", lowered):
+        cues.add("basic_needs")
+    if re.search(r"\b(social worker|fsc|case officer|counsellor|counselor)\b", lowered):
+        cues.add("fsc_referred")
+    if re.search(r"\b(elderly|confused|dementia|isolated)\b", lowered):
+        cues.add("elderly")
+    if re.search(r"\b(disabled|disability|mobility|cognitive)\b", lowered):
+        cues.add("disability")
+    if re.search(r"\b(language barrier|interpreter|limited english|translation)\b", lowered):
+        cues.add("language_barrier")
+    if re.search(r"\b(cannot use|can't use|no email|no internet|technology|tech[- ]?illiterate)\b", lowered):
+        cues.add("technology_barrier")
+    if re.search(r"\b(not sure|unclear|unknown|maybe)\b", lowered):
+        cues.add("unclear")
+    return cues
+
+
+def resolve_gen3_t13_cue_transition(latest_user_query: str, question_id: str | None = None) -> PBSGTransition | None:
+    cues = gen3_t13_cues(latest_user_query)
+    question = question_id or "Q1"
+    if {"active_safety", "basic_needs"} & cues:
+        return PBSGTransition(
+            entry_id="GEN3-T13",
+            question_id=question,
+            branch_key="cue_urgent",
+            outcome="Cross-reference GEN3-T06 for urgent safety or basic needs assessment.",
+            transition_type="cross_reference",
+            target_entry_id="GEN3-T06",
+            target_question_id="Q1",
+        )
+    if "minor" in cues:
+        route_label = "Route B"
+        outcome = "Route B (Minor — Special Handling)"
+    elif {"active_safety", "fsc_referred"} & cues or len(cues - {"unclear"}) >= 2:
+        route_label = "Route A"
+        outcome = "Route A (High-Vulnerability — Escalate + Community Law Centre)"
+    elif len(cues - {"unclear"}) == 1:
+        route_label = "Route C"
+        outcome = "Route C (Low-Vulnerability — Standard Triage with Adaptations)"
+    elif "unclear" in cues:
+        route_label = "Route A"
+        outcome = "Route A (Escalate to PBSG Staff for professional assessment)"
+    else:
+        return None
+    return PBSGTransition(
+        entry_id="GEN3-T13",
+        question_id=question,
+        branch_key=f"cue_{route_label.lower().replace(' ', '_')}",
+        outcome=outcome,
+        transition_type="terminal_route",
+        route_label=route_label,
+    )
+
+
 def resolve_expected_transition(
     entries: dict[str, dict[str, Any]],
     state: PBSGTriageState,
@@ -1126,6 +1257,8 @@ def resolve_expected_transition(
 ) -> PBSGTransition | None:
     if state.mode != "FAST_ROUTING" or not state.pending_entry_id or not state.current_question_id:
         return None
+    if state.pending_entry_id == "GEN3-T13":
+        return resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
     entry = entries.get(state.pending_entry_id)
     branching_logic = entry.get("branching_logic") if entry else None
     question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
@@ -1138,7 +1271,9 @@ def resolve_expected_transition(
     outcome = question_node.get(branch_key)
     if not isinstance(outcome, str):
         return None
-    return parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
+    graph = PBSGWorkflowGraph(entries)
+    transition = graph.transition_for(state.pending_entry_id, state.current_question_id, branch_key)
+    return transition or parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
 
 
 def validate_response_questions(content: str | None, entries: dict[str, dict[str, Any]]) -> tuple[bool, str | None]:
@@ -1184,7 +1319,7 @@ def validate_response_transition(
     route_label = extract_response_route_label(content)
     selected_entry_id = extract_selected_entry_id(content)
 
-    if expected_transition.transition_type in {"proceed_question", "nested_stream"}:
+    if expected_transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question", "cross_reference"}:
         expected_entry_id = expected_transition.target_entry_id
         expected_question_id = expected_transition.target_question_id
         if not targets:
@@ -1212,6 +1347,16 @@ def validate_response_transition(
     if expected_transition.transition_type == "handoff_entry":
         if selected_entry_id != expected_transition.target_entry_id:
             return False, f"response selected {selected_entry_id}; expected handoff to {expected_transition.target_entry_id}"
+        if targets:
+            target = targets[0]
+            actual_entry_id = target.entry_id or selected_entry_id
+            expected_question_id = expected_transition.target_question_id or "Q1"
+            if actual_entry_id != expected_transition.target_entry_id or target.question_id != expected_question_id:
+                return (
+                    False,
+                    f"response asks {actual_entry_id} {target.question_id}; expected "
+                    f"{expected_transition.target_entry_id} {expected_question_id}",
+                )
         return True, None
 
     return True, None
@@ -1257,6 +1402,7 @@ def safe_escalation_response(content: str | None, entries: dict[str, dict[str, A
 class PBSGRoutingEngine:
     def __init__(self, entries: dict[str, dict[str, Any]] | None = None):
         self.entries = entries or load_golden_set_entries()
+        self.graph = PBSGWorkflowGraph(self.entries)
 
     @classmethod
     def from_default_golden_set(cls) -> "PBSGRoutingEngine":
@@ -1273,6 +1419,13 @@ class PBSGRoutingEngine:
         state = build_triage_state(messages, self.entries, latest_user_query)
         if state.mode != "FAST_ROUTING":
             return None
+        if state.pending_entry_id == "GEN3-T13":
+            transition = resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
+            if transition:
+                content = self.render_transition(transition)
+                if not content:
+                    return None
+                return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
         transition = self.resolve_transition_from_branch(state, branch_key_override)
         if not transition:
             transition = resolve_expected_transition(self.entries, state, latest_user_query)
@@ -1299,13 +1452,15 @@ class PBSGRoutingEngine:
         outcome = question_node.get(branch_key)
         if not isinstance(outcome, str):
             return None
-        transition = parse_transition_outcome(
-            self.entries,
-            state.pending_entry_id,
-            state.current_question_id,
-            branch_key,
-            outcome,
-        )
+        transition = self.graph.transition_for(state.pending_entry_id, state.current_question_id, branch_key)
+        if not transition:
+            transition = parse_transition_outcome(
+                self.entries,
+                state.pending_entry_id,
+                state.current_question_id,
+                branch_key,
+                outcome,
+            )
         return self.resume_parent_after_nested_urgent(state, transition)
 
     def resume_parent_after_nested_urgent(
@@ -1332,7 +1487,9 @@ class PBSGRoutingEngine:
         )
 
     def render_transition(self, transition: PBSGTransition) -> str | None:
-        if transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question"}:
+        if transition.transition_type == "nested_stream":
+            return self.render_nested_stream_transition(transition)
+        if transition.transition_type in {"proceed_question", "concurrent_route_question"}:
             return self.render_question_transition(transition)
         if transition.transition_type in {"handoff_entry", "cross_reference"}:
             return self.render_handoff_transition(transition)
@@ -1341,6 +1498,68 @@ class PBSGRoutingEngine:
         if transition.transition_type == "clarification":
             return self.render_clarification(transition)
         return None
+
+    def render_nested_stream_transition(self, transition: PBSGTransition) -> str | None:
+        if not transition.target_entry_id or not transition.target_question_id:
+            return None
+        question = self.question_text(transition.target_entry_id, transition.target_question_id)
+        if not question:
+            return None
+
+        entry = self.entries.get(transition.entry_id)
+        structured_route = structured_route_from_entry(entry, transition.route_label)
+        applicant_script = structured_route.script if structured_route else self.nested_stream_bridge_script(transition)
+        if re.search(r"\bProceed to\s+GEN3-|following which|triage outcome", applicant_script, flags=re.IGNORECASE):
+            applicant_script = self.nested_stream_bridge_script(transition)
+        resume_label = (
+            f"{transition.resume_entry_id} {transition.resume_question_id}"
+            if transition.resume_entry_id and transition.resume_question_id
+            else "the parent stream"
+        )
+        active_stream_label = (
+            f"{transition.target_entry_id} urgent concurrent path"
+            if transition.target_entry_id == "GEN3-T06"
+            else f"{transition.target_entry_id} nested path"
+        )
+
+        lines = self.render_header_and_answered_state(transition.entry_id, transition)
+        lines.extend(
+            [
+                "",
+                f"**Active stream:** {active_stream_label}",
+                "",
+                "**Why this stream is triggered:**",
+                "",
+                f"- {transition.question_id}: {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
+            ]
+        )
+        lines.extend(["", "**Tell the applicant:**", "", f'"{applicant_script}"'])
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.entry_id} {transition.question_id} = {label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
+                f"- Now checking: {transition.target_entry_id} {transition.target_question_id}",
+                f"- After this urgent path: resume {resume_label}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'**{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+            ]
+        )
+        return "\n".join(lines)
+
+    def nested_stream_bridge_script(self, transition: PBSGTransition) -> str:
+        if transition.target_entry_id == "GEN3-T06":
+            if transition.entry_id == "GEN3-T03":
+                return "Your family matter may also involve urgency, such as violence or a deadline. I need to check the urgent issue first, then I will continue the family legal aid questions after that."
+            if transition.entry_id == "GEN3-T02":
+                return "Your criminal matter may also have an urgent deadline or safety concern. I need to check the urgent issue first, then I will continue the criminal legal aid questions after that."
+            return "I need to check the urgent issue first, then I will continue the main triage questions after that."
+        return "I need to check this related pathway first, then I will continue the main triage questions after that."
 
     def render_question_transition(self, transition: PBSGTransition) -> str | None:
         if not transition.target_entry_id or not transition.target_question_id:

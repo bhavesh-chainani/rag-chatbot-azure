@@ -46,7 +46,13 @@ h2 {
 .answerText .applicantVerbatimQuestion p,
 .answerText p.applicantVerbatimQuestion {
     color: #a4262c;
-    font-weight: 700;
+    font-weight: 600;
+}
+
+/* Backend wraps verbatim lines in **bold**; avoid stacking with paragraph weight */
+.answerText .applicantVerbatimQuestion strong,
+.answerText p.applicantVerbatimQuestion strong {
+    font-weight: 600;
 }
 
 .answerText .applicantVerbatimQuestion :global(.citationBadgeContainer) {
@@ -64,7 +70,7 @@ h2 {
     display: block;
     margin-top: 0.35em;
     color: #a4262c;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .selected {

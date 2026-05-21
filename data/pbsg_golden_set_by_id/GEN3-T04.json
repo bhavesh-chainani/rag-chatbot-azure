@@ -57,9 +57,61 @@
     "Route D (Reject and Share Self-Help Resources): Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Additional case type-specific resources: Filing of court documents → CrimsonLogic Service Bureau Employment / wage claim → TADM, TAFEP, ECT, MOM, Judiciary’s website. Small claim (consumer-business dispute with claim amount of ≤ S$20k / S$30k with both parties’ consent) → CASE, SCT, Judiciary’s website. Civil claims → Judiciary’s website. Dispute with financial institution → FiDReC. Bankruptcy and related proceedings → MinLaw IPTO, Judiciary’s website. Neighbour dispute → CMC, CDRT, Judiciary’s website. Harassment → Judiciary’s website. Online harms → SHECARES@SCWO, Judiciary’s website. Road traffic → Motor Insurance Bureau. Divorce → Judiciary’s website. Child/Spouse Maintenance → SCWO MSC, iFAMS, Judiciary’s website. Maintenance for Parents → MSF CMP, Judiciary’s website. Family violence (including PPO and vulnerable adults) → NAVH, FPC, PAVE, PSCs, Judiciary’s website. Custody → Judiciary’s website. Adoption → Judiciary’s website. Guardianship → Judiciary’s website. Syariah → LAB eBantu, SYC’s website, Judiciary’s website. Lasting Power of Attorney → MSF OPG, My Legacy. Deputyship → MSF OPG, SNTC, Judiciary’s website. Estate / probate → PT, My Legacy, Judiciary’s website. Criminal (including bail, Magistrate’s Complaints (private prosecution), and criminal compensation claims) → Judiciary’s website. Complaints against lawyers → LSS. Complaints against medical professionals → SMC, MOH. Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
   ],
   "routing_structured": {
+    "Route A": {
+      "name": "Legal Clinic",
+      "script": "You may be eligible for a Pro Bono SG Legal Clinic. A clinic lawyer may give you initial guidance on possible next steps, but this is not legal representation. You can apply through Pro Bono SG's legal guidance application page. If you cannot self-apply, I can help fill in the form over the phone, or you may go to the PBSG Counter at the State Courts Help Centre with the required documents.",
+      "needs_to_know": [
+        "PBSG generally does not have a civil representation scheme.",
+        "At a Legal Clinic, a lawyer may provide guidance on possible next steps."
+      ],
+      "access": [
+        "Website / application link: https://www.probono.sg/get-legal-help/legal-guidance/",
+        "Address: 1 Havelock Square, #B1-18 State Courts, Singapore 059724"
+      ],
+      "prepare": [
+        "Documents needed for the Legal Clinic application",
+        "Brief summary of the legal issue"
+      ],
+      "intern_steps": [
+        "Share the Legal Clinic application link with the applicant.",
+        "If the applicant cannot self-apply, assist with the form over the phone and read out all terms and conditions.",
+        "If the applicant prefers in-person help or has difficulty answering questions, direct them to the PBSG Counter.",
+        "If the applicant cannot attend in person, escalate to PBSG Staff."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
+    "Route B": {
+      "name": "Refer to LAB",
+      "script": "Because you are a Singapore Citizen or PR seeking civil or family representation, you should apply to the Legal Aid Bureau first. LAB is the government's legal aid office for low-income Singapore Citizens and PRs facing civil and family proceedings. If LAB is unable to assist and you cannot afford paid legal services, you can come back to PBSG with your LAB rejection letter or reasons so we can assess whether we may be able to help.",
+      "needs_to_know": [
+        "LAB should be the first port of call for eligible Singapore Citizens or PRs seeking civil or family representation.",
+        "If the applicant can afford a lawyer, PBSG is not likely able to assist but can share lawyer directories and self-help resources."
+      ],
+      "access": [
+        "Website: https://lab.mlaw.gov.sg/",
+        "Eligibility criteria: https://lab.mlaw.gov.sg/legal-services/do-i-qualify/",
+        "Means test information: https://lab.mlaw.gov.sg/legal-services/taking-the-means-test/",
+        "Phone: 1800 2255 529",
+        "Address: 45 Maxwell Road #07-11, The URA Centre (East Wing), Singapore 069118",
+        "Opening hours / appointment instructions: Appointment needed through LAB's website or hotline"
+      ],
+      "prepare": [
+        "LAB rejection letter or reasons, if LAB is unable to assist",
+        "Financial documents for LAB's means test"
+      ],
+      "intern_steps": [
+        "Share LAB's website, eligibility criteria, means test information, phone number, and appointment instructions.",
+        "If the applicant later receives a LAB rejection or reasons, tell them they may return to PBSG for assessment."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
     "Route C": {
       "name": "Escalate to PBSG Staff",
-      "script": "I need to check this with PBSG Staff before going further. Let me take down your details and have PBSG Staff follow up.",
+      "script": "I need to check this with PBSG Staff before going further. Let me collect your details and have PBSG Staff follow up.",
       "needs_to_know": [
         "PBSG Staff will call back within 1-2 working days."
       ],
@@ -76,6 +128,28 @@
       ],
       "caveats": [
         "Do not give legal advice or assess merits yourself."
+      ]
+    },
+    "Route D": {
+      "name": "Reject and Share Self-Help Resources",
+      "script": "Based on what you have shared, this matter does not appear to fit PBSG's current schemes. I can share some general self-help resources and directories that may help you find other support.",
+      "needs_to_know": [
+        "This route applies where the applicant is well over the means threshold and no exceptional circumstances were raised."
+      ],
+      "access": [
+        "SupportGoWhere — social and financial assistance",
+        "PBSG YouTube channel — webinars on common legal issues",
+        "Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee",
+        "Law Society of Singapore — directory of lawyers",
+        "Legal Services Regulatory Authority e-Services — search for lawyers by practice area"
+      ],
+      "prepare": [],
+      "intern_steps": [
+        "Share general self-help resources and relevant case-type resources where appropriate.",
+        "Do not assess legal merits or advise on what the applicant should do legally."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
       ]
     }
   },

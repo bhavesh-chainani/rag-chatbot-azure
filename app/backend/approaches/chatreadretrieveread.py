@@ -33,6 +33,7 @@ from pbsg_triage_state import (
     PBSGTurnClassification,
     build_triage_state,
     classify_turn_interrupt,
+    collapse_duplicate_route_cards,
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
@@ -487,6 +488,21 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         return self.build_deterministic_chat_response(deterministic_result, session_state, turn_classification)
 
+    def try_deterministic_initial_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if len(messages) != 1:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        deterministic_result = self.pbsg_routing_engine.execute_initial_turn(latest_content)
+        if not deterministic_result:
+            return None
+        return self.build_deterministic_chat_response(deterministic_result, session_state)
+
     async def try_structured_llm_locked_response(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -811,6 +827,9 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        initial_response = self.try_deterministic_initial_response(messages, session_state)
+        if initial_response:
+            return initial_response
         deterministic_response = self.try_deterministic_locked_response(messages, session_state)
         if deterministic_response:
             return deterministic_response
@@ -828,6 +847,7 @@ class ChatReadRetrieveReadApproach(Approach):
             content, followup_questions = self.extract_followup_questions(content)
             extra_info.followup_questions = followup_questions
         content = self.normalize_asked_question_text(content, extra_info)
+        content = collapse_duplicate_route_cards(content)
         content = self.apply_triage_response_guard(content, extra_info)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
@@ -855,6 +875,12 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        initial_response = self.try_deterministic_initial_response(messages, session_state)
+        if initial_response:
+            yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
+            return
         deterministic_response = self.try_deterministic_locked_response(messages, session_state)
         if deterministic_response:
             yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
@@ -887,6 +913,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 content, followup_questions = self.extract_followup_questions(content)
                 extra_info.followup_questions = followup_questions
             content = self.normalize_asked_question_text(content, extra_info)
+            content = collapse_duplicate_route_cards(content)
             content = self.apply_triage_response_guard(content, extra_info)
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
@@ -955,6 +982,7 @@ class ChatReadRetrieveReadApproach(Approach):
             }
         if streamed_content:
             streamed_content = self.normalize_asked_question_text(streamed_content, extra_info) or streamed_content
+            streamed_content = collapse_duplicate_route_cards(streamed_content) or streamed_content
             streamed_content = self.apply_triage_response_guard(streamed_content, extra_info) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
             yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}

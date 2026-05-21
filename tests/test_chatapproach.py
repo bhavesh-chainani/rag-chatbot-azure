@@ -918,6 +918,32 @@ def test_validate_response_questions_rejects_multiple_primary_questions():
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_routes_obvious_capital_offence_without_llm(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("obvious capital offence should not call retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "user",
+            "content": "Applicant has been charged for murder. Their court date is next week. What should they do?",
+        }
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+    content = result["message"]["content"]
+
+    assert result["session_state"] == "session-1"
+    assert content.count("**Selected Entry:**") == 1
+    assert content.count("**Routing Recommendation:**") == 1
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "**Routing Recommendation:** Route A (LASCO)" in content
+    assert "GEN3-T06 Q1" not in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+    assert result["context"]["thoughts"][-1].description == "Answered from Golden Set branching logic without retrieval or LLM generation."
+
+
+@pytest.mark.asyncio
 async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flow(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("locked deterministic flow should not call retrieval or LLM")

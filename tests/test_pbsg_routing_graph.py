@@ -12,6 +12,7 @@ from pbsg_triage_state import (
     PBSGWorkflowGraph,
     branch_key_for_answer,
     candidate_golden_set_dirs,
+    collapse_duplicate_route_cards,
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
@@ -86,6 +87,32 @@ def test_gen3_routes_all_have_structured_read_aloud_cards():
                 assert "http" not in script, f"{entry_id} {route_label} script should keep raw URLs in access"
 
 
+def test_duplicate_route_card_guard_keeps_first_matching_route_card():
+    content = """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    collapsed = collapse_duplicate_route_cards(content)
+
+    assert collapsed is not None
+    assert collapsed.count("**Selected Entry:**") == 1
+    assert "First LASCO wording" in collapsed
+    assert "Repeated LASCO wording" not in collapsed
+
+
 def test_pbsg_golden_set_branching_graph_targets_are_valid():
     entries = load_entries()
     assert entries
@@ -140,7 +167,6 @@ def test_pbsg_branch_resolver_supports_every_branch_label():
                 assert resolved == branch_key, f"{entry_id} {question_id} did not resolve label {label}"
 
 
-<<<<<<< HEAD
 def test_pbsg_workflow_graph_has_edge_for_every_gen3_branch():
     entries = load_entries()
     graph = PBSGWorkflowGraph(entries)
@@ -156,8 +182,6 @@ def test_pbsg_workflow_graph_has_edge_for_every_gen3_branch():
                     assert graph.edge_for(entry_id, question_id, branch_key), f"Missing graph edge for {entry_id} {question_id}.{branch_key}"
 
 
-=======
->>>>>>> legal_develop
 def test_pbsg_routing_engine_renders_every_deterministic_branch():
     entries = load_entries()
     engine = PBSGRoutingEngine(entries)
@@ -206,7 +230,6 @@ def test_pbsg_cross_reference_routes_are_explicit_nested_edges():
     assert t03_q1_yes.resume_question_id == "Q2"
 
 
-<<<<<<< HEAD
 def test_nested_urgent_transition_renders_structured_card():
     entries = load_entries()
     engine = PBSGRoutingEngine(entries)
@@ -231,8 +254,6 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "> **GEN3-T06 Q1" not in content
 
 
-=======
->>>>>>> legal_develop
 def test_pbsg_known_cross_routing_regressions():
     entries = load_entries()
 
@@ -289,7 +310,6 @@ def test_pbsg_known_cross_routing_regressions():
     assert t04_q1_foreigner.target_entry_id == "GEN3-T04"
     assert t04_q1_foreigner.target_question_id == "Q4"
 
-<<<<<<< HEAD
     t06_q2_not_sure = parse_transition_outcome(
         entries,
         "GEN3-T06",
@@ -422,8 +442,6 @@ def test_routing_engine_executes_gen3_t13_cue_without_llm():
     assert result.transition.route_label == "Route B"
     assert "Minor — Special Handling" in result.content
 
-=======
->>>>>>> legal_develop
 
 def test_pbsg_routing_engine_renders_terminal_route_from_active_entry():
     entries = load_entries()
@@ -442,11 +460,8 @@ def test_pbsg_routing_engine_renders_terminal_route_from_active_entry():
     assert "**Selected Entry:** GEN3-T02" in content
     assert "**Routing Recommendation:** Route A" in content
     assert "LASCO" in content
-<<<<<<< HEAD
     assert "**Tell the applicant:**" in content
     assert f'> **"{entries["GEN3-T02"]["routing"][0]}"**' not in content
-=======
->>>>>>> legal_develop
 
 
 def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
@@ -466,7 +481,6 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     assert "**Selected Entry:** GEN3-T04" in content
     assert "Handoff: GEN3-T02 → GEN3-T04" in content
     assert "Next question: Q1 from GEN3-T04" in content
-<<<<<<< HEAD
 
 
 @pytest.mark.parametrize(
@@ -635,5 +649,3 @@ def test_gen3_t13_structured_route_card_renders_overlay_script():
     assert "**Routing Recommendation:** Route B (Minor — Special Handling)" in content
     assert "I need PBSG Staff to handle this carefully" in content
     assert "Do not continue triage independently" in content
-=======
->>>>>>> legal_develop

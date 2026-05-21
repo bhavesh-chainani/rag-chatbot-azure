@@ -128,6 +128,10 @@ REPRESENTED_PATTERN = re.compile(
 WORKFLOW_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b", flags=re.IGNORECASE)
 ROUTE_PATTERN = re.compile(r"\bRoute\s+([A-Z])\b", flags=re.IGNORECASE)
 GOLDEN_SET_RELATIVE_DIR = Path("data") / "pbsg_golden_set_by_id"
+CAPITAL_OFFENCE_PATTERN = re.compile(
+    r"\b(murder|capital offence|capital offense|death penalty|punishable with death)\b",
+    flags=re.IGNORECASE,
+)
 ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
 CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
 CLARIFICATION_QUESTION_PATTERN = re.compile(
@@ -1306,6 +1310,26 @@ def extract_response_route_label(content: str | None) -> str | None:
     return None
 
 
+def collapse_duplicate_route_cards(content: str | None) -> str | None:
+    if not content:
+        return content
+    selected_matches = list(re.finditer(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE))
+    if len(selected_matches) < 2:
+        return content
+    first_start = selected_matches[0].start()
+    second_start = selected_matches[1].start()
+    first_block = content[first_start:second_start]
+    second_block = content[second_start:]
+    first_entry = selected_matches[0].group(1).upper()
+    second_entry = selected_matches[1].group(1).upper()
+    first_route = extract_response_route_label(first_block)
+    second_route = extract_response_route_label(second_block)
+    if first_entry == second_entry and first_route and first_route == second_route:
+        prefix = content[:first_start]
+        return f"{prefix}{first_block}".rstrip()
+    return content
+
+
 def validate_response_transition(
     content: str | None,
     entries: dict[str, dict[str, Any]],
@@ -1407,6 +1431,26 @@ class PBSGRoutingEngine:
     @classmethod
     def from_default_golden_set(cls) -> "PBSGRoutingEngine":
         return cls(load_golden_set_entries())
+
+    def execute_initial_turn(self, latest_user_query: str) -> PBSGDeterministicResult | None:
+        if not self.entries or not CAPITAL_OFFENCE_PATTERN.search(latest_user_query):
+            return None
+        transition = self.graph.transition_for("GEN3-T02", "Q1", "if_yes")
+        if not transition:
+            return None
+        content = self.render_transition(transition)
+        if not content:
+            return None
+        state = PBSGTriageState(
+            mode="FAST_ROUTING",
+            workflow_id="GEN3-T02",
+            workflow_locked=True,
+            active_workflow="GEN3-T02",
+            current_question_id="Q1",
+            pending_entry_id="GEN3-T02",
+            latest_answer_classification="YES",
+        )
+        return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
 
     def execute_locked_turn(
         self,

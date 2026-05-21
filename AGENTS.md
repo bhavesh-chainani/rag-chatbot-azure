@@ -101,6 +101,7 @@ Design principles:
 - Stops asking questions the moment branching logic allows a valid route
 - When multiple topics are detected, handles higher-priority topics first (capital offences > urgent matters > criminal > matrimonial > civil > other)
 - When the current pending `branching_logic` question has a small finite answer set, the backend may attach `context.quick_reply` metadata so the frontend can render selectable response buttons. The assistant markdown stays unchanged for eval compatibility; button clicks are sent back as normal user messages, and free-text input remains available.
+- Follow-up routing is also checked by a backend deterministic transition guard built from the retrieved Golden Set JSON. The guard resolves the pending question's exact `if_*` branch, validates that the generated response follows the expected local question, handoff, terminal route, or nested stream, and repairs simple next-question mistakes server-side before they reach the user.
 
 The four output formats (A/B/C/D) all preserve the `**Selected Entry:**` anchor and `Route <letter>` labels needed by the eval script (`evals/pbsg_golden_set_eval.py`).
 

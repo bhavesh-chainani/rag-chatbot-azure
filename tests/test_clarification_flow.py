@@ -109,6 +109,66 @@ class TestSystemPromptClarificationOutput:
         assert "OUTPUT E" in content
         assert "Clarification" in content
 
+    def test_system_prompt_contains_deterministic_phase_contract(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "TWO-PHASE EXECUTION MODEL" in content
+        assert "PHASE 1 — Workflow identification" in content
+        assert "PHASE 2 — Deterministic workflow execution" in content
+        assert "MANDATORY INTERNAL CHECK BEFORE EVERY RESPONSE" in content
+        assert "do not display this as JSON" in content
+        assert "If any check fails, stop and escalate rather than guessing" in content
+
+    def test_system_prompt_contains_three_mode_contract(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "THREE-MODE SYSTEM ARCHITECTURE" in content
+        assert "MODE 1 — ORCHESTRATION MODE" in content
+        assert "MODE 2 — FAST ROUTING MODE" in content
+        assert "MODE 3 — REPAIR MODE" in content
+        assert "For simple answers" in content
+        assert "execute the branch immediately" in content
+        assert "Invalidate all downstream decisions dependent on the contradicted answer" in content
+        assert "Do not expose dependency graphs" in content
+
+    def test_system_prompt_contains_multi_workflow_orchestration_rules(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json", "GEN3-T02.json", "GEN3-T03.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "MULTI-WORKFLOW DETECTION AND ORDERING" in content
+        assert "Do not assume one narrative = one workflow" in content
+        assert "Only one workflow may be active at a time" in content
+        assert "active_workflow, queued_workflows, completed_workflows, concurrent_monitors" in content
+        assert "first-contact and gating workflows come before downstream substantive routing" in content
+        assert "They may interrupt only when the urgency threshold is met" in content
+        assert "Never improvise cross-workflow logic" in content
+
     def test_system_prompt_output_e_instructions(self):
         rendered = self.prompt_manager.build_system_prompt(
             "chat_answer.system.jinja2",
@@ -159,7 +219,7 @@ class TestSystemPromptClarificationOutput:
         assert "Use OUTPUT B whenever the matched `branching_logic` outcome is **Proceed to Q<next>**" in content
         assert "The next question appears exactly once" in content
         assert "Tell the applicant` is for terminal Route scripts only" in content
-        assert "Do not include Part C" in content
+        assert "Do not include `Routing Recommendation`" in content
 
     def test_system_prompt_final_routes_are_expanded_only_for_terminal_routes(self):
         rendered = self.prompt_manager.build_system_prompt(

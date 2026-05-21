@@ -56,5 +56,72 @@
     "Route B (Minor — Special Handling): Do NOT continue the triage independently. Escalate immediately to PBSG Staff. Do not ask the minor for sensitive disclosures beyond what they have volunteered. If the minor indicates any immediate safety concern, follow GEN3-T06 Route A.",
     "Route C (Low-Vulnerability — Standard Triage with Adaptations): Continue with GEN3-T01, but: (a) slow your pace; (b) repeat scheme names and URLs; (c) offer to email a summary after the call; (d) do not rush the applicant. Flag the call in the intake note with the cue observed, for staff awareness."
   ],
+  "routing_structured": {
+    "Route A": {
+      "name": "High-Vulnerability — Escalate + Community Law Centre",
+      "script": "I want to make sure we handle this carefully. Let me take down the key details and have PBSG Staff assess the best way to follow up with you.",
+      "needs_to_know": [
+        "Use this route when there are two or more vulnerability factors, or one severe factor such as a minor, active violence, or FSC-referred applicant.",
+        "PBSG Staff may assess whether the Community Law Centre or another supported pathway is appropriate."
+      ],
+      "access": [],
+      "prepare": [
+        "Full intake particulars",
+        "Vulnerability factors observed or disclosed",
+        "Brief legal matter description if the applicant can communicate it"
+      ],
+      "intern_steps": [
+        "Take down full intake particulars and the vulnerability factors noted.",
+        "Escalate to PBSG Staff for further assessment and active follow-up.",
+        "If the applicant can communicate their issue, continue standard triage through GEN3-T01 and flag that staff may adjust the route."
+      ],
+      "caveats": [
+        "Do not ask intrusive vulnerability questions beyond what is necessary for routing and safety."
+      ]
+    },
+    "Route B": {
+      "name": "Minor — Special Handling",
+      "script": "I need PBSG Staff to handle this carefully. I will not ask you for more sensitive details right now, but I will escalate this immediately.",
+      "needs_to_know": [
+        "Use this route when the applicant is confirmed to be under 18."
+      ],
+      "access": [],
+      "prepare": [
+        "Applicant's age confirmation",
+        "Any safety concern the minor has already volunteered"
+      ],
+      "intern_steps": [
+        "Do not continue triage independently.",
+        "Escalate immediately to PBSG Staff.",
+        "Do not ask the minor for sensitive disclosures beyond what they have volunteered.",
+        "If there is any immediate safety concern, follow GEN3-T06 Route A."
+      ],
+      "caveats": [
+        "Protect the minor's safety and confidentiality."
+      ]
+    },
+    "Route C": {
+      "name": "Low-Vulnerability — Standard Triage with Adaptations",
+      "script": "I can continue with the usual triage questions. I will go slowly, repeat key details, and can help summarise the next steps after the call.",
+      "needs_to_know": [
+        "Use this route when there is one non-severe vulnerability cue and no immediate safety or high-vulnerability concern."
+      ],
+      "access": [],
+      "prepare": [
+        "Observed vulnerability cue",
+        "Any communication preference or access need"
+      ],
+      "intern_steps": [
+        "Continue with GEN3-T01.",
+        "Slow your pace and do not rush the applicant.",
+        "Repeat scheme names and URLs where helpful.",
+        "Offer to email a summary after the call.",
+        "Flag the observed cue in the intake note for staff awareness."
+      ],
+      "caveats": [
+        "Escalate if new vulnerability or safety cues appear."
+      ]
+    }
+  },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

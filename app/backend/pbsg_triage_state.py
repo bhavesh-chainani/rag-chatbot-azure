@@ -744,6 +744,34 @@ def find_route_text(entry: dict[str, Any] | None, route_label: str | None) -> st
     return None
 
 
+def structured_route_from_entry(entry: dict[str, Any] | None, route_label: str | None) -> StructuredRoute | None:
+    if not entry or not route_label:
+        return None
+    routing_structured = entry.get("routing_structured")
+    route_card = routing_structured.get(route_label) if isinstance(routing_structured, dict) else None
+    if not isinstance(route_card, dict):
+        return None
+
+    def route_list(field: str) -> list[str]:
+        value = route_card.get(field)
+        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    name = route_card.get("name")
+    script = route_card.get("script")
+    if not isinstance(script, str) or not script.strip():
+        return None
+    return StructuredRoute(
+        route_label=route_label,
+        route_name=name if isinstance(name, str) else "",
+        script=script.strip(),
+        needs_to_know=route_list("needs_to_know"),
+        access=route_list("access"),
+        prepare=route_list("prepare"),
+        intern_steps=route_list("intern_steps"),
+        caveats=route_list("caveats"),
+    )
+
+
 def unique_preserve_order(items: list[str]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
@@ -899,7 +927,11 @@ def route_sentences_without_script(body: str, script: str) -> list[str]:
     return sentences
 
 
-def structure_route(route_text: str) -> StructuredRoute:
+def structure_route(route_text: str, entry: dict[str, Any] | None = None, route_label: str | None = None) -> StructuredRoute:
+    structured_route = structured_route_from_entry(entry, route_label)
+    if structured_route:
+        return structured_route
+
     route_label, route_name, body = strip_route_header(route_text)
     script = extract_route_script(body)
     access = extract_access_items(body)
@@ -1042,6 +1074,18 @@ def parse_transition_outcome(
             nested_entry_id=nested_match.group(1).upper(),
             resume_entry_id=resume_match.group(2).upper() if resume_match else entry_id,
             resume_question_id=resume_match.group(1).upper() if resume_match else None,
+        )
+
+    if entry_id == "GEN3-T06" and route_label == "Route D" and re.search(r"\bReturn to\s+GEN3-T01\b", route_context, flags=re.IGNORECASE):
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="handoff_entry",
+            target_entry_id="GEN3-T01",
+            target_question_id="Q1",
+            route_label=route_label,
         )
 
     if route_label:
@@ -1234,6 +1278,7 @@ class PBSGRoutingEngine:
             transition = resolve_expected_transition(self.entries, state, latest_user_query)
         if not transition:
             return None
+        transition = self.resume_parent_after_nested_urgent(state, transition)
         content = self.render_transition(transition)
         if not content:
             return None
@@ -1254,12 +1299,36 @@ class PBSGRoutingEngine:
         outcome = question_node.get(branch_key)
         if not isinstance(outcome, str):
             return None
-        return parse_transition_outcome(
+        transition = parse_transition_outcome(
             self.entries,
             state.pending_entry_id,
             state.current_question_id,
             branch_key,
             outcome,
+        )
+        return self.resume_parent_after_nested_urgent(state, transition)
+
+    def resume_parent_after_nested_urgent(
+        self,
+        state: PBSGTriageState,
+        transition: PBSGTransition,
+    ) -> PBSGTransition:
+        parent_resume = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}
+        if state.pending_entry_id != "GEN3-T06" or state.workflow_id not in parent_resume:
+            return transition
+        if transition.transition_type not in {"terminal_route", "handoff_entry"} or not transition.route_label:
+            return transition
+        return PBSGTransition(
+            entry_id=transition.entry_id,
+            question_id=transition.question_id,
+            branch_key=transition.branch_key,
+            outcome=transition.outcome,
+            transition_type="concurrent_route_question",
+            target_entry_id=state.workflow_id,
+            target_question_id=parent_resume[state.workflow_id],
+            route_label=transition.route_label,
+            resume_entry_id=state.workflow_id,
+            resume_question_id=parent_resume[state.workflow_id],
         )
 
     def render_transition(self, transition: PBSGTransition) -> str | None:
@@ -1334,10 +1403,11 @@ class PBSGRoutingEngine:
         return "\n".join(lines)
 
     def render_terminal_route(self, transition: PBSGTransition) -> str | None:
-        route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
+        entry = self.entries.get(transition.entry_id)
+        route_text = find_route_text(entry, transition.route_label)
         if not transition.route_label or not route_text:
             return None
-        structured_route = structure_route(route_text)
+        structured_route = structure_route(route_text, entry, transition.route_label)
         lines = self.render_header_and_answered_state(transition.entry_id, transition)
         lines.extend(
             [

@@ -50,5 +50,113 @@
     "Route D (Return to GEN3-T01): Once the urgent concern is addressed (or pathway confirmed), return to the main triage questions at GEN3-T01 to identify the appropriate scheme for the underlying legal matter.",
     "Route E (Document and Close): Record the urgent intake in the system with a clear note of the concern raised and the pathway given. Inform applicant that they may call back if a legal matter emerges later. Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
   ],
+  "routing_structured": {
+    "Route A": {
+      "name": "Emergency Services — IMMEDIATE",
+      "script": "The most important thing right now is your safety. Please call 999 for police or 995 for ambulance immediately.",
+      "needs_to_know": [
+        "Emergency services should be contacted before continuing legal triage when there is an immediate threat to life or physical safety."
+      ],
+      "access": [
+        "Police emergency: 999",
+        "Ambulance / fire: 995"
+      ],
+      "prepare": [
+        "Brief description of the immediate safety concern"
+      ],
+      "intern_steps": [
+        "Ask the applicant to contact emergency services immediately.",
+        "After the emergency call, note the incident and escalate to PBSG Staff.",
+        "If the applicant still has a legal matter, arrange a call-back to continue urgent triage from GEN3-T06 Q2."
+      ],
+      "caveats": [
+        "Do not continue legal triage while immediate safety is at risk."
+      ]
+    },
+    "Route B": {
+      "name": "SSO / FSC — PRIMARY",
+      "script": "There are officers at Social Service Offices and social workers at Family Service Centres who may be able to help you. Let me help you find your nearest centre.",
+      "needs_to_know": [
+        "Use this route when the urgent issue is about basic needs such as food, shelter, money, child welfare, or mental health support."
+      ],
+      "access": [
+        "SSO and FSC directory: https://www.msf.gov.sg/our-services/directories"
+      ],
+      "prepare": [
+        "Applicant's postal code",
+        "Nearest SSO/FSC name, address, and phone number after lookup"
+      ],
+      "intern_steps": [
+        "Look up the SSO and FSC directory live using the applicant's postal code.",
+        "Provide the name, address, and phone number of the nearest SSO and FSC.",
+        "If the applicant also has a legal issue, continue concurrently to the appropriate legal route."
+      ],
+      "caveats": [
+        "This social support pathway runs concurrently with legal triage where needed."
+      ]
+    },
+    "Route C": {
+      "name": "Return to GEN3-T01 and Escalate for Urgent Legal Consultation Assessment",
+      "script": "Your matter sounds like it may be urgent. Let me check how best we can assist you. I will try to call you back by the end of today.",
+      "needs_to_know": [
+        "PBSG Staff must assess whether the applicant is eligible for an urgent same-day or next-day legal consultation."
+      ],
+      "access": [],
+      "prepare": [
+        "Applicant name and contact details",
+        "Deadline date",
+        "Brief matter description",
+        "Answers to GEN3-T01 Q1-Q5 where applicable"
+      ],
+      "intern_steps": [
+        "Return to GEN3-T01 to identify the appropriate scheme if this is standalone urgent triage.",
+        "Escalate to PBSG Staff immediately for urgent legal consultation assessment.",
+        "Refer to GEN3-I06 for full urgent legal consultation scheme details."
+      ],
+      "caveats": [
+        "Do not promise that the applicant qualifies for urgent legal consultation."
+      ]
+    },
+    "Route D": {
+      "name": "Return to GEN3-T01",
+      "script": "Now that the urgent concern has been addressed or the urgent pathway has been confirmed, I will ask a few questions to identify the right legal help pathway.",
+      "needs_to_know": [
+        "The underlying legal matter still needs normal first-contact triage."
+      ],
+      "access": [],
+      "prepare": [
+        "Brief description of the underlying legal matter"
+      ],
+      "intern_steps": [
+        "Return to GEN3-T01 Q1 for main triage if this is standalone urgent triage.",
+        "If GEN3-T06 was nested under GEN3-T02 or GEN3-T03, resume the parent stream instead of restarting GEN3-T01."
+      ],
+      "caveats": []
+    },
+    "Route E": {
+      "name": "Document and Close",
+      "script": "I have noted the urgent concern and the pathway shared. You may call PBSG again if a legal matter emerges later.",
+      "needs_to_know": [
+        "Use this route when there is no legal matter left to triage after the urgent concern is addressed."
+      ],
+      "access": [
+        "SupportGoWhere — social and financial assistance",
+        "PBSG YouTube channel — webinars on common legal issues",
+        "Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee",
+        "Law Society of Singapore — directory of lawyers",
+        "Legal Services Regulatory Authority e-Services — search for lawyers by practice area"
+      ],
+      "prepare": [
+        "Clear intake note of the urgent concern raised and pathway given"
+      ],
+      "intern_steps": [
+        "Record the urgent intake in the system.",
+        "Document the concern raised and the pathway given."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    }
+  },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

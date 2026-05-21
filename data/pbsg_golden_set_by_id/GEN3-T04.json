@@ -56,5 +56,28 @@
     "Route C (Escalate to PBSG Staff): Take down: full name, contact number, email (if any), brief matter description including answers to Q1-Q3, any urgency/vulnerability factors noted. Inform the applicant that PBSG Staff will call back within 1–2 working days. Email information to PBSG Staff on the same day. Do NOT attempt to advise further.",
     "Route D (Reject and Share Self-Help Resources): Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Additional case type-specific resources: Filing of court documents → CrimsonLogic Service Bureau Employment / wage claim → TADM, TAFEP, ECT, MOM, Judiciary’s website. Small claim (consumer-business dispute with claim amount of ≤ S$20k / S$30k with both parties’ consent) → CASE, SCT, Judiciary’s website. Civil claims → Judiciary’s website. Dispute with financial institution → FiDReC. Bankruptcy and related proceedings → MinLaw IPTO, Judiciary’s website. Neighbour dispute → CMC, CDRT, Judiciary’s website. Harassment → Judiciary’s website. Online harms → SHECARES@SCWO, Judiciary’s website. Road traffic → Motor Insurance Bureau. Divorce → Judiciary’s website. Child/Spouse Maintenance → SCWO MSC, iFAMS, Judiciary’s website. Maintenance for Parents → MSF CMP, Judiciary’s website. Family violence (including PPO and vulnerable adults) → NAVH, FPC, PAVE, PSCs, Judiciary’s website. Custody → Judiciary’s website. Adoption → Judiciary’s website. Guardianship → Judiciary’s website. Syariah → LAB eBantu, SYC’s website, Judiciary’s website. Lasting Power of Attorney → MSF OPG, My Legacy. Deputyship → MSF OPG, SNTC, Judiciary’s website. Estate / probate → PT, My Legacy, Judiciary’s website. Criminal (including bail, Magistrate’s Complaints (private prosecution), and criminal compensation claims) → Judiciary’s website. Complaints against lawyers → LSS. Complaints against medical professionals → SMC, MOH. Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
   ],
+  "routing_structured": {
+    "Route C": {
+      "name": "Escalate to PBSG Staff",
+      "script": "I need to check this with PBSG Staff before going further. Let me take down your details and have PBSG Staff follow up.",
+      "needs_to_know": [
+        "PBSG Staff will call back within 1-2 working days."
+      ],
+      "access": [],
+      "prepare": [
+        "Brief matter description",
+        "Any urgency or vulnerability factors"
+      ],
+      "intern_steps": [
+        "Take down the applicant's full name, contact number, email if any, and brief matter description.",
+        "Include answers to Q1-Q3 and any urgency or vulnerability factors noted.",
+        "Email the information to PBSG Staff on the same day.",
+        "Do not attempt to advise further."
+      ],
+      "caveats": [
+        "Do not give legal advice or assess merits yourself."
+      ]
+    }
+  },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

@@ -69,5 +69,47 @@
     "Route H (Matrimonial Stream) → Proceed to GEN3-T03 (Matrimonial Stream Triage).",
     "Route I (Civil Stream) → Proceed to GEN3-T04 (Civil Stream Triage)."
   ],
+  "routing_structured": {
+    "Route B": {
+      "name": "Refer Person to Contact PBSG Directly",
+      "script": "The person who needs legal help should contact PBSG directly. PBSG can provide general information on schemes, but the application must be submitted by the person who needs legal help.",
+      "needs_to_know": [
+        "PBSG can provide general information on schemes to the caller.",
+        "The application must be submitted by the person who needs legal help."
+      ],
+      "access": [
+        "Phone: 6536 0650",
+        "Email: help@probono.sg",
+        "Opening hours / appointment instructions: Mon-Fri, 10am-1pm and 2pm-4pm, excluding weekends and public holidays"
+      ],
+      "prepare": [],
+      "intern_steps": [
+        "Give the caller the PBSG hotline number and email address.",
+        "Explain that the person who needs legal help should contact PBSG directly."
+      ],
+      "caveats": []
+    },
+    "Route F": {
+      "name": "Escalate to PBSG Staff",
+      "script": "I need to check this with PBSG Staff before going further. Let me take down your details and have PBSG Staff follow up.",
+      "needs_to_know": [
+        "PBSG Staff will call back within 1-2 working days."
+      ],
+      "access": [],
+      "prepare": [
+        "Brief matter description",
+        "Any urgency or vulnerability factors"
+      ],
+      "intern_steps": [
+        "Take down the applicant's full name, contact number, email if any, and brief matter description.",
+        "Include answers to Q1-Q5 and any urgency or vulnerability factors noted.",
+        "Email the information to PBSG Staff on the same day.",
+        "Do not attempt to advise further."
+      ],
+      "caveats": [
+        "Do not give legal advice or assess merits yourself."
+      ]
+    }
+  },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; and (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: \"I'm an intern/volunteer and I'm not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\" • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

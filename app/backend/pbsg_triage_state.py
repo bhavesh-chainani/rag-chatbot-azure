@@ -1316,18 +1316,30 @@ def collapse_duplicate_route_cards(content: str | None) -> str | None:
     selected_matches = list(re.finditer(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE))
     if len(selected_matches) < 2:
         return content
-    first_start = selected_matches[0].start()
-    second_start = selected_matches[1].start()
-    first_block = content[first_start:second_start]
-    second_block = content[second_start:]
-    first_entry = selected_matches[0].group(1).upper()
-    second_entry = selected_matches[1].group(1).upper()
-    first_route = extract_response_route_label(first_block)
-    second_route = extract_response_route_label(second_block)
-    if first_entry == second_entry and first_route and first_route == second_route:
-        prefix = content[:first_start]
-        return f"{prefix}{first_block}".rstrip()
-    return content
+    blocks: list[tuple[int, int, str, str, str | None]] = []
+    for index, match in enumerate(selected_matches):
+        start = match.start()
+        end = selected_matches[index + 1].start() if index + 1 < len(selected_matches) else len(content)
+        block = content[start:end]
+        blocks.append((start, end, block, match.group(1).upper(), extract_response_route_label(block)))
+
+    prefix = content[: blocks[0][0]]
+    kept_blocks: list[str] = []
+    seen_route_cards: set[tuple[str, str]] = set()
+    changed = False
+
+    for _, _, block, entry_id, route_label in blocks:
+        if route_label:
+            key = (entry_id, route_label)
+            if key in seen_route_cards:
+                changed = True
+                continue
+            seen_route_cards.add(key)
+        kept_blocks.append(block)
+
+    if not changed:
+        return content
+    return f"{prefix}{''.join(kept_blocks)}".rstrip()
 
 
 def validate_response_transition(

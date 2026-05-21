@@ -5,7 +5,7 @@ import pytest
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
-from openai.types.chat import ChatCompletion
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from approaches.approach import (
     ActivityDetail,
@@ -894,6 +894,41 @@ def test_apply_triage_response_guard_escalates_invalid_question(chat_approach):
     assert "Q5" not in guarded
 
 
+def test_apply_triage_response_guard_replaces_duplicate_terminal_route_with_canonical_card(chat_approach):
+    entry = chat_approach.pbsg_golden_set_entries["GEN3-T02"]
+    transition = chat_approach.pbsg_routing_engine.graph.transition_for("GEN3-T02", "Q1", "if_yes")
+    extra_info = ExtraInfo(
+        data_points=chat_approach.golden_set_data_points({"GEN3-T02": entry}),
+        deterministic_transition=transition,
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First model route card."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated model route card."
+"""
+
+    guarded = chat_approach.apply_triage_response_guard(content, extra_info)
+
+    assert guarded is not None
+    assert guarded.count("**Selected Entry:**") == 1
+    assert guarded.count("**Routing Recommendation:**") == 1
+    assert "**Routing Recommendation:** Route A (LASCO)" in guarded
+    assert "First model route card" not in guarded
+    assert "Repeated model route card" not in guarded
+    assert "LASCO handles capital offences" in guarded
+
+
 def test_validate_response_questions_rejects_multiple_primary_questions():
     entries = {
         "GEN3-T01": {
@@ -941,6 +976,44 @@ async def test_run_without_streaming_routes_obvious_capital_offence_without_llm(
     assert "GEN3-T06 Q1" not in content
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
     assert result["context"]["thoughts"][-1].description == "Answered from Golden Set branching logic without retrieval or LLM generation."
+
+
+@pytest.mark.asyncio
+async def test_run_until_final_call_returns_canonical_route_before_final_llm(chat_approach, monkeypatch):
+    async def fake_run_search_approach(messages, overrides, auth_claims):
+        return ExtraInfo(
+            data_points=chat_approach.golden_set_data_points(
+                {"GEN3-T02": chat_approach.pbsg_golden_set_entries["GEN3-T02"]}
+            ),
+            thoughts=[],
+        )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("proved terminal route should not call final LLM")
+
+    monkeypatch.setattr(chat_approach, "run_search_approach", fake_run_search_approach)
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "Yes"},
+    ]
+
+    extra_info, chat_coroutine = await chat_approach.run_until_final_call(messages, {}, {}, should_stream=False)
+    response = await chat_coroutine
+    content = response.choices[0].message.content or ""
+
+    assert extra_info.deterministic_transition is not None
+    assert content.count("**Selected Entry:**") == 1
+    assert content.count("**Routing Recommendation:**") == 1
+    assert "**Routing Recommendation:** Route A (LASCO)" in content
+    assert extra_info.thoughts[-1].title == "Deterministic PBSG routing"
 
 
 @pytest.mark.asyncio
@@ -1604,6 +1677,100 @@ async def test_run_with_streaming_handles_non_stream_response(chat_approach, mon
     assert events[1]["delta"]["content"] == "Answer text"
     assert events[2]["context"] is extra_info
     assert events[3]["context"]["followup_questions"] == ["Follow up?"]
+
+
+@pytest.mark.asyncio
+async def test_run_with_streaming_buffers_pbsg_output_and_collapses_duplicate_route_cards(chat_approach, monkeypatch):
+    entry = chat_approach.pbsg_golden_set_entries["GEN3-T02"]
+    extra_info = ExtraInfo(
+        data_points=chat_approach.golden_set_data_points({"GEN3-T02": entry}),
+        thoughts=[ThoughtStep("Final", None, props={})],
+    )
+    duplicate_content = """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    class FakeStream:
+        def __init__(self):
+            self.responses = [
+                {
+                    "object": "chat.completion.chunk",
+                    "choices": [{"delta": {"role": "assistant"}, "index": 0, "finish_reason": None}],
+                    "id": "chunk-1",
+                    "model": "gpt-4.1-mini",
+                    "created": 1,
+                },
+                {
+                    "object": "chat.completion.chunk",
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": duplicate_content},
+                            "index": 0,
+                            "finish_reason": None,
+                        }
+                    ],
+                    "id": "chunk-1",
+                    "model": "gpt-4.1-mini",
+                    "created": 1,
+                },
+                {
+                    "object": "chat.completion.chunk",
+                    "choices": [],
+                    "id": "chunk-1",
+                    "model": "gpt-4.1-mini",
+                    "created": 1,
+                    "usage": {"completion_tokens": 1, "prompt_tokens": 1, "total_tokens": 2},
+                },
+            ]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.responses:
+                raise StopAsyncIteration
+            return ChatCompletionChunk.model_validate(self.responses.pop(0), strict=False)
+
+    async def fake_run_until_final_call(messages, overrides, auth_claims, should_stream):
+        assert should_stream is True
+
+        async def stream_response():
+            return FakeStream()
+
+        return extra_info, stream_response()
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fake_run_until_final_call)
+
+    events = []
+    async for event in chat_approach.run_with_streaming(
+        messages=[{"role": "user", "content": "Criminal charge"}],
+        overrides={},
+        auth_claims={},
+        session_state="state",
+    ):
+        events.append(event)
+
+    content_events = [event for event in events if event.get("delta", {}).get("content")]
+    assert len(content_events) == 1
+    content = content_events[0]["delta"]["content"]
+    assert content.count("**Selected Entry:**") == 1
+    assert content.count("**Routing Recommendation:**") == 1
+    assert "First LASCO wording" in content
+    assert "Repeated LASCO wording" not in content
+    assert events[-1]["context"] is extra_info
 
 
 @pytest.mark.asyncio

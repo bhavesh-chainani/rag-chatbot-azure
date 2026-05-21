@@ -113,6 +113,45 @@ def test_duplicate_route_card_guard_keeps_first_matching_route_card():
     assert "Repeated LASCO wording" not in collapsed
 
 
+def test_duplicate_route_card_guard_collapses_repeated_cards_without_dropping_distinct_routes():
+    content = """Intro note.
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T03
+
+**Routing Recommendation:** Route B (LAB)
+
+**Tell the applicant:**
+
+> "Family wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    collapsed = collapse_duplicate_route_cards(content)
+
+    assert collapsed is not None
+    assert collapsed.startswith("Intro note.")
+    assert collapsed.count("**Selected Entry:** GEN3-T02") == 1
+    assert collapsed.count("**Selected Entry:** GEN3-T03") == 1
+    assert "First LASCO wording" in collapsed
+    assert "Family wording" in collapsed
+    assert "Repeated LASCO wording" not in collapsed
+
+
 def test_pbsg_golden_set_branching_graph_targets_are_valid():
     entries = load_entries()
     assert entries
@@ -200,6 +239,28 @@ def test_pbsg_routing_engine_renders_every_deterministic_branch():
                     continue
                 assert content, f"{entry_id} {question_id}.{branch_key} did not render"
                 assert "**Selected Entry:**" in content
+
+
+def test_pbsg_terminal_routes_render_single_route_card_for_every_gen3_branch():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+
+    for entry_id, entry in entries.items():
+        if not entry_id.startswith("GEN3-"):
+            continue
+        for question_id, question_node in entry["branching_logic"].items():
+            if not isinstance(question_node, dict):
+                continue
+            for branch_key, outcome in question_node.items():
+                if not branch_key.startswith("if_") or not isinstance(outcome, str):
+                    continue
+                transition = parse_transition_outcome(entries, entry_id, question_id, branch_key, outcome)
+                if transition.transition_type != "terminal_route":
+                    continue
+                content = engine.render_transition(transition)
+                assert content is not None
+                assert content.count("**Selected Entry:**") == 1, f"{entry_id} {question_id}.{branch_key}"
+                assert content.count("**Routing Recommendation:**") == 1, f"{entry_id} {question_id}.{branch_key}"
 
 
 def test_pbsg_cross_reference_routes_are_explicit_nested_edges():

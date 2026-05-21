@@ -39,6 +39,7 @@ from pbsg_triage_state import (
     load_golden_set_entries,
     parse_transition_outcome,
     resolve_expected_transition,
+    resolve_initial_topic,
     safe_escalation_response,
     validate_response_transition,
     validate_response_questions,
@@ -423,6 +424,38 @@ class ChatReadRetrieveReadApproach(Approach):
             text=[f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}" for entry_id, entry in sorted(entries.items())],
             citations=[f"{entry_id}.json" for entry_id in sorted(entries)],
         )
+
+    def ensure_golden_set_source_entries(
+        self,
+        data_points: DataPoints,
+        entry_ids: list[str],
+    ) -> None:
+        if not entry_ids:
+            return
+        data_points.text = data_points.text or []
+        data_points.citations = data_points.citations or []
+        existing_entries = self.extract_golden_set_entries(data_points.text)
+        for entry_id in entry_ids:
+            entry = self.pbsg_golden_set_entries.get(entry_id)
+            if not entry or entry_id in existing_entries:
+                continue
+            data_points.text.append(f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}")
+            citation = f"{entry_id}.json"
+            if citation not in data_points.citations:
+                data_points.citations.append(citation)
+
+    def ensure_initial_topic_sources(
+        self,
+        data_points: DataPoints,
+        messages: list[ChatCompletionMessageParam],
+        original_user_query: Any,
+    ) -> None:
+        if len(messages) != 1 or not isinstance(original_user_query, str):
+            return
+        resolution = resolve_initial_topic(self.pbsg_golden_set_entries, original_user_query)
+        if not resolution:
+            return
+        self.ensure_golden_set_source_entries(data_points, [resolution.entry_id, *resolution.overlays])
 
     def build_deterministic_chat_response(
         self,
@@ -1238,6 +1271,7 @@ class ChatReadRetrieveReadApproach(Approach):
             download_image_sources=send_image_sources,
             user_oid=auth_claims.get("oid"),
         )
+        self.ensure_initial_topic_sources(data_points, messages, original_user_query)
         extra_info = ExtraInfo(
             data_points,
             thoughts=[
@@ -1330,6 +1364,8 @@ class ChatReadRetrieveReadApproach(Approach):
             web_results=agentic_results.web_results,
             sharepoint_results=agentic_results.sharepoint_results,
         )
+        original_user_query = messages[-1].get("content") if messages else None
+        self.ensure_initial_topic_sources(data_points, messages, original_user_query)
 
         return ExtraInfo(
             data_points,

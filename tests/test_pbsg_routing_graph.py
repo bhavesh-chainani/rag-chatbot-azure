@@ -17,6 +17,7 @@ from pbsg_triage_state import (
     load_golden_set_entries,
     parse_transition_outcome,
     resolve_gen3_t13_cue_transition,
+    resolve_initial_topic,
 )
 
 
@@ -44,6 +45,54 @@ def test_golden_set_candidates_include_local_and_container_layouts():
 
     assert (Path.cwd() / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
     assert (Path(__file__).resolve().parents[1] / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
+
+
+@pytest.mark.parametrize("query", ["hi", "I need help", "start triage", "general enquiry"])
+def test_initial_topic_resolver_defaults_vague_starts_to_gen3_t01(query):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert resolution.confidence < 0.7
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_entry_id"),
+    [
+        ("Applicant has a criminal charge in court.", "GEN3-T02"),
+        ("Applicant wants a divorce and has custody issues.", "GEN3-T03"),
+        ("Applicant's employer has not paid salary for three months.", "GEN3-T04"),
+    ],
+)
+def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_entry_id):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == expected_entry_id
+    assert resolution.confidence >= 0.6
+
+
+def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Elderly applicant is confused and has a debt issue.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T04"
+    assert "GEN3-T13" in resolution.overlays
+
+
+def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is elderly and confused.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T13"
 
 
 def route_labels(entry: dict[str, Any]) -> set[str]:

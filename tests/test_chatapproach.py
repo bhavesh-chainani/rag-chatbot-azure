@@ -979,6 +979,91 @@ async def test_run_without_streaming_routes_obvious_capital_offence_without_llm(
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_defaults_vague_initial_turn_to_gen3_t01(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("vague first turn should not call retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I need help"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T01" in content
+    assert "Next question: Q1 from GEN3-T01" in content
+    assert "Are you currently represented by a lawyer" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "expected_entry_id"),
+    [
+        ("Applicant has a criminal charge in court.", "GEN3-T02"),
+        ("Applicant wants a divorce and custody advice.", "GEN3-T03"),
+        ("Applicant's employer has not paid salary for three months.", "GEN3-T04"),
+    ],
+)
+async def test_run_without_streaming_selects_clear_initial_topic(chat_approach, monkeypatch, query, expected_entry_id):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clear first turn should render deterministic first question")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert f"**Selected Entry:** {expected_entry_id}" in content
+    assert f"Next question: Q1 from {expected_entry_id}" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == expected_entry_id
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_keeps_vulnerability_as_overlay_when_legal_issue_exists(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("vulnerability overlay should still render deterministic first question")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Elderly applicant is confused and has a debt issue."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "GEN3-T13 noted as a monitor, not the active workflow" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T04"
+    assert "GEN3-T13" in result["context"]["pbsg_triage_state"]["triggered_overlays"]
+
+
+@pytest.mark.asyncio
+async def test_initial_topic_source_pack_injects_default_t01_over_high_ranked_t13(chat_approach):
+    data_points = DataPoints(
+        text=[f"GEN3-T13.json: {json.dumps(chat_approach.pbsg_golden_set_entries['GEN3-T13'])}"],
+        citations=["GEN3-T13.json"],
+    )
+
+    chat_approach.ensure_initial_topic_sources(data_points, [{"role": "user", "content": "start triage"}], "start triage")
+    entries = chat_approach.extract_golden_set_entries(data_points.text)
+
+    assert "GEN3-T01" in entries
+    assert "GEN3-T13" in entries
+    assert "GEN3-T01.json" in data_points.citations
+
+
+@pytest.mark.asyncio
 async def test_run_until_final_call_returns_canonical_route_before_final_llm(chat_approach, monkeypatch):
     async def fake_run_search_approach(messages, overrides, auth_claims):
         return ExtraInfo(
@@ -1666,7 +1751,11 @@ async def test_run_with_streaming_handles_non_stream_response(chat_approach, mon
 
     events = []
     async for event in chat_approach.run_with_streaming(
-        messages=[{"role": "user", "content": "Hello"}],
+        messages=[
+            {"role": "user", "content": "Earlier non-PBSG question"},
+            {"role": "assistant", "content": "Earlier answer"},
+            {"role": "user", "content": "Hello"},
+        ],
         overrides={"suggest_followup_questions": True},
         auth_claims={},
         session_state="state",
@@ -1756,7 +1845,11 @@ async def test_run_with_streaming_buffers_pbsg_output_and_collapses_duplicate_ro
 
     events = []
     async for event in chat_approach.run_with_streaming(
-        messages=[{"role": "user", "content": "Criminal charge"}],
+        messages=[
+            {"role": "user", "content": "Earlier"},
+            {"role": "assistant", "content": "Earlier answer"},
+            {"role": "user", "content": "Criminal charge"},
+        ],
         overrides={},
         auth_claims={},
         session_state="state",

@@ -60,6 +60,24 @@ class PBSGDeterministicResult:
     entries: dict[str, dict[str, Any]]
 
 
+@dataclass
+class PBSGQueuedTopic:
+    entry_id: str
+    evidence: str
+    confidence: float
+
+
+@dataclass
+class PBSGTurnClassification:
+    turn_type: str
+    should_call_llm: bool
+    reason: str | None = None
+    pending_branch_key: str | None = None
+    pending_answer_confidence: float | None = None
+    new_topics: list[PBSGQueuedTopic] = field(default_factory=list)
+    affects_prior_answer: bool = False
+
+
 ASK_MARKERS = [
     "Ask the applicant (read verbatim):",
     "Back to triage",
@@ -86,6 +104,21 @@ REPRESENTED_PATTERN = re.compile(
 WORKFLOW_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b", flags=re.IGNORECASE)
 ROUTE_PATTERN = re.compile(r"\bRoute\s+([A-Z])\b", flags=re.IGNORECASE)
 DEFAULT_GOLDEN_SET_DIR = Path(__file__).resolve().parents[2] / "data" / "pbsg_golden_set_by_id"
+ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
+CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
+CLARIFICATION_QUESTION_PATTERN = re.compile(
+    r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
+)
+SAFETY_INTERRUPT_PATTERN = re.compile(
+    r"\b(danger|violence|self[- ]?harm|homeless|court tomorrow|deadline|immediate threat)\b", flags=re.IGNORECASE
+)
+TOPIC_SIGNAL_RULES = [
+    ("GEN3-T02", re.compile(r"\b(criminal|charged|charge|police|arrest|offence|offense)\b", flags=re.IGNORECASE)),
+    ("GEN3-T03", re.compile(r"\b(divorce|custody|maintenance|matrimonial|family violence|ppo)\b", flags=re.IGNORECASE)),
+    ("GEN3-T04", re.compile(r"\b(employment|landlord|tenant|contract|estate|probate|civil|debt)\b", flags=re.IGNORECASE)),
+    ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
+    ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
+]
 
 
 def message_content_to_text(content: Any) -> str:
@@ -465,6 +498,93 @@ def concurrent_monitors_from_flags(flags: dict[str, bool]) -> list[str]:
     return monitors
 
 
+def detect_candidate_topics(
+    text: str,
+    entries: dict[str, dict[str, Any]],
+    active_workflow: str | None,
+) -> list[PBSGQueuedTopic]:
+    topics: list[PBSGQueuedTopic] = []
+    for entry_id, pattern in TOPIC_SIGNAL_RULES:
+        if entry_id == active_workflow or entry_id not in entries:
+            continue
+        match = pattern.search(text)
+        if match:
+            topics.append(PBSGQueuedTopic(entry_id=entry_id, evidence=match.group(0), confidence=0.8))
+    return topics
+
+
+def classify_turn_interrupt(
+    entries: dict[str, dict[str, Any]],
+    state: PBSGTriageState,
+    latest_user_query: str,
+) -> PBSGTurnClassification:
+    if state.mode != "FAST_ROUTING" or not state.pending_entry_id or not state.current_question_id:
+        return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
+
+    entry = entries.get(state.pending_entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
+    if not isinstance(question_node, dict):
+        return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
+
+    branch_key = branch_key_for_answer(question_node, latest_user_query)
+    candidates = detect_candidate_topics(latest_user_query, entries, state.active_workflow)
+    has_additive = bool(ADDITIVE_PATTERN.search(latest_user_query))
+    has_correction = bool(CORRECTION_PATTERN.search(latest_user_query)) or bool(state.contradiction_signals)
+    has_clarification = bool(CLARIFICATION_QUESTION_PATTERN.search(latest_user_query))
+    has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query))
+
+    if has_correction:
+        return PBSGTurnClassification(
+            turn_type="correction",
+            should_call_llm=True,
+            reason="correction signal",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+            affects_prior_answer=True,
+        )
+    if has_clarification:
+        return PBSGTurnClassification(
+            turn_type="clarification",
+            should_call_llm=True,
+            reason="clarification question",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if has_safety:
+        return PBSGTurnClassification(
+            turn_type="safety_interrupt",
+            should_call_llm=True,
+            reason="safety or urgency signal",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if candidates and (has_additive or branch_key):
+        return PBSGTurnClassification(
+            turn_type="answer_plus_new_topic" if branch_key else "new_topic_only",
+            should_call_llm=True,
+            reason="possible new topic in locked flow",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if candidates:
+        return PBSGTurnClassification(
+            turn_type="new_topic_only",
+            should_call_llm=True,
+            reason="possible new topic in locked flow",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if branch_key:
+        return PBSGTurnClassification(
+            turn_type="answer_only",
+            should_call_llm=False,
+            pending_branch_key=branch_key,
+            pending_answer_confidence=1.0,
+        )
+    return PBSGTurnClassification(turn_type="ambiguous", should_call_llm=True, reason="answer did not map locally")
+
+
 def build_triage_state(
     messages: list[ChatCompletionMessageParam],
     entries: dict[str, dict[str, Any]],
@@ -837,19 +957,45 @@ class PBSGRoutingEngine:
         self,
         messages: list[ChatCompletionMessageParam],
         latest_user_query: str,
+        branch_key_override: str | None = None,
     ) -> PBSGDeterministicResult | None:
         if not self.entries:
             return None
         state = build_triage_state(messages, self.entries, latest_user_query)
         if state.mode != "FAST_ROUTING":
             return None
-        transition = resolve_expected_transition(self.entries, state, latest_user_query)
+        transition = self.resolve_transition_from_branch(state, branch_key_override)
+        if not transition:
+            transition = resolve_expected_transition(self.entries, state, latest_user_query)
         if not transition:
             return None
         content = self.render_transition(transition)
         if not content:
             return None
         return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+    def resolve_transition_from_branch(
+        self,
+        state: PBSGTriageState,
+        branch_key: str | None,
+    ) -> PBSGTransition | None:
+        if not branch_key or not state.pending_entry_id or not state.current_question_id:
+            return None
+        entry = self.entries.get(state.pending_entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict) or branch_key not in question_node:
+            return None
+        outcome = question_node.get(branch_key)
+        if not isinstance(outcome, str):
+            return None
+        return parse_transition_outcome(
+            self.entries,
+            state.pending_entry_id,
+            state.current_question_id,
+            branch_key,
+            outcome,
+        )
 
     def render_transition(self, transition: PBSGTransition) -> str | None:
         if transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question"}:

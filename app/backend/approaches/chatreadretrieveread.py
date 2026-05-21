@@ -27,9 +27,12 @@ from approaches.approach import (
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGDeterministicResult,
+    PBSGQueuedTopic,
     PBSGRoutingEngine,
     PBSGTransition,
+    PBSGTurnClassification,
     build_triage_state,
+    classify_turn_interrupt,
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
@@ -392,7 +395,16 @@ class ChatReadRetrieveReadApproach(Approach):
         self,
         deterministic_result: PBSGDeterministicResult,
         session_state: Any = None,
+        turn_classification: PBSGTurnClassification | None = None,
     ) -> dict[str, Any]:
+        if turn_classification and turn_classification.new_topics:
+            for topic in turn_classification.new_topics:
+                if topic.entry_id not in deterministic_result.state.queued_workflows:
+                    deterministic_result.state.queued_workflows.append(topic.entry_id)
+            deterministic_result.content = self.append_queued_topic_note(
+                deterministic_result.content, deterministic_result.state.active_workflow, turn_classification.new_topics
+            )
+
         extra_info = ExtraInfo(
             data_points=self.golden_set_data_points(deterministic_result.entries),
             deterministic_transition=deterministic_result.transition,
@@ -409,6 +421,7 @@ class ChatReadRetrieveReadApproach(Approach):
                     "question_id": deterministic_result.transition.question_id,
                     "branch_key": deterministic_result.transition.branch_key,
                     "transition_type": deterministic_result.transition.transition_type,
+                    "turn_type": turn_classification.turn_type if turn_classification else "answer_only",
                 },
             )
         )
@@ -426,6 +439,35 @@ class ChatReadRetrieveReadApproach(Approach):
             "session_state": session_state,
         }
 
+    def append_queued_topic_note(
+        self,
+        content: str,
+        active_workflow: str | None,
+        topics: list[PBSGQueuedTopic],
+    ) -> str:
+        if not topics:
+            return content
+        unique_topics: list[PBSGQueuedTopic] = []
+        for topic in topics:
+            if topic.entry_id not in [existing.entry_id for existing in unique_topics]:
+                unique_topics.append(topic)
+        active_line = f"1. {active_workflow} — active workflow" if active_workflow else "1. Current stream — active workflow"
+        queued_lines = [
+            f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+            for index, topic in enumerate(unique_topics, start=2)
+        ]
+        note = "\n".join(
+            [
+                "",
+                "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
+                "",
+                "Topics identified:",
+                active_line,
+                *queued_lines,
+            ]
+        )
+        return f"{content}{note}"
+
     def try_deterministic_locked_response(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -436,10 +478,14 @@ class ChatReadRetrieveReadApproach(Approach):
         latest_content = messages[-1].get("content")
         if not isinstance(latest_content, str):
             return None
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
+        if turn_classification.should_call_llm:
+            return None
         deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
         if not deterministic_result:
             return None
-        return self.build_deterministic_chat_response(deterministic_result, session_state)
+        return self.build_deterministic_chat_response(deterministic_result, session_state, turn_classification)
 
     async def try_structured_llm_locked_response(
         self,
@@ -466,15 +512,19 @@ class ChatReadRetrieveReadApproach(Approach):
         branch_keys = [key for key in question_node if key.startswith("if_")]
         if not branch_keys:
             return None
+        local_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
 
         classifier_messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
                 "content": (
-                    "Classify the latest user message as an answer to one PBSG triage question. "
-                    "Return compact JSON only with keys classification, branch_key, confidence. "
-                    "classification must be one of branch, clarification, ambiguous, contradiction. "
-                    "Only choose branch_key from the allowed branch keys. Do not write user-facing routing advice."
+                    "Classify a locked PBSG triage turn. Return compact JSON only. "
+                    "Schema: turn_type is one of answer_only, answer_plus_new_topic, new_topic_only, "
+                    "correction, clarification, safety_interrupt, ambiguous. pending_answer is either null "
+                    "or {branch_key, confidence}. new_topics is a list of {entry_id, evidence, confidence}. "
+                    "correction is {affects_prior_answer, reason}. clarification_answer may be a short plain-language "
+                    "answer if the user asked a clarification question. Only choose branch_key from allowed branches "
+                    "and entry_id from available entries. Do not write user-facing routing advice."
                 ),
             },
             {
@@ -486,6 +536,9 @@ class ChatReadRetrieveReadApproach(Approach):
                         "question": question_node.get("question"),
                         "allowed_branch_keys": branch_keys,
                         "allowed_branch_labels": {key: label_from_branch_key(key) for key in branch_keys},
+                        "available_entries": sorted(self.pbsg_golden_set_entries),
+                        "local_gate_turn_type": local_classification.turn_type,
+                        "local_gate_new_topics": [asdict(topic) for topic in local_classification.new_topics],
                         "latest_user_message": latest_content,
                     },
                     ensure_ascii=False,
@@ -505,39 +558,64 @@ class ChatReadRetrieveReadApproach(Approach):
             ),
         )
         classifier_content = completion.choices[0].message.content or "{}"
-        try:
-            payload = json.loads(classifier_content)
-        except json.JSONDecodeError:
-            return None
-        if payload.get("classification") != "branch":
-            return None
-        branch_key = payload.get("branch_key")
-        confidence = payload.get("confidence")
-        if branch_key not in branch_keys or not isinstance(confidence, (int, float)) or confidence < 0.75:
-            return None
-        outcome = question_node.get(branch_key)
-        if not isinstance(outcome, str):
-            return None
-        transition = parse_transition_outcome(
-            self.pbsg_golden_set_entries,
-            triage_state.pending_entry_id,
-            triage_state.current_question_id,
-            branch_key,
-            outcome,
+        turn_classification = self.parse_structured_turn_classification(
+            classifier_content, branch_keys, local_classification
         )
-        content = self.pbsg_routing_engine.render_transition(transition)
-        if not content:
+        if not turn_classification:
             return None
-        result = PBSGDeterministicResult(
-            content=content,
-            state=triage_state,
-            transition=transition,
-            entries=self.pbsg_golden_set_entries,
+
+        if turn_classification.turn_type == "correction":
+            response = self.build_pending_question_response(
+                triage_state,
+                turn_classification,
+                "I noted a correction. To avoid routing on the wrong facts, please confirm the corrected answer to the current question before we continue.",
+                session_state,
+            )
+            response["context"]["thoughts"].append(
+                self.format_thought_step_for_chatcompletion(
+                    title="Structured PBSG turn switch",
+                    messages=classifier_messages,
+                    overrides=overrides,
+                    model=self.chatgpt_model,
+                    deployment=self.chatgpt_deployment,
+                    usage=completion.usage,
+                )
+            )
+            return response
+
+        if turn_classification.turn_type in {"new_topic_only", "clarification", "ambiguous"}:
+            if turn_classification.turn_type == "clarification":
+                note = "I noted the clarification question. Please answer the current triage question so I can continue safely."
+            elif turn_classification.turn_type == "new_topic_only":
+                note = "I noted a separate possible topic and will handle it after this stream is routed."
+            else:
+                note = "I could not map that safely to one allowed branch. Please answer the current triage question directly."
+            response = self.build_pending_question_response(triage_state, turn_classification, note, session_state)
+            response["context"]["thoughts"].append(
+                self.format_thought_step_for_chatcompletion(
+                    title="Structured PBSG turn switch",
+                    messages=classifier_messages,
+                    overrides=overrides,
+                    model=self.chatgpt_model,
+                    deployment=self.chatgpt_deployment,
+                    usage=completion.usage,
+                )
+            )
+            return response
+
+        branch_key = turn_classification.pending_branch_key
+        confidence = turn_classification.pending_answer_confidence
+        if branch_key not in branch_keys or not confidence or confidence < 0.75:
+            return None
+        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(
+            messages[:-1], latest_content, branch_key_override=branch_key
         )
-        response = self.build_deterministic_chat_response(result, session_state)
+        if not deterministic_result:
+            return None
+        response = self.build_deterministic_chat_response(deterministic_result, session_state, turn_classification)
         response["context"]["thoughts"].append(
             self.format_thought_step_for_chatcompletion(
-                title="Structured PBSG answer classification",
+                title="Structured PBSG turn switch",
                 messages=classifier_messages,
                 overrides=overrides,
                 model=self.chatgpt_model,
@@ -546,6 +624,164 @@ class ChatReadRetrieveReadApproach(Approach):
             )
         )
         return response
+
+    def parse_structured_turn_classification(
+        self,
+        classifier_content: str,
+        branch_keys: list[str],
+        local_classification: PBSGTurnClassification,
+    ) -> PBSGTurnClassification | None:
+        try:
+            payload = json.loads(classifier_content)
+        except json.JSONDecodeError:
+            return None
+
+        # Backward-compatible shape for older tests/fallbacks.
+        if payload.get("classification") == "branch":
+            branch_key = payload.get("branch_key")
+            confidence = payload.get("confidence")
+            if branch_key in branch_keys and isinstance(confidence, (int, float)):
+                return PBSGTurnClassification(
+                    turn_type="answer_only",
+                    should_call_llm=True,
+                    pending_branch_key=branch_key,
+                    pending_answer_confidence=float(confidence),
+                    new_topics=local_classification.new_topics,
+                )
+            return None
+
+        turn_type = payload.get("turn_type")
+        if turn_type not in {
+            "answer_only",
+            "answer_plus_new_topic",
+            "new_topic_only",
+            "correction",
+            "clarification",
+            "safety_interrupt",
+            "ambiguous",
+        }:
+            return None
+
+        pending_answer = payload.get("pending_answer")
+        branch_key = None
+        confidence = None
+        if isinstance(pending_answer, dict):
+            candidate_branch = pending_answer.get("branch_key")
+            candidate_confidence = pending_answer.get("confidence")
+            if candidate_branch in branch_keys and isinstance(candidate_confidence, (int, float)):
+                branch_key = candidate_branch
+                confidence = float(candidate_confidence)
+
+        topics = self.validated_queued_topics(payload.get("new_topics"), local_classification.new_topics)
+        correction = payload.get("correction")
+        affects_prior_answer = (
+            bool(correction.get("affects_prior_answer")) if isinstance(correction, dict) else local_classification.affects_prior_answer
+        )
+        return PBSGTurnClassification(
+            turn_type=turn_type,
+            should_call_llm=True,
+            reason=payload.get("clarification_answer") if isinstance(payload.get("clarification_answer"), str) else None,
+            pending_branch_key=branch_key,
+            pending_answer_confidence=confidence,
+            new_topics=topics,
+            affects_prior_answer=affects_prior_answer,
+        )
+
+    def validated_queued_topics(
+        self,
+        raw_topics: Any,
+        local_topics: list[PBSGQueuedTopic],
+    ) -> list[PBSGQueuedTopic]:
+        topics: list[PBSGQueuedTopic] = []
+        if isinstance(raw_topics, list):
+            for raw_topic in raw_topics:
+                if not isinstance(raw_topic, dict):
+                    continue
+                entry_id = raw_topic.get("entry_id")
+                evidence = raw_topic.get("evidence")
+                confidence = raw_topic.get("confidence")
+                if (
+                    isinstance(entry_id, str)
+                    and entry_id in self.pbsg_golden_set_entries
+                    and isinstance(evidence, str)
+                    and isinstance(confidence, (int, float))
+                    and confidence >= 0.7
+                ):
+                    topics.append(PBSGQueuedTopic(entry_id=entry_id, evidence=evidence, confidence=float(confidence)))
+        for local_topic in local_topics:
+            if local_topic.entry_id not in [topic.entry_id for topic in topics]:
+                topics.append(local_topic)
+        return topics
+
+    def build_pending_question_response(
+        self,
+        triage_state: Any,
+        turn_classification: PBSGTurnClassification,
+        note: str,
+        session_state: Any = None,
+    ) -> dict[str, Any]:
+        entry_id = triage_state.pending_entry_id or triage_state.workflow_id or "Unclear"
+        question_id = triage_state.current_question_id
+        question = self.pbsg_routing_engine.question_text(entry_id, question_id) if question_id else None
+        for topic in turn_classification.new_topics:
+            if topic.entry_id not in triage_state.queued_workflows:
+                triage_state.queued_workflows.append(topic.entry_id)
+        content_lines = [
+            f"**Selected Entry:** {entry_id}",
+            "",
+            f"**Note:** {note}",
+        ]
+        if turn_classification.reason and turn_classification.turn_type == "clarification":
+            content_lines.extend(["", "**Clarification:**", "", turn_classification.reason])
+        if turn_classification.new_topics:
+            content_lines.extend(
+                [
+                    "",
+                    "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
+                    "",
+                    "Topics identified:",
+                    f"1. {triage_state.active_workflow or entry_id} — active workflow",
+                ]
+            )
+            content_lines.extend(
+                f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+                for index, topic in enumerate(turn_classification.new_topics, start=2)
+            )
+        if question_id and question:
+            content_lines.extend(
+                [
+                    "",
+                    "Triage progress:",
+                    "",
+                    f"- Current question remains: {question_id} from {entry_id}",
+                    "",
+                    "**Ask the applicant (read verbatim):**",
+                    "",
+                    f'> **{question_id}: "{self.convert_question_to_second_person(question)}"**',
+                ]
+            )
+        data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
+        extra_info = ExtraInfo(data_points=data_points)
+        content = "\n".join(content_lines)
+        extra_info.quick_reply = self.build_quick_reply(content, extra_info)
+        extra_info.thoughts.append(
+            ThoughtStep(
+                "Structured PBSG turn switch",
+                "Preserved the active triage state without advancing an unsafe route.",
+                {"turn_type": turn_classification.turn_type},
+            )
+        )
+        return {
+            "message": {"content": content, "role": "assistant"},
+            "context": {
+                "thoughts": extra_info.thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(triage_state),
+            },
+            "session_state": session_state,
+        }
 
     def get_search_query(self, chat_completion: ChatCompletion, default_query: str) -> str:
         """Read the optimized search query from a chat completion tool call."""

@@ -959,6 +959,156 @@ async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_lo
     assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
 
 
+def fake_openai_client_with_json(payload):
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(payload)},
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    return FakeOpenAIClient()
+
+
+def gen3_t04_q4_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "(Means) Is the applicant's Per Capita Household Income (PCHI) ≤ S$5,000, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_queues_new_topic_while_routing_active_answer(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("compound locked turn should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "answer_plus_new_topic",
+            "pending_answer": {"branch_key": "if_no_well_over_no_exceptions", "confidence": 0.92},
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.88}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("well over the threshold, no exceptions. also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Routing Recommendation:** Route D" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_preserves_pending_question_for_new_topic_only(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("new topic switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "new_topic_only",
+            "pending_answer": None,
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.9}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_preserves_pending_question_for_correction(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("correction switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "correction",
+            "pending_answer": None,
+            "new_topics": [],
+            "correction": {"affects_prior_answer": True, "reason": "means answer changed"},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("actually sorry I meant something else"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "I noted a correction" in result["message"]["content"]
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_answers_clarification_without_advancing(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clarification switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "clarification",
+            "pending_answer": None,
+            "new_topics": [],
+            "correction": {"affects_prior_answer": False, "reason": None},
+            "clarification_answer": "PCHI means total monthly household income divided by household members.",
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("what does PCHI mean?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "PCHI means total monthly household income" in result["message"]["content"]
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+
+
 def test_create_chat_completion_uses_max_completion_tokens_for_gpt5_variants(chat_approach):
     captured_kwargs = {}
 

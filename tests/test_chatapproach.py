@@ -18,7 +18,12 @@ from approaches.approach import (
 )
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
-from pbsg_triage_state import build_triage_state, format_state_prompt, validate_response_questions
+from pbsg_triage_state import (
+    build_triage_state,
+    format_state_prompt,
+    normalize_simple_answer,
+    validate_response_questions,
+)
 from prepdocslib.embeddings import ImageEmbeddings
 
 from .mocks import (
@@ -397,7 +402,7 @@ def test_build_quick_reply_returns_none_without_pending_question(chat_approach):
     extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
     content = """**Selected Entry:** GEN3-T01
 
-**Part C - Routing recommendation:** Route A
+**Routing Recommendation:** Route A
 """
 
     assert chat_approach.build_quick_reply(content, extra_info) is None
@@ -440,6 +445,179 @@ Triage progress:
     assert "Workflow locked: GEN3-T03" in prompt
     assert "Pending question: GEN3-T03 Q2" in prompt
     assert "if_no_foreigner" in prompt
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("yeah", "YES"),
+        ("correct", "YES"),
+        ("i do", "YES"),
+        ("nope", "NO"),
+        ("don't have", "NO"),
+        ("never", "NO"),
+        ("not sure", "UNCLEAR"),
+        ("I don't know yet", "UNCLEAR"),
+        ("my hearing is tomorrow", None),
+    ],
+)
+def test_normalize_simple_answer(answer, expected):
+    assert normalize_simple_answer(answer) == expected
+
+
+def test_pbsg_triage_state_enters_orchestration_without_locked_workflow():
+    state = build_triage_state(
+        messages=[],
+        entries={"GEN3-T01": {"id": "GEN3-T01", "branching_logic": {"Q1": {"question": "Represented?"}}}},
+        latest_user_query="Applicant needs help with a divorce and a criminal charge.",
+    )
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "ORCHESTRATION"
+    assert state.workflow_locked is False
+    assert "Mode: ORCHESTRATION" in prompt
+    assert "Workflow locked: false" in prompt
+
+
+def test_pbsg_triage_state_enters_fast_routing_with_simple_answer():
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant currently represented?",
+                "if_yes": "Route A",
+                "if_no": "Proceed to Q2",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you currently represented?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T01": entry}, "nope")
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "FAST_ROUTING"
+    assert state.latest_answer_classification == "NO"
+    assert state.allowed_transitions == ["if_yes", "if_no"]
+    assert "Mode: FAST_ROUTING" in prompt
+    assert "Latest answer classification: NO" in prompt
+    assert "execute the matching branch without filler" in prompt
+
+
+def test_pbsg_triage_state_enters_repair_for_nationality_contradiction():
+    entry = {
+        "id": "GEN3-T04",
+        "branching_logic": {
+            "Q4": {
+                "question": "Does the applicant meet the means criteria?",
+                "if_yes": "Route A",
+                "if_no": "Route D",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T04
+
+What I gathered from your description:
+- Q1: Singapore Citizen or PR -> Yes [GEN3-T04.json]
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "Do you meet the means criteria?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T04": entry}, "Actually I am a foreigner, not a PR.")
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "REPAIR"
+    assert state.repair_required is True
+    assert "nationality/residency changed from SGC/PR to foreigner" in state.contradiction_signals
+    assert "Mode: REPAIR" in prompt
+    assert "Repair required: true" in prompt
+    assert "Invalidate downstream decisions" in prompt
+
+
+def test_pbsg_triage_state_enters_repair_for_representation_contradiction():
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant calling for self?",
+                "if_self": "Proceed to Q3",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+What I gathered from your description:
+- Q1: Currently represented -> No [GEN3-T01.json]
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Are you calling for yourself?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T01": entry}, "My lawyer is already handling this case.")
+
+    assert state.mode == "REPAIR"
+    assert state.repair_required is True
+    assert "representation status changed to existing lawyer" in state.contradiction_signals
+
+
+def test_pbsg_triage_state_tracks_queued_workflows_and_monitors():
+    entries = {
+        "GEN3-T01": {"id": "GEN3-T01", "branching_logic": {"Q1": {"question": "Represented?"}}},
+        "GEN3-T02": {"id": "GEN3-T02", "branching_logic": {"Q1": {"question": "Capital?"}}},
+        "GEN3-T03": {"id": "GEN3-T03", "branching_logic": {"Q1": {"question": "Violence or deadline?"}}},
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Topics identified:**
+1. GEN3-T01 (First Contact) — active workflow
+2. GEN3-T02 (Criminal Stream) — queued workflow
+3. GEN3-T03 (Matrimonial Stream) — queued workflow
+
+**Concurrent monitors:** urgency, vulnerability
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you currently represented?"**""",
+        }
+    ]
+
+    state = build_triage_state(
+        messages,
+        entries,
+        "The applicant has a court date next week, cannot afford food, and is also getting divorced.",
+    )
+    prompt = format_state_prompt(state)
+
+    assert state.active_workflow == "GEN3-T01"
+    assert state.queued_workflows == ["GEN3-T02", "GEN3-T03"]
+    assert "urgency" in state.concurrent_monitors
+    assert "safety" in state.concurrent_monitors
+    assert "Active workflow: GEN3-T01" in prompt
+    assert "Queued workflows: GEN3-T02, GEN3-T03" in prompt
+    assert "Only this workflow may ask the next primary question" in prompt
+    assert "They may interrupt only for urgency threshold, safety issue, or required escalation" in prompt
 
 
 def test_validate_response_questions_allows_explicit_nested_entry_question():

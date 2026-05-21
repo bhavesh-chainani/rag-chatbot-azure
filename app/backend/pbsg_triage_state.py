@@ -755,6 +755,14 @@ def unique_preserve_order(items: list[str]) -> list[str]:
     return unique
 
 
+def normalize_route_key(text: str) -> str:
+    text = URL_PATTERN.sub("", text.lower())
+    text = EMAIL_PATTERN.sub("", text)
+    text = PHONE_PATTERN.sub("", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def strip_route_header(route_text: str) -> tuple[str, str, str]:
     match = re.match(r"(Route\s+[A-Z])\s*(?:\(([^)]*)\))?:\s*(.*)", route_text, flags=re.IGNORECASE | re.DOTALL)
     if not match:
@@ -769,7 +777,17 @@ def split_route_sentences(text: str) -> list[str]:
 
 
 def clean_route_script(text: str) -> str:
-    text = re.sub(r"https?://\S+", "the relevant application page", text)
+    text = re.sub(r"https?://\S+", "the relevant application page.", text)
+    text = re.sub(
+        r"Share about CLAS.*?and inform applicant that they may be eligible",
+        "You may be eligible for CLAS",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\bIf applicant is unable to self-apply\b", "If you cannot self-apply", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bIf applicant has difficulties going to PBSG\b", "If you have difficulties going to PBSG", text, flags=re.IGNORECASE)
+    text = re.sub(r"\binform applicant to apply for CLAS:\s*", "Please apply for CLAS through ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\binform applicant to go to\b", "you may go to", text, flags=re.IGNORECASE)
     text = re.sub(r"\bInform the applicant that\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bInform applicant that\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bInform applicant to\s+", "Please ", text, flags=re.IGNORECASE)
@@ -780,6 +798,16 @@ def clean_route_script(text: str) -> str:
     text = re.sub(r"\bapplicant's\b", "your", text, flags=re.IGNORECASE)
     text = re.sub(r"\bapplicant\b", "you", text, flags=re.IGNORECASE)
     text = re.sub(r"\bPBSG can provide general information on schemes to you\b", "PBSG can provide general information on schemes", text)
+    text = re.sub(r"\bIf you is\b", "If you are", text, flags=re.IGNORECASE)
+    text = re.sub(r"\byou is\b", "you are", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bif you cannot self-apply,\s*you may go\b", "If you cannot self-apply, you may go", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"If you cannot self-apply, you may go to PBSG Counter at State Courts Help Centre\s*\([^)]*\)\s*with documents needed\.?",
+        "If you cannot self-apply, you may go to the PBSG Counter at the State Courts Help Centre with the required documents.",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\.\s*\.", ".", text)
     return re.sub(r"\s+", " ", text).strip(" ;")
 
 
@@ -807,7 +835,9 @@ def extract_access_items(body: str) -> list[str]:
     items.extend(f"Website / application link: {url}" for url in URL_PATTERN.findall(body))
     items.extend(f"Email: {email}" for email in EMAIL_PATTERN.findall(body))
     items.extend(f"Phone: {phone}" for phone in PHONE_PATTERN.findall(body))
-    items.extend(f"Address: {address}" for address in ADDRESS_PATTERN.findall(body))
+    for address in ADDRESS_PATTERN.findall(body):
+        cleaned_address = re.sub(r"\s+with documents needed.*", "", address, flags=re.IGNORECASE).rstrip(")")
+        items.append(f"Address: {cleaned_address}")
     items.extend(f"Opening hours / appointment instructions: {hours.strip()}" for hours in HOURS_PATTERN.findall(body))
     return unique_preserve_order(items)
 
@@ -823,40 +853,100 @@ def extract_route_items(body: str, patterns: list[str]) -> list[str]:
     )
 
 
+def summarize_prepare_item(sentence: str) -> list[str]:
+    items: list[str] = []
+    if re.search(r"\bmeans test|financial documents?\b", sentence, flags=re.IGNORECASE):
+        items.append("Financial documents for the means test")
+    if re.search(r"\bcharge details|CLAS|criminal legal aid\b", sentence, flags=re.IGNORECASE):
+        items.append("Charge details and other case details if asked on application")
+    if re.search(r"\brejection letter|rejection|reasons?\b", sentence, flags=re.IGNORECASE):
+        items.append("Relevant rejection letters or reasons, if applicable")
+    if not items and re.search(r"\bdocuments?\b", sentence, flags=re.IGNORECASE):
+        items.append("Documents needed for the application")
+    return items
+
+
+def summarize_intern_step(sentence: str) -> list[str]:
+    lowered = sentence.lower()
+    if "apply for clas" in lowered or "criminal legal aid application" in lowered:
+        return ["Share the CLAS application link with the applicant"]
+    if "unable to self-apply" in lowered or "cannot self-apply" in lowered:
+        return ["If the applicant cannot self-apply, direct them to the PBSG Counter"]
+    if "difficulties going to pbsg" in lowered:
+        return ["If there are difficulties going to PBSG, escalate to PBSG Staff"]
+    if "take down" in lowered:
+        return [sentence]
+    if "email" in lowered and "same day" in lowered:
+        return ["Email the information to PBSG Staff on the same day"]
+    if "do not attempt to advise" in lowered:
+        return ["Do not attempt to advise further"]
+    if "share" in lowered:
+        return [re.sub(r"\s+", " ", sentence).strip(" .")]
+    if "escalate" in lowered:
+        return [re.sub(r"\s+", " ", sentence).strip(" .")]
+    return []
+
+
+def route_sentences_without_script(body: str, script: str) -> list[str]:
+    script_key = normalize_route_key(script)
+    sentences: list[str] = []
+    for sentence in split_route_sentences(body):
+        cleaned_script = clean_route_script(sentence)
+        sentence_key = normalize_route_key(cleaned_script)
+        if sentence_key and (sentence_key in script_key or script_key in sentence_key):
+            continue
+        sentences.append(sentence)
+    return sentences
+
+
 def structure_route(route_text: str) -> StructuredRoute:
     route_label, route_name, body = strip_route_header(route_text)
     script = extract_route_script(body)
     access = extract_access_items(body)
-    intern_steps = extract_route_items(
-        body,
+    remaining_sentences = route_sentences_without_script(body, script)
+    intern_steps = unique_preserve_order(
         [
-            r"\btake down\b",
-            r"\bemail\b",
-            r"\bforward\b",
-            r"\bescalate\b",
-            r"\bshare\b",
-            r"\bdirect\b",
-            r"\bassist\b",
-            r"\bdo NOT\b",
-        ],
+            item
+            for sentence in remaining_sentences
+            for item in summarize_intern_step(sentence)
+        ]
     )
-    prepare = extract_route_items(body, [r"\bdocuments?\b", r"\brejection\b", r"\breasons?\b", r"\bfinancial\b", r"\bcharge details\b"])
-    caveats = extract_route_items(body, [r"third-party websites", r"not affiliated", r"Do NOT attempt to advise", r"not able to give legal advice"])
-    needs_to_know = extract_route_items(
-        body,
+    prepare = unique_preserve_order(
         [
-            r"\beligib",
-            r"\bnot managed\b",
-            r"\bnot needed\b",
-            r"\bnot likely\b",
-            r"\bunable to assist\b",
-            r"\bfirst\b",
-            r"\bfree\b",
-            r"\blow-income\b",
-            r"\brepresentation\b",
-            r"\bguidance\b",
-        ],
+            item
+            for sentence in remaining_sentences
+            for item in summarize_prepare_item(sentence)
+        ]
     )
+    caveats = unique_preserve_order(
+        [
+            sentence
+            for sentence in remaining_sentences
+            if re.search(r"third-party websites|not affiliated|Do NOT attempt to advise|not able to give legal advice", sentence, flags=re.IGNORECASE)
+        ]
+    )
+    needs_to_know = unique_preserve_order(
+        [
+            sentence
+            for sentence in remaining_sentences
+            if re.search(
+                r"\beligib|\bnot managed\b|\bnot needed\b|\bnot likely\b|\bunable to assist\b|\bfirst\b|\bfree\b|\blow-income\b|\brepresentation\b|\bguidance\b",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            and not re.search(r"\bapply\b|\bgo to\b|\btake down\b|\bemail\b|\bshare\b|\bdocuments? needed\b", sentence, flags=re.IGNORECASE)
+        ]
+    )
+    if route_label == "Route E" and "CLAS" in route_name:
+        prepare = unique_preserve_order(prepare + ["Financial documents for the means test", "Charge details and other case details if asked on application"])
+        intern_steps = unique_preserve_order(
+            intern_steps
+            + [
+                "Share the CLAS application link with the applicant",
+                "If the applicant cannot self-apply, direct them to the PBSG Counter",
+                "If there are difficulties going to PBSG, escalate to PBSG Staff",
+            ]
+        )
     return StructuredRoute(
         route_label=route_label,
         route_name=route_name,

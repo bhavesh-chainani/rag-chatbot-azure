@@ -289,3 +289,36 @@ def test_pbsg_terminal_route_cards_are_scannable(entry_id, question_id, branch_k
     )
     assert expected_text in content
     assert f'> **"{route_text}"**' not in content
+
+
+def test_clas_route_card_has_clean_script_and_no_duplicate_long_prose():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    transition = parse_transition_outcome(
+        entries,
+        "GEN3-T02",
+        "Q6",
+        "if_yes",
+        entries["GEN3-T02"]["branching_logic"]["Q6"]["if_yes"],
+    )
+
+    content = engine.render_transition(transition)
+
+    assert content is not None
+    assert "you is" not in content.lower()
+    assert "If you cannot self-apply" in content
+    assert "Website / application link: https://www.probono.sg/get-legal-help/legal-representation" in content
+    assert "Financial documents for the means test" in content
+    assert "Charge details and other case details if asked on application" in content
+    assert "Share the CLAS application link with the applicant" in content
+    assert "If the applicant cannot self-apply, direct them to the PBSG Counter" in content
+
+    tell_section = content.split("**Tell the applicant:**", 1)[1].split("**How to access this route:**", 1)[0]
+    assert "https://www.probono.sg" not in tell_section
+    assert "the PBSG Counter at the State Courts Help Centre with the required documents" in tell_section
+    assert len(tell_section) < 520
+    duplicated_source_sentence = (
+        "Inform applicant to apply for CLAS: https://www.probono.sg/get-legal-help/legal-representation. "
+        "If applicant is unable to self-apply, inform applicant to go to PBSG Counter"
+    )
+    assert duplicated_source_sentence not in content

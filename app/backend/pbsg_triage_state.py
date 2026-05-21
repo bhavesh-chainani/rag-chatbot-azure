@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,7 +104,7 @@ REPRESENTED_PATTERN = re.compile(
 )
 WORKFLOW_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b", flags=re.IGNORECASE)
 ROUTE_PATTERN = re.compile(r"\bRoute\s+([A-Z])\b", flags=re.IGNORECASE)
-DEFAULT_GOLDEN_SET_DIR = Path(__file__).resolve().parents[2] / "data" / "pbsg_golden_set_by_id"
+GOLDEN_SET_RELATIVE_DIR = Path("data") / "pbsg_golden_set_by_id"
 ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
 CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
 CLARIFICATION_QUESTION_PATTERN = re.compile(
@@ -119,6 +120,35 @@ TOPIC_SIGNAL_RULES = [
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
+
+
+def candidate_golden_set_dirs() -> list[Path]:
+    env_dir = os.getenv("PBSG_GOLDEN_SET_DIR")
+    module_path = Path(__file__).resolve()
+    candidates: list[Path] = []
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser())
+
+    candidates.extend(base / GOLDEN_SET_RELATIVE_DIR for base in (Path.cwd(), module_path.parent, *module_path.parents))
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve(strict=False)
+        if resolved not in seen:
+            seen.add(resolved)
+            deduped.append(candidate)
+    return deduped
+
+
+def resolve_default_golden_set_dir() -> Path:
+    for candidate in candidate_golden_set_dirs():
+        if candidate.exists():
+            return candidate
+    return Path(__file__).resolve().parent / GOLDEN_SET_RELATIVE_DIR
+
+
+DEFAULT_GOLDEN_SET_DIR = resolve_default_golden_set_dir()
 
 
 def message_content_to_text(content: Any) -> str:

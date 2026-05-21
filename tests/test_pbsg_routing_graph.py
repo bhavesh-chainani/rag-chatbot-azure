@@ -5,7 +5,15 @@ from typing import Any
 
 import pytest
 
-from pbsg_triage_state import PBSGRoutingEngine, branch_key_for_answer, label_from_branch_key, parse_transition_outcome
+from pbsg_triage_state import (
+    GOLDEN_SET_RELATIVE_DIR,
+    PBSGRoutingEngine,
+    branch_key_for_answer,
+    candidate_golden_set_dirs,
+    label_from_branch_key,
+    load_golden_set_entries,
+    parse_transition_outcome,
+)
 
 
 GOLDEN_SET_DIR = Path(__file__).resolve().parents[1] / "data" / "pbsg_golden_set_by_id"
@@ -19,6 +27,19 @@ def load_entries() -> dict[str, dict[str, Any]]:
         if isinstance(entry_id, str) and isinstance(entry.get("branching_logic"), dict):
             entries[entry_id] = entry
     return entries
+
+
+def test_default_golden_set_loader_resolves_repo_data():
+    entries = load_golden_set_entries()
+
+    assert {"GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06"}.issubset(entries)
+
+
+def test_golden_set_candidates_include_local_and_container_layouts():
+    candidates = {candidate.resolve(strict=False) for candidate in candidate_golden_set_dirs()}
+
+    assert (Path.cwd() / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
+    assert (Path(__file__).resolve().parents[1] / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
 
 
 def route_labels(entry: dict[str, Any]) -> set[str]:

@@ -232,6 +232,8 @@ def test_pbsg_routing_engine_renders_terminal_route_from_active_entry():
     assert "**Selected Entry:** GEN3-T02" in content
     assert "**Routing Recommendation:** Route A" in content
     assert "LASCO" in content
+    assert "**Tell the applicant:**" in content
+    assert f'> **"{entries["GEN3-T02"]["routing"][0]}"**' not in content
 
 
 def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
@@ -251,3 +253,39 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     assert "**Selected Entry:** GEN3-T04" in content
     assert "Handoff: GEN3-T02 → GEN3-T04" in content
     assert "Next question: Q1 from GEN3-T04" in content
+
+
+@pytest.mark.parametrize(
+    ("entry_id", "question_id", "branch_key", "expected_route", "expected_text"),
+    [
+        ("GEN3-T01", "Q2", "if_calling_on_behalf_and_able_to_self_help", "Route B", "Email: help@probono.sg"),
+        ("GEN3-T02", "Q6", "if_yes", "Route E", "Website / application link: https://www.probono.sg/get-legal-help/legal-representation"),
+        ("GEN3-T04", "Q4", "if_no_well_over_no_exceptions", "Route D", "third-party websites"),
+        ("GEN3-T04", "Q4", "if_not_sure", "Route C", "Take down"),
+    ],
+)
+def test_pbsg_terminal_route_cards_are_scannable(entry_id, question_id, branch_key, expected_route, expected_text):
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    transition = parse_transition_outcome(
+        entries,
+        entry_id,
+        question_id,
+        branch_key,
+        entries[entry_id]["branching_logic"][question_id][branch_key],
+    )
+
+    content = engine.render_transition(transition)
+    route_text = next(route for route in entries[entry_id]["routing"] if route.startswith(expected_route))
+
+    assert content is not None
+    assert f"**Routing Recommendation:** {expected_route}" in content
+    assert "**Why this route applies:**" in content
+    assert "**Tell the applicant:**" in content
+    assert (
+        "**What the applicant needs to know:**" in content
+        or "**How to access this route:**" in content
+        or "**Next steps for you (the intern):**" in content
+    )
+    assert expected_text in content
+    assert f'> **"{route_text}"**' not in content

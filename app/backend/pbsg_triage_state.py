@@ -79,6 +79,18 @@ class PBSGTurnClassification:
     affects_prior_answer: bool = False
 
 
+@dataclass
+class StructuredRoute:
+    route_label: str
+    route_name: str
+    script: str
+    needs_to_know: list[str] = field(default_factory=list)
+    access: list[str] = field(default_factory=list)
+    prepare: list[str] = field(default_factory=list)
+    intern_steps: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+
+
 ASK_MARKERS = [
     "Ask the applicant (read verbatim):",
     "Back to triage",
@@ -120,6 +132,14 @@ TOPIC_SIGNAL_RULES = [
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
+URL_PATTERN = re.compile(r"https?://[^\s|,)\"“”]+")
+EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", flags=re.IGNORECASE)
+PHONE_PATTERN = re.compile(r"\b(?:\d{4}\s?\d{4}|1800\s?\d{4}\s?\d{3}|65\d{6})\b")
+ADDRESS_PATTERN = re.compile(
+    r"\b(?:\d+\s+[A-Z][^.|]*?(?:Square|Road|Centre|Center|Courts|Singapore\s+\d{6})[^.|]*)",
+    flags=re.IGNORECASE,
+)
+HOURS_PATTERN = re.compile(r"\b(?:Mon|Mondays?|Fri|Fridays?|weekends?|PH|am|pm|appointment)[^.]*(?:\.|$)", flags=re.IGNORECASE)
 
 
 def candidate_golden_set_dirs() -> list[Path]:
@@ -724,6 +744,131 @@ def find_route_text(entry: dict[str, Any] | None, route_label: str | None) -> st
     return None
 
 
+def unique_preserve_order(items: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = re.sub(r"\s+", " ", item).strip(" .;")
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            unique.append(cleaned)
+    return unique
+
+
+def strip_route_header(route_text: str) -> tuple[str, str, str]:
+    match = re.match(r"(Route\s+[A-Z])\s*(?:\(([^)]*)\))?:\s*(.*)", route_text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return "Route", "", route_text
+    return match.group(1).title(), match.group(2) or "", match.group(3).strip()
+
+
+def split_route_sentences(text: str) -> list[str]:
+    protected = re.sub(r"(https?://\S+)", lambda match: match.group(1).replace(".", "<DOT>"), text)
+    sentences = re.split(r"(?<=[.!?])\s+", protected)
+    return [sentence.replace("<DOT>", ".").strip() for sentence in sentences if sentence.strip()]
+
+
+def clean_route_script(text: str) -> str:
+    text = re.sub(r"https?://\S+", "the relevant application page", text)
+    text = re.sub(r"\bInform the applicant that\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bInform applicant that\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bInform applicant to\s+", "Please ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bAdvise the applicant to\s+", "Please ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bAsk the applicant to\s+", "Please ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bthe applicant's\b", "your", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bthe applicant\b", "you", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bapplicant's\b", "your", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bapplicant\b", "you", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bPBSG can provide general information on schemes to you\b", "PBSG can provide general information on schemes", text)
+    return re.sub(r"\s+", " ", text).strip(" ;")
+
+
+def extract_route_script(body: str) -> str:
+    sentences = split_route_sentences(body)
+    script_candidates = [
+        sentence
+        for sentence in sentences
+        if re.search(
+            r"\b(Inform|Advise|Describe|Share about|Say to|Direct|Please|PBSG provides|You may be eligible|should contact)\b",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+    ]
+    if not script_candidates:
+        script_candidates = sentences[:2]
+    script = " ".join(clean_route_script(sentence) for sentence in script_candidates[:3])
+    if len(script) > 420:
+        script = script[:420].rsplit(" ", 1)[0].rstrip(",;") + "."
+    return script or "I need to check this with PBSG Staff before going further."
+
+
+def extract_access_items(body: str) -> list[str]:
+    items: list[str] = []
+    items.extend(f"Website / application link: {url}" for url in URL_PATTERN.findall(body))
+    items.extend(f"Email: {email}" for email in EMAIL_PATTERN.findall(body))
+    items.extend(f"Phone: {phone}" for phone in PHONE_PATTERN.findall(body))
+    items.extend(f"Address: {address}" for address in ADDRESS_PATTERN.findall(body))
+    items.extend(f"Opening hours / appointment instructions: {hours.strip()}" for hours in HOURS_PATTERN.findall(body))
+    return unique_preserve_order(items)
+
+
+def extract_route_items(body: str, patterns: list[str]) -> list[str]:
+    sentences = split_route_sentences(body)
+    return unique_preserve_order(
+        [
+            sentence
+            for sentence in sentences
+            if any(re.search(pattern, sentence, flags=re.IGNORECASE) for pattern in patterns)
+        ]
+    )
+
+
+def structure_route(route_text: str) -> StructuredRoute:
+    route_label, route_name, body = strip_route_header(route_text)
+    script = extract_route_script(body)
+    access = extract_access_items(body)
+    intern_steps = extract_route_items(
+        body,
+        [
+            r"\btake down\b",
+            r"\bemail\b",
+            r"\bforward\b",
+            r"\bescalate\b",
+            r"\bshare\b",
+            r"\bdirect\b",
+            r"\bassist\b",
+            r"\bdo NOT\b",
+        ],
+    )
+    prepare = extract_route_items(body, [r"\bdocuments?\b", r"\brejection\b", r"\breasons?\b", r"\bfinancial\b", r"\bcharge details\b"])
+    caveats = extract_route_items(body, [r"third-party websites", r"not affiliated", r"Do NOT attempt to advise", r"not able to give legal advice"])
+    needs_to_know = extract_route_items(
+        body,
+        [
+            r"\beligib",
+            r"\bnot managed\b",
+            r"\bnot needed\b",
+            r"\bnot likely\b",
+            r"\bunable to assist\b",
+            r"\bfirst\b",
+            r"\bfree\b",
+            r"\blow-income\b",
+            r"\brepresentation\b",
+            r"\bguidance\b",
+        ],
+    )
+    return StructuredRoute(
+        route_label=route_label,
+        route_name=route_name,
+        script=script,
+        needs_to_know=needs_to_know[:5],
+        access=access[:8],
+        prepare=prepare[:5],
+        intern_steps=intern_steps[:6],
+        caveats=caveats[:4],
+    )
+
+
 def extract_route_label(outcome: str) -> str | None:
     match = ROUTE_PATTERN.search(outcome)
     return f"Route {match.group(1).upper()}" if match else None
@@ -1102,6 +1247,7 @@ class PBSGRoutingEngine:
         route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
         if not transition.route_label or not route_text:
             return None
+        structured_route = structure_route(route_text)
         lines = self.render_header_and_answered_state(transition.entry_id, transition)
         lines.extend(
             [
@@ -1111,14 +1257,30 @@ class PBSGRoutingEngine:
                 f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
                 "- Next step: final routing recommendation",
                 "",
-                f"**Routing Recommendation:** {transition.route_label}",
+                f"**Routing Recommendation:** {structured_route.route_label}"
+                + (f" ({structured_route.route_name})" if structured_route.route_name else ""),
+                "",
+                "**Why this route applies:**",
+                "",
+                f"- {transition.question_id}: {label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
                 "",
                 "**Tell the applicant:**",
                 "",
-                f'> **"{route_text}"**',
+                f'> **"{structured_route.script}"**',
             ]
         )
+        self.extend_route_section(lines, "What the applicant needs to know:", structured_route.needs_to_know, transition.entry_id)
+        self.extend_route_section(lines, "How to access this route:", structured_route.access, transition.entry_id)
+        self.extend_route_section(lines, "What the applicant should prepare:", structured_route.prepare, transition.entry_id)
+        self.extend_route_section(lines, "Next steps for you (the intern):", structured_route.intern_steps, transition.entry_id)
+        self.extend_route_section(lines, "Important caveat:", structured_route.caveats, transition.entry_id)
         return "\n".join(lines)
+
+    def extend_route_section(self, lines: list[str], title: str, items: list[str], entry_id: str) -> None:
+        if not items:
+            return
+        lines.extend(["", f"**{title}**", ""])
+        lines.extend(f"- {item} [{entry_id}.json]" for item in items)
 
     def render_clarification(self, transition: PBSGTransition) -> str | None:
         clarification = transition.clarification_text or first_quoted_text(transition.outcome)

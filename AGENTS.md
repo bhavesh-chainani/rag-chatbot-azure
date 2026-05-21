@@ -100,6 +100,8 @@ Design principles:
 
 The four output formats (A/B/C/D) all preserve the `**Selected Entry:**` anchor and `Route <letter>` labels needed by the eval script (`evals/pbsg_golden_set_eval.py`).
 
+Terminal routing outputs are rendered as structured intern-facing route cards by the backend, not as one long quoted route paragraph. If the Golden Set data is enriched in future, prefer an optional `routing_structured` object per route with fields such as `route`, `name`, `script`, `needs_to_know`, `access`, `prepare`, `intern_steps`, and `caveats`. The renderer should prefer those structured fields when present and fall back to parsing the existing `routing` prose.
+
 ## Adding new data
 
 New files should be added to the `data` folder, and then either run scripts/prepdocs.sh or scripts/prepdocs.ps1 to ingest the data.

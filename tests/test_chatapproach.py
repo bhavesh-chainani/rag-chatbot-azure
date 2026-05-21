@@ -18,6 +18,14 @@ from approaches.approach import (
 )
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
+from pbsg_triage_state import (
+    PBSGTransition,
+    build_triage_state,
+    format_state_prompt,
+    normalize_simple_answer,
+    resolve_expected_transition,
+    validate_response_questions,
+)
 from prepdocslib.embeddings import ImageEmbeddings
 
 from .mocks import (
@@ -396,10 +404,709 @@ def test_build_quick_reply_returns_none_without_pending_question(chat_approach):
     extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
     content = """**Selected Entry:** GEN3-T01
 
-**Part C - Routing recommendation:** Route A
+**Routing Recommendation:** Route A
 """
 
     assert chat_approach.build_quick_reply(content, extra_info) is None
+
+
+def test_pbsg_triage_state_locks_followup_to_pending_question():
+    entry = {
+        "id": "GEN3-T03",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant a Singapore Citizen or PR?",
+                "if_yes": "Proceed to Q3",
+                "if_no_foreigner": "Proceed to Q4",
+                "if_not_sure": "Clarify nationality/residency status; if still unclear, Route F.",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+Triage progress:
+- Next question: Q2 (SGC/PR path) from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Are you a Singapore Citizen or PR?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T03": entry}, "No, foreigner")
+    prompt = format_state_prompt(state)
+
+    assert state.workflow_id == "GEN3-T03"
+    assert state.workflow_locked is True
+    assert state.pending_entry_id == "GEN3-T03"
+    assert state.current_question_id == "Q2"
+    assert state.allowed_branch_keys == ["if_yes", "if_no_foreigner", "if_not_sure"]
+    assert "Workflow locked: GEN3-T03" in prompt
+    assert "Pending question: GEN3-T03 Q2" in prompt
+    assert "if_no_foreigner" in prompt
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("yeah", "YES"),
+        ("correct", "YES"),
+        ("i do", "YES"),
+        ("nope", "NO"),
+        ("don't have", "NO"),
+        ("never", "NO"),
+        ("not sure", "UNCLEAR"),
+        ("I don't know yet", "UNCLEAR"),
+        ("my hearing is tomorrow", None),
+    ],
+)
+def test_normalize_simple_answer(answer, expected):
+    assert normalize_simple_answer(answer) == expected
+
+
+def test_pbsg_triage_state_enters_orchestration_without_locked_workflow():
+    state = build_triage_state(
+        messages=[],
+        entries={"GEN3-T01": {"id": "GEN3-T01", "branching_logic": {"Q1": {"question": "Represented?"}}}},
+        latest_user_query="Applicant needs help with a divorce and a criminal charge.",
+    )
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "ORCHESTRATION"
+    assert state.workflow_locked is False
+    assert "Mode: ORCHESTRATION" in prompt
+    assert "Workflow locked: false" in prompt
+
+
+def test_pbsg_triage_state_enters_fast_routing_with_simple_answer():
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant currently represented?",
+                "if_yes": "Route A",
+                "if_no": "Proceed to Q2",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you currently represented?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T01": entry}, "nope")
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "FAST_ROUTING"
+    assert state.latest_answer_classification == "NO"
+    assert state.allowed_transitions == ["if_yes", "if_no"]
+    assert "Mode: FAST_ROUTING" in prompt
+    assert "Latest answer classification: NO" in prompt
+    assert "execute the matching branch without filler" in prompt
+
+
+def test_pbsg_triage_state_enters_repair_for_nationality_contradiction():
+    entry = {
+        "id": "GEN3-T04",
+        "branching_logic": {
+            "Q4": {
+                "question": "Does the applicant meet the means criteria?",
+                "if_yes": "Route A",
+                "if_no": "Route D",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T04
+
+What I gathered from your description:
+- Q1: Singapore Citizen or PR -> Yes [GEN3-T04.json]
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "Do you meet the means criteria?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T04": entry}, "Actually I am a foreigner, not a PR.")
+    prompt = format_state_prompt(state)
+
+    assert state.mode == "REPAIR"
+    assert state.repair_required is True
+    assert "nationality/residency changed from SGC/PR to foreigner" in state.contradiction_signals
+    assert "Mode: REPAIR" in prompt
+    assert "Repair required: true" in prompt
+    assert "Invalidate downstream decisions" in prompt
+
+
+def test_pbsg_triage_state_enters_repair_for_representation_contradiction():
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant calling for self?",
+                "if_self": "Proceed to Q3",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+What I gathered from your description:
+- Q1: Currently represented -> No [GEN3-T01.json]
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Are you calling for yourself?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T01": entry}, "My lawyer is already handling this case.")
+
+    assert state.mode == "REPAIR"
+    assert state.repair_required is True
+    assert "representation status changed to existing lawyer" in state.contradiction_signals
+
+
+def test_pbsg_triage_state_tracks_queued_workflows_and_monitors():
+    entries = {
+        "GEN3-T01": {"id": "GEN3-T01", "branching_logic": {"Q1": {"question": "Represented?"}}},
+        "GEN3-T02": {"id": "GEN3-T02", "branching_logic": {"Q1": {"question": "Capital?"}}},
+        "GEN3-T03": {"id": "GEN3-T03", "branching_logic": {"Q1": {"question": "Violence or deadline?"}}},
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Topics identified:**
+1. GEN3-T01 (First Contact) — active workflow
+2. GEN3-T02 (Criminal Stream) — queued workflow
+3. GEN3-T03 (Matrimonial Stream) — queued workflow
+
+**Concurrent monitors:** urgency, vulnerability
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you currently represented?"**""",
+        }
+    ]
+
+    state = build_triage_state(
+        messages,
+        entries,
+        "The applicant has a court date next week, cannot afford food, and is also getting divorced.",
+    )
+    prompt = format_state_prompt(state)
+
+    assert state.active_workflow == "GEN3-T01"
+    assert state.queued_workflows == ["GEN3-T02", "GEN3-T03"]
+    assert "urgency" in state.concurrent_monitors
+    assert "safety" in state.concurrent_monitors
+    assert "Active workflow: GEN3-T01" in prompt
+    assert "Queued workflows: GEN3-T02, GEN3-T03" in prompt
+    assert "Only this workflow may ask the next primary question" in prompt
+    assert "They may interrupt only for urgency threshold, safety issue, or required escalation" in prompt
+
+
+def test_resolve_expected_transition_keeps_gen3_t02_q3_yes_local():
+    entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q3": {
+                "question": "Has the applicant been charged in court?",
+                "if_yes": "Proceed to Q4",
+                "if_no": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
+                "if_not_sure": "Route F (Escalate to PBSG Staff)",
+            }
+        },
+        "routing": ["Route F (Escalate to PBSG Staff): Take down details."],
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q3: "Have you been charged in court?"**""",
+        }
+    ]
+    state = build_triage_state(messages, {"GEN3-T02": entry}, "Yes")
+
+    transition = resolve_expected_transition({"GEN3-T02": entry}, state, "Yes")
+
+    assert transition == PBSGTransition(
+        entry_id="GEN3-T02",
+        question_id="Q3",
+        branch_key="if_yes",
+        outcome="Proceed to Q4",
+        transition_type="proceed_question",
+        target_entry_id="GEN3-T02",
+        target_question_id="Q4",
+    )
+
+
+def test_resolve_expected_transition_detects_gen3_t02_nested_urgent_route():
+    entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+                "if_no": "Proceed to Q3",
+            }
+        },
+        "routing": [
+            "Route D (CLAS + Urgent Concurrent): Proceed to GEN3-T06, following which, regardless of triage outcome of GEN3-T06, proceed to Q3 of GEN3-T02. Present both triaging outcomes to applicant."
+        ],
+    }
+    urgent_entry = {"id": "GEN3-T06", "branching_logic": {"Q1": {"question": "Immediate safety?"}}}
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Is there a court date/deadline within 14 days?"**""",
+        }
+    ]
+    entries = {"GEN3-T02": entry, "GEN3-T06": urgent_entry}
+    state = build_triage_state(messages, entries, "Yes")
+
+    transition = resolve_expected_transition(entries, state, "Yes")
+
+    assert transition is not None
+    assert transition.transition_type == "nested_stream"
+    assert transition.route_label == "Route D"
+    assert transition.target_entry_id == "GEN3-T06"
+    assert transition.target_question_id == "Q1"
+    assert transition.resume_entry_id == "GEN3-T02"
+    assert transition.resume_question_id == "Q3"
+
+
+def test_apply_triage_response_guard_repairs_gen3_t02_q3_yes_wrong_urgent_route(chat_approach):
+    criminal_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q3": {
+                "question": "Has the applicant been charged in court?",
+                "if_yes": "Proceed to Q4",
+                "if_no": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
+            },
+            "Q4": {
+                "question": "Is the applicant a Singapore Citizen or PR?",
+                "if_yes": "Proceed to Q5",
+                "if_no_foreigner": "Proceed to Q6",
+            },
+        },
+        "routing": [
+            "Route D (CLAS + Urgent Concurrent): Proceed to GEN3-T06, following which, regardless of triage outcome of GEN3-T06, proceed to Q3 of GEN3-T02."
+        ],
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {"Q1": {"question": "Is there an immediate threat to the applicant's safety?"}},
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(criminal_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        ),
+        deterministic_transition=PBSGTransition(
+            entry_id="GEN3-T02",
+            question_id="Q3",
+            branch_key="if_yes",
+            outcome="Proceed to Q4",
+            transition_type="proceed_question",
+            target_entry_id="GEN3-T02",
+            target_question_id="Q4",
+        ),
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)
+
+Next: GEN3-T06 Q1 — "Is there an immediate threat to your safety right now?"
+"""
+
+    guarded = chat_approach.apply_triage_response_guard(content, extra_info)
+
+    assert guarded is not None
+    assert "**Selected Entry:** GEN3-T02" in guarded
+    assert "Routing Recommendation" not in guarded
+    assert "Next question: Q4 from GEN3-T02" in guarded
+    assert '> **Q4: "Are you a Singapore Citizen or PR?"**' in guarded
+    assert "GEN3-T06" not in guarded
+
+
+def test_apply_triage_response_guard_accepts_expected_nested_gen3_t06_question(chat_approach):
+    criminal_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {"Q1": {"question": "Is there an immediate threat to the applicant's safety?"}},
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(criminal_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        ),
+        deterministic_transition=PBSGTransition(
+            entry_id="GEN3-T02",
+            question_id="Q2",
+            branch_key="if_yes",
+            outcome="Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+            transition_type="nested_stream",
+            target_entry_id="GEN3-T06",
+            target_question_id="Q1",
+            route_label="Route D",
+            nested_entry_id="GEN3-T06",
+            resume_entry_id="GEN3-T02",
+            resume_question_id="Q3",
+        ),
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q1: "Is there an immediate threat to your safety right now?"**"""
+
+    guarded = chat_approach.apply_triage_response_guard(content, extra_info)
+
+    assert guarded == content
+
+
+def test_validate_response_questions_allows_explicit_nested_entry_question():
+    entries = {
+        "GEN3-T02": {"id": "GEN3-T02", "branching_logic": {"Q2": {"question": "Deadline?"}}},
+        "GEN3-T06": {"id": "GEN3-T06", "branching_logic": {"Q1": {"question": "Immediate safety?"}}},
+    }
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q1: "Is there an immediate threat to your safety right now?"**"""
+
+    is_valid, reason = validate_response_questions(content, entries)
+
+    assert is_valid is True
+    assert reason is None
+
+
+def test_apply_triage_response_guard_escalates_invalid_question(chat_approach):
+    entry = {
+        "id": "GEN3-T04",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant a Singapore Citizen or PR?",
+                "if_yes": "Proceed to Q2",
+            }
+        },
+        "routing": [
+            "Route C (Escalate to PBSG Staff): Take down details and email PBSG Staff on the same day."
+        ],
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T04.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q5: "What type of matter is this?"**"""
+
+    guarded = chat_approach.apply_triage_response_guard(content, extra_info)
+
+    assert guarded is not None
+    assert "**Selected Entry:** GEN3-T04" in guarded
+    assert "Route C (Escalate to PBSG Staff)" in guarded
+    assert "generated transition could not be verified" in guarded
+    assert "Q5" not in guarded
+
+
+def test_validate_response_questions_rejects_multiple_primary_questions():
+    entries = {
+        "GEN3-T01": {
+            "id": "GEN3-T01",
+            "branching_logic": {
+                "Q1": {"question": "Represented?"},
+                "Q2": {"question": "Calling for self?"},
+            },
+        }
+    }
+    content = """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you represented?"**
+> **Q2: "Are you calling for yourself?"**"""
+
+    is_valid, reason = validate_response_questions(content, entries)
+
+    assert is_valid is False
+    assert reason == "response contains more than one primary triage question"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flow(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("locked deterministic flow should not call retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "No"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    assert result["session_state"] == "session-1"
+    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T02")
+    assert "Next question: Q2 from GEN3-T02" in result["message"]["content"]
+    assert "court date/deadline within 14 days" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
+    assert result["context"]["quick_reply"]["entryId"] == "GEN3-T02"
+    assert result["context"]["quick_reply"]["questionId"] == "Q2"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_locked_answer(
+    chat_approach, monkeypatch
+):
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {"classification": "branch", "branch_key": "if_no_foreigner", "confidence": 0.9}
+                                ),
+                            },
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("structured locked fallback should not run retrieval")
+
+    chat_approach.openai_client = FakeOpenAIClient()
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Is the applicant a Singapore Citizen or PR?"**""",
+        },
+        {"role": "user", "content": "She is here on a work permit."},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T03")
+    assert "Next question: Q4 from GEN3-T03" in result["message"]["content"]
+    assert "Singaporean child" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+
+
+def fake_openai_client_with_json(payload):
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(payload)},
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    return FakeOpenAIClient()
+
+
+def gen3_t04_q4_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "(Means) Is the applicant's Per Capita Household Income (PCHI) ≤ S$5,000, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_queues_new_topic_while_routing_active_answer(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("compound locked turn should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "answer_plus_new_topic",
+            "pending_answer": {"branch_key": "if_no_well_over_no_exceptions", "confidence": 0.92},
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.88}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("well over the threshold, no exceptions. also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Routing Recommendation:** Route D" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_preserves_pending_question_for_new_topic_only(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("new topic switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "new_topic_only",
+            "pending_answer": None,
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.9}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_preserves_pending_question_for_correction(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("correction switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "correction",
+            "pending_answer": None,
+            "new_topics": [],
+            "correction": {"affects_prior_answer": True, "reason": "means answer changed"},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("actually sorry I meant something else"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "I noted a correction" in result["message"]["content"]
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_answers_clarification_without_advancing(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clarification switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "clarification",
+            "pending_answer": None,
+            "new_topics": [],
+            "correction": {"affects_prior_answer": False, "reason": None},
+            "clarification_answer": "PCHI means total monthly household income divided by household members.",
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("what does PCHI mean?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "PCHI means total monthly household income" in result["message"]["content"]
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
 
 
 def test_create_chat_completion_uses_max_completion_tokens_for_gpt5_variants(chat_approach):

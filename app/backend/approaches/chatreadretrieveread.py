@@ -24,6 +24,12 @@ from approaches.approach import (
     ThoughtStep,
 )
 from approaches.promptmanager import PromptManager
+from pbsg_triage_state import (
+    build_triage_state,
+    format_state_prompt,
+    safe_escalation_response,
+    validate_response_questions,
+)
 from prepdocslib.blobmanager import AdlsBlobManager, BlobManager
 from prepdocslib.embeddings import ImageEmbeddings
 
@@ -332,6 +338,16 @@ class ChatReadRetrieveReadApproach(Approach):
         ]
         return QuickReply(mode="single", entryId=entry_id, questionId=question_id, options=options)
 
+    def apply_triage_response_guard(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
+        entries = self.extract_golden_set_entries(extra_info.data_points.text)
+        if not content or not entries:
+            return content
+
+        is_valid, reason = validate_response_questions(content, entries)
+        if is_valid:
+            return content
+        return safe_escalation_response(content, entries, reason or "unknown transition error")
+
     def get_search_query(self, chat_completion: ChatCompletion, default_query: str) -> str:
         """Read the optimized search query from a chat completion tool call."""
         try:
@@ -368,6 +384,7 @@ class ChatReadRetrieveReadApproach(Approach):
             content, followup_questions = self.extract_followup_questions(content)
             extra_info.followup_questions = followup_questions
         content = self.normalize_asked_question_text(content, extra_info)
+        content = self.apply_triage_response_guard(content, extra_info)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
         # TODO: Update for agentic? This isn't still true?
@@ -413,6 +430,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 content, followup_questions = self.extract_followup_questions(content)
                 extra_info.followup_questions = followup_questions
             content = self.normalize_asked_question_text(content, extra_info)
+            content = self.apply_triage_response_guard(content, extra_info)
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
             if self.include_token_usage and extra_info.thoughts and chat_result.usage:
@@ -480,6 +498,7 @@ class ChatReadRetrieveReadApproach(Approach):
             }
         if streamed_content:
             streamed_content = self.normalize_asked_question_text(streamed_content, extra_info) or streamed_content
+            streamed_content = self.apply_triage_response_guard(streamed_content, extra_info) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
             yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
 
@@ -549,14 +568,24 @@ class ChatReadRetrieveReadApproach(Approach):
 
             return (extra_info, return_answer())
 
+        golden_set_entries = self.extract_golden_set_entries(extra_info.data_points.text)
+        triage_state_prompt = ""
+        if isinstance(original_user_query, str) and golden_set_entries:
+            triage_state = build_triage_state(messages[:-1], golden_set_entries, original_user_query)
+            triage_state_prompt = format_state_prompt(triage_state)
+
+        system_template_variables = self.get_system_prompt_variables(overrides.get("prompt_template"))
+        system_template_variables.setdefault("injected_prompt", "")
+        system_template_variables = system_template_variables | {
+            "include_follow_up_questions": bool(overrides.get("suggest_followup_questions")),
+            "image_sources": extra_info.data_points.images,
+            "citations": extra_info.data_points.citations,
+            "routing_state_prompt": triage_state_prompt,
+        }
+
         messages = self.prompt_manager.build_conversation(
             system_template_path="chat_answer.system.jinja2",
-            system_template_variables=self.get_system_prompt_variables(overrides.get("prompt_template"))
-            | {
-                "include_follow_up_questions": bool(overrides.get("suggest_followup_questions")),
-                "image_sources": extra_info.data_points.images,
-                "citations": extra_info.data_points.citations,
-            },
+            system_template_variables=system_template_variables,
             user_template_path="chat_answer.user.jinja2",
             user_template_variables={
                 "user_query": original_user_query,

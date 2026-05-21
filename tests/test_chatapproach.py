@@ -18,6 +18,7 @@ from approaches.approach import (
 )
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
+from pbsg_triage_state import build_triage_state, format_state_prompt, validate_response_questions
 from prepdocslib.embeddings import ImageEmbeddings
 
 from .mocks import (
@@ -400,6 +401,114 @@ def test_build_quick_reply_returns_none_without_pending_question(chat_approach):
 """
 
     assert chat_approach.build_quick_reply(content, extra_info) is None
+
+
+def test_pbsg_triage_state_locks_followup_to_pending_question():
+    entry = {
+        "id": "GEN3-T03",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant a Singapore Citizen or PR?",
+                "if_yes": "Proceed to Q3",
+                "if_no_foreigner": "Proceed to Q4",
+                "if_not_sure": "Clarify nationality/residency status; if still unclear, Route F.",
+            }
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+Triage progress:
+- Next question: Q2 (SGC/PR path) from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Are you a Singapore Citizen or PR?"**""",
+        }
+    ]
+
+    state = build_triage_state(messages, {"GEN3-T03": entry}, "No, foreigner")
+    prompt = format_state_prompt(state)
+
+    assert state.workflow_id == "GEN3-T03"
+    assert state.workflow_locked is True
+    assert state.pending_entry_id == "GEN3-T03"
+    assert state.current_question_id == "Q2"
+    assert state.allowed_branch_keys == ["if_yes", "if_no_foreigner", "if_not_sure"]
+    assert "Workflow locked: GEN3-T03" in prompt
+    assert "Pending question: GEN3-T03 Q2" in prompt
+    assert "if_no_foreigner" in prompt
+
+
+def test_validate_response_questions_allows_explicit_nested_entry_question():
+    entries = {
+        "GEN3-T02": {"id": "GEN3-T02", "branching_logic": {"Q2": {"question": "Deadline?"}}},
+        "GEN3-T06": {"id": "GEN3-T06", "branching_logic": {"Q1": {"question": "Immediate safety?"}}},
+    }
+    content = """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q1: "Is there an immediate threat to your safety right now?"**"""
+
+    is_valid, reason = validate_response_questions(content, entries)
+
+    assert is_valid is True
+    assert reason is None
+
+
+def test_apply_triage_response_guard_escalates_invalid_question(chat_approach):
+    entry = {
+        "id": "GEN3-T04",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is the applicant a Singapore Citizen or PR?",
+                "if_yes": "Proceed to Q2",
+            }
+        },
+        "routing": [
+            "Route C (Escalate to PBSG Staff): Take down details and email PBSG Staff on the same day."
+        ],
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T04.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q5: "What type of matter is this?"**"""
+
+    guarded = chat_approach.apply_triage_response_guard(content, extra_info)
+
+    assert guarded is not None
+    assert "**Selected Entry:** GEN3-T04" in guarded
+    assert "Route C (Escalate to PBSG Staff)" in guarded
+    assert "generated transition could not be verified" in guarded
+    assert "Q5" not in guarded
+
+
+def test_validate_response_questions_rejects_multiple_primary_questions():
+    entries = {
+        "GEN3-T01": {
+            "id": "GEN3-T01",
+            "branching_logic": {
+                "Q1": {"question": "Represented?"},
+                "Q2": {"question": "Calling for self?"},
+            },
+        }
+    }
+    content = """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you represented?"**
+> **Q2: "Are you calling for yourself?"**"""
+
+    is_valid, reason = validate_response_questions(content, entries)
+
+    assert is_valid is False
+    assert reason == "response contains more than one primary triage question"
 
 
 def test_create_chat_completion_uses_max_completion_tokens_for_gpt5_variants(chat_approach):

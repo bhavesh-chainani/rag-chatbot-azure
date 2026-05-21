@@ -109,6 +109,25 @@ class TestSystemPromptClarificationOutput:
         assert "OUTPUT E" in content
         assert "Clarification" in content
 
+    def test_system_prompt_contains_deterministic_phase_contract(self):
+        rendered = self.prompt_manager.build_system_prompt(
+            "chat_answer.system.jinja2",
+            {
+                "override_prompt": None,
+                "include_follow_up_questions": False,
+                "image_sources": None,
+                "citations": ["GEN3-T01.json"],
+                "injected_prompt": "",
+            },
+        )
+        content = rendered["content"]
+        assert "TWO-PHASE EXECUTION MODEL" in content
+        assert "PHASE 1 — Workflow identification" in content
+        assert "PHASE 2 — Deterministic workflow execution" in content
+        assert "MANDATORY INTERNAL CHECK BEFORE EVERY RESPONSE" in content
+        assert "do not display this as JSON" in content
+        assert "If any check fails, stop and escalate rather than guessing" in content
+
     def test_system_prompt_output_e_instructions(self):
         rendered = self.prompt_manager.build_system_prompt(
             "chat_answer.system.jinja2",

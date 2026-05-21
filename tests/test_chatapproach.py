@@ -277,6 +277,52 @@ def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
     assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
 
 
+def test_build_quick_reply_works_for_structured_nested_urgent_card(chat_approach):
+    parent_entry = {
+        "id": "GEN3-T02",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is there a court date/deadline within 14 days?",
+                "if_yes": "Route D (CLAS + Urgent concurrent — cross-reference GEN3-T06)",
+            }
+        },
+    }
+    urgent_entry = {
+        "id": "GEN3-T06",
+        "branching_logic": {
+            "Q1": {
+                "question": "Is there an immediate threat to life or safety right now?",
+                "if_yes": "Route A (Emergency Services)",
+                "if_no": "Proceed to Q2",
+                "if_not_sure": "Route A as a precaution",
+            }
+        },
+    }
+    extra_info = ExtraInfo(
+        data_points=DataPoints(
+            text=[
+                f"GEN3-T02.json: {json.dumps(parent_entry)}",
+                f"GEN3-T06.json: {json.dumps(urgent_entry)}",
+            ]
+        )
+    )
+    content = """**Selected Entry:** GEN3-T02
+
+**Active stream:** GEN3-T06 urgent concurrent path
+
+**Ask the applicant (read verbatim):**
+
+**GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"**
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert quick_reply.entryId == "GEN3-T06"
+    assert quick_reply.questionId == "Q1"
+    assert [option.label for option in quick_reply.options] == ["Yes", "No", "Not sure"]
+
+
 def test_normalize_asked_question_text_uses_selected_entry_question(chat_approach):
     criminal_entry = {
         "id": "GEN3-T02",
@@ -1543,3 +1589,155 @@ async def test_run_until_final_call_rejects_web_streaming(chat_approach):
             auth_claims={},
             should_stream=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_run_with_streaming_uses_deterministic_fast_path_for_locked_flow(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("locked deterministic flow should not call retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "No"},
+    ]
+
+    events = []
+    async for event in chat_approach.run_with_streaming(messages, {}, {}, session_state="session-1"):
+        events.append(event)
+
+    assert events[0]["session_state"] == "session-1"
+    assert events[1]["delta"]["content"].startswith("**Selected Entry:** GEN3-T02")
+    assert "Next question: Q2 from GEN3-T02" in events[1]["delta"]["content"]
+    assert events[2]["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
+
+
+def fake_openai_client_with_json(payload):
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(payload)},
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    return FakeOpenAIClient()
+
+
+def gen3_t04_q4_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "(Means) Is the applicant's Per Capita Household Income (PCHI) ≤ S$5,000, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_queues_new_topic_while_routing_active_answer(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("compound locked turn should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "answer_plus_new_topic",
+            "pending_answer": {"branch_key": "if_no_well_over_no_exceptions", "confidence": 0.92},
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.88}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("well over the threshold, no exceptions. also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Routing Recommendation:** Route D" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_preserves_pending_question_for_new_topic_only(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("new topic switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "new_topic_only",
+            "pending_answer": None,
+            "new_topics": [{"entry_id": "GEN3-T02", "evidence": "criminal", "confidence": 0.9}],
+            "correction": {"affects_prior_answer": False, "reason": None},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("also the foreigner has a criminal issue"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+    assert "Queued topic note" in result["message"]["content"]
+    assert "GEN3-T02" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+
+
+@pytest.mark.asyncio
+async def test_structured_switch_answers_clarification_without_advancing(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clarification switch should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "turn_type": "clarification",
+            "pending_answer": None,
+            "new_topics": [],
+            "correction": {"affects_prior_answer": False, "reason": None},
+            "clarification_answer": "PCHI means total monthly household income divided by household members.",
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("what does PCHI mean?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "PCHI means total monthly household income" in result["message"]["content"]
+    assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]

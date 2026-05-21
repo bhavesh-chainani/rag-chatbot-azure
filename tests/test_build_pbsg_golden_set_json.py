@@ -124,3 +124,33 @@ Guardrails
     flat = json.dumps(bl, ensure_ascii=False)
     assert "see Part C routing" in flat
     assert "Q2" in bl and "Second" in bl["Q2"]["question"]
+
+
+def test_builder_preserves_existing_routing_structured(pbsg_build, tmp_path, monkeypatch):
+    output_dir = tmp_path / "pbsg_golden_set_by_id"
+    output_dir.mkdir()
+    (output_dir / "GEN3-T99.json").write_text(
+        json.dumps(
+            {
+                "id": "GEN3-T99",
+                "routing_structured": {
+                    "Route A": {
+                        "name": "Structured",
+                        "script": "Exact structured script.",
+                        "needs_to_know": [],
+                        "access": [],
+                        "prepare": [],
+                        "intern_steps": [],
+                        "caveats": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pbsg_build, "OUTPUT_DIR", output_dir)
+
+    preserved = pbsg_build.load_existing_routing_structured()
+    entries = pbsg_build.preserve_routing_structured([{"id": "GEN3-T99", "routing": ["Route A (X): Source."]}], preserved)
+
+    assert entries[0]["routing_structured"]["Route A"]["script"] == "Exact structured script."

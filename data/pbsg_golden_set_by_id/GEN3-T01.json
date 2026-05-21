@@ -69,5 +69,180 @@
     "Route H (Matrimonial Stream) → Proceed to GEN3-T03 (Matrimonial Stream Triage).",
     "Route I (Civil Stream) → Proceed to GEN3-T04 (Civil Stream Triage)."
   ],
+  "routing_structured": {
+    "Route A": {
+      "name": "Already Represented — Reject",
+      "script": "PBSG is unable to assist through its schemes while you are currently represented by a lawyer on the same matter. Please contact your own lawyer first, because they are already familiar with your matter and are best placed to help you. If you cannot contact your lawyer, or you no longer wish to be represented by that lawyer, I can note the reason and ask PBSG Staff to assess whether any exception or alternative pathway may apply.",
+      "needs_to_know": [
+        "One of PBSG's eligibility criteria is that the applicant must not be currently legally represented on the same matter.",
+        "PBSG Staff will assess whether any exception or alternative pathway applies only if the applicant cannot continue with the current lawyer."
+      ],
+      "access": [],
+      "prepare": [
+        "Current lawyer or law firm name, if known",
+        "Reason the applicant cannot continue with the current lawyer"
+      ],
+      "intern_steps": [
+        "Ask for the reason only if the applicant says they cannot contact their lawyer, the lawyer is unresponsive, or they no longer wish to be represented by that lawyer.",
+        "Note the reason verbatim.",
+        "Forward the applicant's name, contact details, matter type, current lawyer or firm if known, and the reason provided to PBSG Staff."
+      ],
+      "caveats": [
+        "Do not advise the applicant on whether to discharge or change lawyers."
+      ]
+    },
+    "Route B": {
+      "name": "Refer Person to Contact PBSG Directly",
+      "script": "The person who needs legal help should contact PBSG directly. PBSG can provide general information on schemes, but the application must be submitted by the person who needs legal help.",
+      "needs_to_know": [
+        "PBSG can provide general information on schemes to the caller.",
+        "The application must be submitted by the person who needs legal help."
+      ],
+      "access": [
+        "Phone: 6536 0650",
+        "Email: help@probono.sg",
+        "Opening hours / appointment instructions: Mon-Fri, 10am-1pm and 2pm-4pm, excluding weekends and public holidays"
+      ],
+      "prepare": [],
+      "intern_steps": [
+        "Give the caller the PBSG hotline number and email address.",
+        "Explain that the person who needs legal help should contact PBSG directly."
+      ],
+      "caveats": []
+    },
+    "Route C": {
+      "name": "Non-Profit Legal Services",
+      "script": "PBSG provides corporate legal assistance to eligible non-profits, charities, social enterprises, and individuals looking to incorporate one of these organisations. Please email PBSG's Non-Profit Legal Services team with your request. If you cannot email, I can collect the key details for follow-up.",
+      "needs_to_know": [
+        "This route is for eligible non-profits, charities, social enterprises, and people looking to incorporate one of these organisations."
+      ],
+      "access": [
+        "Email: nls@probono.sg"
+      ],
+      "prepare": [
+        "Organisation name",
+        "Applicant name and phone number",
+        "Brief description of the matter"
+      ],
+      "intern_steps": [
+        "Ask the applicant to email nls@probono.sg with their request.",
+        "If the applicant cannot email, take down the organisation name, applicant name, phone number, and brief matter description.",
+        "Forward the details to the PBSG Non-Profit Legal Services team for follow-up."
+      ],
+      "caveats": []
+    },
+    "Route D": {
+      "name": "Reject — Business/Commercial Matter",
+      "script": "PBSG schemes are for individuals seeking help with personal legal issues. Based on what you have shared, this appears to be a for-profit business or commercial matter, so PBSG is not able to assist through its schemes. I can share general lawyer directories and self-help resources that may help you find other support.",
+      "needs_to_know": [
+        "PBSG schemes are for individuals in their personal capacity, not for-profit business disputes."
+      ],
+      "access": [
+        "Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee",
+        "Law Society of Singapore — directory of lawyers",
+        "Legal Services Regulatory Authority e-Services — search for lawyers by practice area"
+      ],
+      "prepare": [],
+      "intern_steps": [
+        "Share general lawyer directories and relevant case-type resources where appropriate.",
+        "Do not advise on the commercial dispute or apply the law to the facts."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
+    "Route E": {
+      "name": "Reject for Guidance — Prior Advice Received",
+      "script": "PBSG Legal Clinics provide initial guidance. Since you have already received legal advice on this same matter, another clinic consultation is not likely to add value. You should go back to the lawyer who gave the earlier advice, or consider engaging private counsel if you want a second opinion. If there are barriers, such as not understanding the earlier advice or not being able to afford private counsel, I can take that down for PBSG Staff to review.",
+      "needs_to_know": [
+        "PBSG prioritises individuals who have not yet had the opportunity to receive legal help.",
+        "Escalation may be appropriate if the applicant did not understand the earlier advice or faces financial hardship."
+      ],
+      "access": [
+        "SupportGoWhere — social and financial assistance",
+        "PBSG YouTube channel — webinars on common legal issues",
+        "Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee",
+        "Law Society of Singapore — directory of lawyers",
+        "Legal Services Regulatory Authority e-Services — search for lawyers by practice area"
+      ],
+      "prepare": [
+        "Details of the earlier legal advice",
+        "Any barriers to returning to the earlier lawyer or engaging private counsel"
+      ],
+      "intern_steps": [
+        "If the applicant raises barriers, record the barrier clearly and escalate to PBSG Staff.",
+        "Share general resources if no escalation factor is raised."
+      ],
+      "caveats": [
+        "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
+      ]
+    },
+    "Route F": {
+      "name": "Escalate to PBSG Staff",
+      "script": "I need to check this with PBSG Staff before going further. Let me collect your details and have PBSG Staff follow up.",
+      "needs_to_know": [
+        "PBSG Staff will call back within 1-2 working days."
+      ],
+      "access": [],
+      "prepare": [
+        "Brief matter description",
+        "Any urgency or vulnerability factors"
+      ],
+      "intern_steps": [
+        "Take down the applicant's full name, contact number, email if any, and brief matter description.",
+        "Include answers to Q1-Q5 and any urgency or vulnerability factors noted.",
+        "Email the information to PBSG Staff on the same day.",
+        "Do not attempt to advise further."
+      ],
+      "caveats": [
+        "Do not give legal advice or assess merits yourself."
+      ]
+    },
+    "Route G": {
+      "name": "Criminal Stream",
+      "script": "Your matter sounds like it falls under the criminal stream. I will ask a few criminal legal aid questions next so we can identify the right pathway.",
+      "needs_to_know": [
+        "Criminal matters continue under GEN3-T02."
+      ],
+      "access": [],
+      "prepare": [
+        "Charge details, court dates, and any urgent deadlines if known"
+      ],
+      "intern_steps": [
+        "Proceed to GEN3-T02 Q1."
+      ],
+      "caveats": []
+    },
+    "Route H": {
+      "name": "Matrimonial Stream",
+      "script": "Your matter sounds like it falls under the matrimonial or family stream. I will ask a few family legal aid questions next so we can identify the right pathway.",
+      "needs_to_know": [
+        "Matrimonial and family matters continue under GEN3-T03."
+      ],
+      "access": [],
+      "prepare": [
+        "Family court details, children details, deadlines, and any safety concerns if known"
+      ],
+      "intern_steps": [
+        "Proceed to GEN3-T03 Q1."
+      ],
+      "caveats": []
+    },
+    "Route I": {
+      "name": "Civil Stream",
+      "script": "Your matter sounds like it falls under the civil or general legal guidance stream. I will ask a few questions next to see whether LAB, a PBSG Legal Clinic, or another pathway may be appropriate.",
+      "needs_to_know": [
+        "Civil and general guidance matters continue under GEN3-T04."
+      ],
+      "access": [],
+      "prepare": [
+        "Brief description of the civil issue and whether representation or guidance is needed"
+      ],
+      "intern_steps": [
+        "Proceed to GEN3-T04 Q1."
+      ],
+      "caveats": []
+    }
+  },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; and (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: \"I'm an intern/volunteer and I'm not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.\" • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

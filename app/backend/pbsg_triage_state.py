@@ -1,0 +1,1159 @@
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from openai.types.chat import ChatCompletionMessageParam
+
+
+@dataclass
+class PBSGTriageQuestionTarget:
+    entry_id: str | None
+    question_id: str
+
+
+@dataclass
+class PBSGTriageState:
+    mode: str = "ORCHESTRATION"
+    workflow_id: str | None = None
+    workflow_locked: bool = False
+    active_workflow: str | None = None
+    queued_workflows: list[str] = field(default_factory=list)
+    completed_workflows: list[str] = field(default_factory=list)
+    concurrent_monitors: list[str] = field(default_factory=list)
+    current_question_id: str | None = None
+    pending_entry_id: str | None = None
+    previous_states: list[str] = field(default_factory=list)
+    answered_lines: list[str] = field(default_factory=list)
+    allowed_branch_keys: list[str] = field(default_factory=list)
+    allowed_transitions: list[str] = field(default_factory=list)
+    latest_answer_classification: str | None = None
+    contradiction_signals: list[str] = field(default_factory=list)
+    active_monitors: dict[str, bool] = field(
+        default_factory=lambda: {"urgent": False, "vulnerable": False, "representation": False}
+    )
+    repair_required: bool = False
+    escalation_required: bool = False
+
+
+@dataclass
+class PBSGTransition:
+    entry_id: str
+    question_id: str
+    branch_key: str
+    outcome: str
+    transition_type: str
+    target_entry_id: str | None = None
+    target_question_id: str | None = None
+    route_label: str | None = None
+    nested_entry_id: str | None = None
+    resume_entry_id: str | None = None
+    resume_question_id: str | None = None
+    clarification_text: str | None = None
+
+
+@dataclass
+class PBSGDeterministicResult:
+    content: str
+    state: PBSGTriageState
+    transition: PBSGTransition
+    entries: dict[str, dict[str, Any]]
+
+
+@dataclass
+class PBSGQueuedTopic:
+    entry_id: str
+    evidence: str
+    confidence: float
+
+
+@dataclass
+class PBSGTurnClassification:
+    turn_type: str
+    should_call_llm: bool
+    reason: str | None = None
+    pending_branch_key: str | None = None
+    pending_answer_confidence: float | None = None
+    new_topics: list[PBSGQueuedTopic] = field(default_factory=list)
+    affects_prior_answer: bool = False
+
+
+ASK_MARKERS = [
+    "Ask the applicant (read verbatim):",
+    "Back to triage",
+]
+
+URGENT_PATTERN = re.compile(
+    r"\b("
+    r"court|deadline|within 14 days|tomorrow|next week|arrest|custody|detention|bail|deport|"
+    r"homeless|evict|violence|safe|safety|self[- ]?harm|suicid|no food|no money"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+VULNERABLE_PATTERN = re.compile(
+    r"\b("
+    r"elderly|minor|under 18|disabled|disability|abuse|domestic violence|language barrier|"
+    r"interpreter|mental distress|social worker|fsc|financial hardship"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+REPRESENTED_PATTERN = re.compile(
+    r"\b(represented|lawyer|solicitor|counsel|legal advice|filed documents)\b",
+    flags=re.IGNORECASE,
+)
+WORKFLOW_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b", flags=re.IGNORECASE)
+ROUTE_PATTERN = re.compile(r"\bRoute\s+([A-Z])\b", flags=re.IGNORECASE)
+GOLDEN_SET_RELATIVE_DIR = Path("data") / "pbsg_golden_set_by_id"
+ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
+CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
+CLARIFICATION_QUESTION_PATTERN = re.compile(
+    r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
+)
+SAFETY_INTERRUPT_PATTERN = re.compile(
+    r"\b(danger|violence|self[- ]?harm|homeless|court tomorrow|deadline|immediate threat)\b", flags=re.IGNORECASE
+)
+TOPIC_SIGNAL_RULES = [
+    ("GEN3-T02", re.compile(r"\b(criminal|charged|charge|police|arrest|offence|offense)\b", flags=re.IGNORECASE)),
+    ("GEN3-T03", re.compile(r"\b(divorce|custody|maintenance|matrimonial|family violence|ppo)\b", flags=re.IGNORECASE)),
+    ("GEN3-T04", re.compile(r"\b(employment|landlord|tenant|contract|estate|probate|civil|debt)\b", flags=re.IGNORECASE)),
+    ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
+    ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
+]
+
+
+def candidate_golden_set_dirs() -> list[Path]:
+    env_dir = os.getenv("PBSG_GOLDEN_SET_DIR")
+    module_path = Path(__file__).resolve()
+    candidates: list[Path] = []
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser())
+
+    candidates.extend(base / GOLDEN_SET_RELATIVE_DIR for base in (Path.cwd(), module_path.parent, *module_path.parents))
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve(strict=False)
+        if resolved not in seen:
+            seen.add(resolved)
+            deduped.append(candidate)
+    return deduped
+
+
+def resolve_default_golden_set_dir() -> Path:
+    for candidate in candidate_golden_set_dirs():
+        if candidate.exists():
+            return candidate
+    return Path(__file__).resolve().parent / GOLDEN_SET_RELATIVE_DIR
+
+
+DEFAULT_GOLDEN_SET_DIR = resolve_default_golden_set_dir()
+
+
+def message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
+def load_golden_set_entries(directory: Path | None = None) -> dict[str, dict[str, Any]]:
+    import json
+
+    entries: dict[str, dict[str, Any]] = {}
+    golden_set_dir = directory or DEFAULT_GOLDEN_SET_DIR
+    if not golden_set_dir.exists():
+        return entries
+    for path in sorted(golden_set_dir.glob("*.json")):
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        entry_id = entry.get("id")
+        if isinstance(entry_id, str) and isinstance(entry.get("branching_logic"), dict):
+            entries[entry_id] = entry
+    return entries
+
+
+def latest_assistant_content(messages: list[ChatCompletionMessageParam]) -> str | None:
+    for message in reversed(messages):
+        if message.get("role") == "assistant":
+            content = message_content_to_text(message.get("content"))
+            if content:
+                return content
+    return None
+
+
+def extract_selected_entry_id(content: str | None) -> str | None:
+    if not content:
+        return None
+    matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
+    return matches[-1] if matches else None
+
+
+def question_region(content: str | None) -> str:
+    if not content:
+        return ""
+    marker_positions = [content.rfind(marker) for marker in ASK_MARKERS]
+    marker_position = max(marker_positions)
+    return content[marker_position:] if marker_position >= 0 else ""
+
+
+def extract_question_targets(content: str | None) -> list[PBSGTriageQuestionTarget]:
+    region = question_region(content)
+    if not region:
+        return []
+
+    matches = re.findall(r"(?:(GEN3-[A-Z0-9-]+)\s+)?(Q\d+[A-Z]?)\s*:", region, flags=re.IGNORECASE)
+    if not matches:
+        matches = re.findall(r"(?:(GEN3-[A-Z0-9-]+)\s+)?(Q\d+[A-Z]?)\b", region, flags=re.IGNORECASE)
+    return [PBSGTriageQuestionTarget(entry_id or None, question_id.upper()) for entry_id, question_id in matches]
+
+
+def extract_answered_lines(content: str | None) -> list[str]:
+    if not content:
+        return []
+    lines: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if re.match(r"^[-*]?\s*(?:GEN3-[A-Z0-9-]+\s+)?Q\d+[A-Z]?\b", stripped, flags=re.IGNORECASE):
+            lines.append(stripped)
+        elif stripped.startswith("- Last answered:") or stripped.startswith("- Carried over:"):
+            lines.append(stripped)
+    return lines[-8:]
+
+
+def extract_topic_workflows(content: str | None) -> list[str]:
+    if not content or "Topics identified:" not in content:
+        return []
+    topics_region = content.split("Topics identified:", 1)[1]
+    topics_region = re.split(r"\n\s*(?:Then immediately|What I gathered|Triage progress|\*\*Ask)", topics_region, 1)[0]
+    workflows: list[str] = []
+    for match in WORKFLOW_ID_PATTERN.findall(topics_region):
+        workflow_id = match.upper()
+        if workflow_id not in workflows:
+            workflows.append(workflow_id)
+    return workflows
+
+
+def extract_completed_workflows(content: str | None) -> list[str]:
+    if not content:
+        return []
+    completed: list[str] = []
+    for match in re.findall(r"\*\*✓\s*(GEN3-[A-Z0-9-]+)\s+routed\.\*\*", content, flags=re.IGNORECASE):
+        workflow_id = match.upper()
+        if workflow_id not in completed:
+            completed.append(workflow_id)
+    return completed
+
+
+def allowed_branch_keys(entries: dict[str, dict[str, Any]], entry_id: str | None, question_id: str | None) -> list[str]:
+    if not entry_id or not question_id:
+        return []
+    entry = entries.get(entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+    if not isinstance(question_node, dict):
+        return []
+    return [key for key in question_node if key.startswith("if_")]
+
+
+def normalize_simple_answer(text: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9\s']", " ", text.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return None
+
+    yes_phrases = {
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "correct",
+        "that's right",
+        "that is right",
+        "i do",
+        "i have one",
+        "i am",
+        "he does",
+        "she does",
+        "they do",
+    }
+    no_phrases = {
+        "no",
+        "nope",
+        "nah",
+        "not really",
+        "don't have",
+        "do not have",
+        "never",
+        "i don't",
+        "i do not",
+        "none",
+    }
+    unclear_phrases = {
+        "not sure",
+        "unsure",
+        "don't know",
+        "do not know",
+        "i don't know",
+        "i do not know",
+        "unknown",
+        "maybe",
+    }
+
+    if normalized in yes_phrases:
+        return "YES"
+    if normalized in no_phrases:
+        return "NO"
+    if normalized in unclear_phrases:
+        return "UNCLEAR"
+    if any(phrase in normalized for phrase in unclear_phrases):
+        return "UNCLEAR"
+    return None
+
+
+def normalize_branch_label(text: str) -> str:
+    normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def label_from_branch_key(branch_key: str) -> str:
+    labels = {
+        "yes": "Yes",
+        "no": "No",
+        "not_sure": "Not sure",
+        "not_sure_or_both": "Not sure or both",
+        "no_foreigner": "No, foreigner",
+        "criminal": "Criminal",
+        "matrimonial": "Matrimonial",
+        "civil_or_others": "Civil or others",
+        "guidance": "Guidance",
+        "representation": "Representation",
+        "yes_and_nonprofit": "Yes, nonprofit",
+        "yes_and_for_profit": "Yes, for-profit business",
+        "calling_on_behalf_and_able_to_self_help": "Calling on behalf, can self-help",
+        "self_or_calling_on_behalf_and_unable_to_self_help": "Self, or cannot self-help",
+        "yes_passed_or_processing": "Yes, passed or processing",
+        "yes_failed_means_test": "Yes, failed means test",
+        "yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
+        "no_or_has_not_applied": "No, or has not applied",
+        "no_marginal": "No, marginal",
+        "no_well_over": "No, well over",
+        "yes_lab_unable_to_assist": "Yes, LAB unable to assist",
+        "yes_lab_able_or_not_sure": "Yes, LAB able or not sure",
+        "no_marginal_or_exceptional": "No, marginal or exceptional",
+        "no_well_over_no_exceptions": "No, well over, no exceptions",
+    }
+    suffix = branch_key.removeprefix("if_")
+    if suffix in labels:
+        return labels[suffix]
+    return suffix.replace("_", " ").capitalize()
+
+
+def convert_question_to_second_person(question: str) -> str:
+    question = re.sub(r"^\([^)]*\)\s*", "", question).strip()
+    replacements = [
+        (r"\bIs the applicant's\b", "Is your"),
+        (r"\bDoes the applicant's\b", "Does your"),
+        (r"\bHas the applicant's\b", "Has your"),
+        (r"\bIs the applicant\b", "Are you"),
+        (r"\bHas the applicant\b", "Have you"),
+        (r"\bDoes the applicant\b", "Do you"),
+        (r"\bthe applicant's\b", "your"),
+        (r"\bthe applicant\b", "you"),
+        (r"\bapplicant's\b", "your"),
+        (r"\bapplicant\b", "you"),
+    ]
+    for pattern, replacement in replacements:
+        question = re.sub(pattern, replacement, question, flags=re.IGNORECASE)
+    return question
+
+
+def first_quoted_text(text: str) -> str | None:
+    match = re.search(r'"([^"]+)"|“([^”]+)”', text)
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
+
+
+def route_sort_key(route_label: str) -> str:
+    return route_label.lower()
+
+
+def choose_single_branch(candidates: list[str]) -> str | None:
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str) -> str | None:
+    branch_keys = [key for key in question_node if key.startswith("if_")]
+    if not branch_keys:
+        return None
+
+    normalized_query = normalize_branch_label(latest_user_query)
+    label_matches = [
+        key for key in branch_keys if normalize_branch_label(label_from_branch_key(key)) == normalized_query
+    ]
+    if label_matches:
+        return label_matches[0]
+
+    simple_answer = normalize_simple_answer(latest_user_query)
+    if simple_answer == "YES":
+        if "if_yes" in branch_keys:
+            return "if_yes"
+        return choose_single_branch([key for key in branch_keys if key.startswith("if_yes")])
+    if simple_answer == "NO":
+        if "if_no" in branch_keys:
+            return "if_no"
+        if "if_no_foreigner" in branch_keys:
+            return "if_no_foreigner"
+        if "if_no_or_has_not_applied" in branch_keys:
+            return "if_no_or_has_not_applied"
+        return choose_single_branch([key for key in branch_keys if key.startswith("if_no")])
+    if simple_answer == "UNCLEAR":
+        if "if_not_sure" in branch_keys:
+            return "if_not_sure"
+        if "if_not_sure_or_both" in branch_keys:
+            return "if_not_sure_or_both"
+
+    keyword_rules = [
+        (r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", "if_no_foreigner"),
+        (r"\b(representation|represent|lawyer to act|lawyer)\b", "if_representation"),
+        (r"\b(guidance|initial advice|advice|consultation)\b", "if_guidance"),
+        (r"\b(nonprofit|non profit|charity|social enterprise)\b", "if_yes_and_nonprofit"),
+        (r"\b(for profit|company|business|commercial)\b", "if_yes_and_for_profit"),
+        (r"\b(can call|able to call|can contact|able to contact)\b", "if_calling_on_behalf_and_able_to_self_help"),
+        (
+            r"\b(cannot call|can't call|unable to call|cannot contact|detained|hospitali[sz]ed|minor|overseas)\b",
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+        ),
+        (r"\b(passed|processing|pending|ongoing)\b", "if_yes_passed_or_processing"),
+        (r"\b(failed means|means test failed|failed the means)\b", "if_yes_failed_means_test"),
+        (r"\b(pdo.*unable|unable.*pdo|pdo.*reject|reject.*pdo)\b", "if_yes_pdo_unable_to_assist"),
+        (r"\b(lab.*unable|unable.*lab|lab.*reject|reject.*lab)\b", "if_yes_lab_unable_to_assist"),
+        (r"\b(lab.*able|able.*lab|lab.*not sure|not sure.*lab)\b", "if_yes_lab_able_or_not_sure"),
+        (r"\b(marginal|exceptional|hardship|medical|liabilities|dependents?)\b", "if_no_marginal_or_exceptional"),
+        (r"\b(marginal)\b", "if_no_marginal"),
+        (r"\b(well over|over threshold|no exceptions?)\b", "if_no_well_over_no_exceptions"),
+        (r"\b(well over)\b", "if_no_well_over"),
+        (r"\b(criminal|charge|charged|arrest|police)\b", "if_criminal"),
+        (r"\b(divorce|matrimonial|family|custody|maintenance)\b", "if_matrimonial"),
+        (r"\b(civil|employment|contract|property|estate|neighbou?r|others?)\b", "if_civil_or_others"),
+    ]
+    for pattern, branch_key in keyword_rules:
+        if branch_key in branch_keys and re.search(pattern, normalized_query):
+            return branch_key
+
+    return None
+
+
+def text_has_yes_answer(text: str) -> bool:
+    return bool(re.search(r"(?:→|->)\s*(?:yes|sgc/pr|singapore citizen|citizen|represented)", text))
+
+
+def text_has_no_answer(text: str) -> bool:
+    return bool(re.search(r"(?:→|->)\s*(?:no|no, foreigner|foreigner|not represented)", text))
+
+
+def detect_contradiction_signals(answered_lines: list[str], latest_user_query: str) -> list[str]:
+    prior = "\n".join(answered_lines).lower()
+    latest = latest_user_query.lower()
+    signals: list[str] = []
+
+    prior_citizen_yes = ("citizen" in prior or "pr" in prior) and text_has_yes_answer(prior)
+    prior_foreigner = "foreigner" in prior or (("citizen" in prior or "pr" in prior) and text_has_no_answer(prior))
+    latest_foreigner = bool(re.search(r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", latest))
+    latest_citizen = bool(re.search(r"\b(singapore citizen|citizen|sgc|pr|permanent resident)\b", latest))
+    if prior_citizen_yes and latest_foreigner:
+        signals.append("nationality/residency changed from SGC/PR to foreigner")
+    elif prior_foreigner and latest_citizen:
+        signals.append("nationality/residency changed from foreigner to SGC/PR")
+
+    prior_rep_no = "represented" in prior and text_has_no_answer(prior)
+    prior_rep_yes = "represented" in prior and text_has_yes_answer(prior)
+    latest_has_lawyer = bool(re.search(r"\b(my|his|her|their)?\s*(lawyer|solicitor|counsel)\b", latest))
+    latest_no_lawyer = bool(re.search(r"\b(no lawyer|not represented|don't have a lawyer|do not have a lawyer)\b", latest))
+    if prior_rep_no and latest_has_lawyer:
+        signals.append("representation status changed to existing lawyer")
+    elif prior_rep_yes and latest_no_lawyer:
+        signals.append("representation status changed to no current lawyer")
+
+    prior_advice_no = "legal advice" in prior and text_has_no_answer(prior)
+    latest_prior_advice = bool(re.search(r"\b(consulted|saw|spoke to|advised by)\s+(a\s+)?lawyer\b", latest))
+    if prior_advice_no and latest_prior_advice:
+        signals.append("prior legal advice status changed")
+
+    prior_personal = "business" in prior and text_has_no_answer(prior)
+    prior_business = "business" in prior and text_has_yes_answer(prior)
+    latest_business = bool(re.search(r"\b(company|business|shareholder|commercial|b2b)\b", latest))
+    latest_personal = bool(re.search(r"\b(personal|family|divorce|housing|criminal)\b", latest))
+    if prior_personal and latest_business:
+        signals.append("matter type changed from personal to business/commercial")
+    elif prior_business and latest_personal:
+        signals.append("matter type changed from business/commercial to personal")
+
+    prior_deadline_no = ("deadline" in prior or "court date" in prior) and text_has_no_answer(prior)
+    latest_deadline = bool(re.search(r"\b(tomorrow|next week|in \d+ days|court date|deadline)\b", latest))
+    if prior_deadline_no and latest_deadline:
+        signals.append("urgency/deadline status changed")
+
+    return signals
+
+
+def monitor_flags(text: str) -> dict[str, bool]:
+    return {
+        "urgent": bool(URGENT_PATTERN.search(text)),
+        "vulnerable": bool(VULNERABLE_PATTERN.search(text)),
+        "representation": bool(REPRESENTED_PATTERN.search(text)),
+    }
+
+
+def concurrent_monitors_from_flags(flags: dict[str, bool]) -> list[str]:
+    monitors: list[str] = []
+    if flags.get("urgent"):
+        monitors.append("urgency")
+        monitors.append("safety")
+    if flags.get("vulnerable"):
+        monitors.append("vulnerability")
+    if flags.get("representation"):
+        monitors.append("representation conflict")
+    return monitors
+
+
+def detect_candidate_topics(
+    text: str,
+    entries: dict[str, dict[str, Any]],
+    active_workflow: str | None,
+) -> list[PBSGQueuedTopic]:
+    topics: list[PBSGQueuedTopic] = []
+    for entry_id, pattern in TOPIC_SIGNAL_RULES:
+        if entry_id == active_workflow or entry_id not in entries:
+            continue
+        match = pattern.search(text)
+        if match:
+            topics.append(PBSGQueuedTopic(entry_id=entry_id, evidence=match.group(0), confidence=0.8))
+    return topics
+
+
+def classify_turn_interrupt(
+    entries: dict[str, dict[str, Any]],
+    state: PBSGTriageState,
+    latest_user_query: str,
+) -> PBSGTurnClassification:
+    if state.mode != "FAST_ROUTING" or not state.pending_entry_id or not state.current_question_id:
+        return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
+
+    entry = entries.get(state.pending_entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
+    if not isinstance(question_node, dict):
+        return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
+
+    branch_key = branch_key_for_answer(question_node, latest_user_query)
+    candidates = detect_candidate_topics(latest_user_query, entries, state.active_workflow)
+    has_additive = bool(ADDITIVE_PATTERN.search(latest_user_query))
+    has_correction = bool(CORRECTION_PATTERN.search(latest_user_query)) or bool(state.contradiction_signals)
+    has_clarification = bool(CLARIFICATION_QUESTION_PATTERN.search(latest_user_query))
+    has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query))
+
+    if has_correction:
+        return PBSGTurnClassification(
+            turn_type="correction",
+            should_call_llm=True,
+            reason="correction signal",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+            affects_prior_answer=True,
+        )
+    if has_clarification:
+        return PBSGTurnClassification(
+            turn_type="clarification",
+            should_call_llm=True,
+            reason="clarification question",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if has_safety:
+        return PBSGTurnClassification(
+            turn_type="safety_interrupt",
+            should_call_llm=True,
+            reason="safety or urgency signal",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if candidates and (has_additive or branch_key):
+        return PBSGTurnClassification(
+            turn_type="answer_plus_new_topic" if branch_key else "new_topic_only",
+            should_call_llm=True,
+            reason="possible new topic in locked flow",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if candidates:
+        return PBSGTurnClassification(
+            turn_type="new_topic_only",
+            should_call_llm=True,
+            reason="possible new topic in locked flow",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
+        )
+    if branch_key:
+        return PBSGTurnClassification(
+            turn_type="answer_only",
+            should_call_llm=False,
+            pending_branch_key=branch_key,
+            pending_answer_confidence=1.0,
+        )
+    return PBSGTurnClassification(turn_type="ambiguous", should_call_llm=True, reason="answer did not map locally")
+
+
+def build_triage_state(
+    messages: list[ChatCompletionMessageParam],
+    entries: dict[str, dict[str, Any]],
+    latest_user_query: str,
+) -> PBSGTriageState:
+    assistant_content = latest_assistant_content(messages)
+    selected_entry_id = extract_selected_entry_id(assistant_content)
+    targets = extract_question_targets(assistant_content)
+    pending_target = targets[-1] if targets else None
+    pending_entry_id = pending_target.entry_id if pending_target and pending_target.entry_id else selected_entry_id
+    current_question_id = pending_target.question_id if pending_target else None
+    conversation_text = "\n".join(message_content_to_text(message.get("content")) for message in messages)
+    conversation_text = f"{conversation_text}\n{latest_user_query}"
+    flags = monitor_flags(conversation_text)
+    topic_workflows = extract_topic_workflows(assistant_content)
+    completed_workflows = extract_completed_workflows(assistant_content)
+    active_workflow = pending_entry_id or selected_entry_id
+    answered_lines = extract_answered_lines(assistant_content)
+    branch_keys = allowed_branch_keys(entries, pending_entry_id, current_question_id)
+    contradiction_signals = detect_contradiction_signals(answered_lines, latest_user_query)
+    workflow_locked = bool(selected_entry_id and selected_entry_id in entries)
+    if contradiction_signals:
+        mode = "REPAIR"
+    elif workflow_locked:
+        mode = "FAST_ROUTING"
+    else:
+        mode = "ORCHESTRATION"
+    queued_workflows = [
+        workflow_id
+        for workflow_id in topic_workflows
+        if workflow_id != active_workflow and workflow_id not in completed_workflows
+    ]
+
+    return PBSGTriageState(
+        mode=mode,
+        workflow_id=selected_entry_id,
+        workflow_locked=workflow_locked,
+        active_workflow=active_workflow,
+        queued_workflows=queued_workflows,
+        completed_workflows=completed_workflows,
+        concurrent_monitors=concurrent_monitors_from_flags(flags),
+        current_question_id=current_question_id,
+        pending_entry_id=pending_entry_id,
+        previous_states=answered_lines,
+        answered_lines=answered_lines,
+        allowed_branch_keys=branch_keys,
+        allowed_transitions=branch_keys,
+        latest_answer_classification=normalize_simple_answer(latest_user_query),
+        contradiction_signals=contradiction_signals,
+        active_monitors=flags,
+        repair_required=bool(contradiction_signals),
+    )
+
+
+def format_state_prompt(state: PBSGTriageState) -> str:
+    lines = [
+        "",
+        "DETERMINISTIC ROUTING STATE (internal; do not expose as JSON)",
+        f"- Mode: {state.mode}.",
+    ]
+    if not state.workflow_locked or not state.workflow_id:
+        lines.append("- Workflow locked: false. Use ORCHESTRATION MODE to identify and lock the safest workflow before execution.")
+        return "\n".join(lines)
+
+    lines.append(
+        f"- Workflow locked: {state.workflow_id}. Do not re-run workflow identification unless a branch explicitly hands off, a monitor requires escalation, material new facts appear, or repair is required."
+    )
+    if state.active_workflow:
+        lines.append(f"- Active workflow: {state.active_workflow}. Only this workflow may ask the next primary question.")
+    if state.queued_workflows:
+        lines.append(f"- Queued workflows: {', '.join(state.queued_workflows)}. Do not ask from these workflows until the active workflow is routed, suspended by rule, or explicitly hands off.")
+    if state.completed_workflows:
+        lines.append(f"- Completed workflows: {', '.join(state.completed_workflows)}.")
+    if state.concurrent_monitors:
+        lines.append(f"- Concurrent monitors: {', '.join(state.concurrent_monitors)}. They may interrupt only for urgency threshold, safety issue, or required escalation.")
+    if state.pending_entry_id and state.current_question_id:
+        lines.append(f"- Pending question: {state.pending_entry_id} {state.current_question_id}. Treat the user's latest message as the answer to this question.")
+    if state.latest_answer_classification:
+        lines.append(f"- Latest answer classification: {state.latest_answer_classification}. In FAST_ROUTING mode, execute the matching branch without filler.")
+    if state.allowed_transitions:
+        lines.append(f"- Allowed transitions for the pending question: {', '.join(state.allowed_transitions)}.")
+    if state.repair_required:
+        lines.append("- Repair required: true. Enter REPAIR MODE before continuing.")
+    if state.contradiction_signals:
+        lines.append(f"- Material contradiction signals: {'; '.join(state.contradiction_signals)}.")
+        lines.append("- Invalidate downstream decisions that depended on the contradicted state, relock the workflow, then return to FAST_ROUTING mode.")
+    active = [name for name, enabled in state.active_monitors.items() if enabled]
+    if active:
+        lines.append(f"- Active monitors triggered: {', '.join(active)}. Apply the Golden Set escalation/concurrent-routing rule if it is triggered by the current workflow.")
+    if state.answered_lines:
+        lines.append("- Prior visible triage state to preserve:")
+        lines.extend(f"  - {line}" for line in state.answered_lines)
+    lines.append("- If the latest answer is ambiguous, unsupported, contradictory, or cannot map to one allowed branch, ask the approved single clarification or escalate to PBSG Staff. Never guess.")
+    return "\n".join(lines)
+
+
+def find_route_text(entry: dict[str, Any] | None, route_label: str | None) -> str | None:
+    if not entry or not route_label:
+        return None
+    routing = entry.get("routing")
+    if not isinstance(routing, list):
+        return None
+    route_prefix = route_label.lower()
+    for route in routing:
+        if isinstance(route, str) and route.lower().startswith(route_prefix):
+            return route
+    return None
+
+
+def extract_route_label(outcome: str) -> str | None:
+    match = ROUTE_PATTERN.search(outcome)
+    return f"Route {match.group(1).upper()}" if match else None
+
+
+def parse_transition_outcome(
+    entries: dict[str, dict[str, Any]],
+    entry_id: str,
+    question_id: str,
+    branch_key: str,
+    outcome: str,
+) -> PBSGTransition:
+    local_question_match = re.search(r"\bProceed to\s+(Q\d+[A-Z]?)\b", outcome, flags=re.IGNORECASE)
+    route_label = extract_route_label(outcome)
+    if local_question_match and route_label:
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="concurrent_route_question",
+            target_entry_id=entry_id,
+            target_question_id=local_question_match.group(1).upper(),
+            route_label=route_label,
+        )
+    if local_question_match:
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="proceed_question",
+            target_entry_id=entry_id,
+            target_question_id=local_question_match.group(1).upper(),
+        )
+
+    handoff_match = re.search(r"\bProceed to\s+(GEN3-[A-Z0-9-]+)\b", outcome, flags=re.IGNORECASE)
+    if handoff_match:
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="handoff_entry",
+            target_entry_id=handoff_match.group(1).upper(),
+            target_question_id="Q1",
+        )
+
+    if outcome.lower().startswith("clarify"):
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="clarification",
+            target_entry_id=entry_id,
+            target_question_id=question_id,
+            route_label=extract_route_label(outcome),
+            clarification_text=first_quoted_text(outcome) or outcome,
+        )
+
+    entry = entries.get(entry_id)
+    route_text = find_route_text(entry, route_label)
+    route_context = " ".join(part for part in [outcome, route_text] if part)
+    nested_match = re.search(r"\bProceed to\s+(GEN3-[A-Z0-9-]+)\b", route_context, flags=re.IGNORECASE)
+    if route_label and nested_match:
+        resume_match = re.search(
+            r"following which.*?\bproceed to\s+(Q\d+[A-Z]?)\s+of\s+(GEN3-[A-Z0-9-]+)",
+            route_context,
+            flags=re.IGNORECASE,
+        )
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="nested_stream",
+            target_entry_id=nested_match.group(1).upper(),
+            target_question_id="Q1",
+            route_label=route_label,
+            nested_entry_id=nested_match.group(1).upper(),
+            resume_entry_id=resume_match.group(2).upper() if resume_match else entry_id,
+            resume_question_id=resume_match.group(1).upper() if resume_match else None,
+        )
+
+    if route_label:
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="terminal_route",
+            route_label=route_label,
+        )
+
+    cross_reference_match = re.search(r"\bCross-reference\s+(GEN3-[A-Z0-9-]+)\b", outcome, flags=re.IGNORECASE)
+    if cross_reference_match:
+        return PBSGTransition(
+            entry_id=entry_id,
+            question_id=question_id,
+            branch_key=branch_key,
+            outcome=outcome,
+            transition_type="cross_reference",
+            target_entry_id=cross_reference_match.group(1).upper(),
+            target_question_id="Q1",
+        )
+
+    return PBSGTransition(
+        entry_id=entry_id,
+        question_id=question_id,
+        branch_key=branch_key,
+        outcome=outcome,
+        transition_type="instruction",
+    )
+
+
+def resolve_expected_transition(
+    entries: dict[str, dict[str, Any]],
+    state: PBSGTriageState,
+    latest_user_query: str,
+) -> PBSGTransition | None:
+    if state.mode != "FAST_ROUTING" or not state.pending_entry_id or not state.current_question_id:
+        return None
+    entry = entries.get(state.pending_entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
+    if not isinstance(question_node, dict):
+        return None
+
+    branch_key = branch_key_for_answer(question_node, latest_user_query)
+    if not branch_key:
+        return None
+    outcome = question_node.get(branch_key)
+    if not isinstance(outcome, str):
+        return None
+    return parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
+
+
+def validate_response_questions(content: str | None, entries: dict[str, dict[str, Any]]) -> tuple[bool, str | None]:
+    targets = extract_question_targets(content)
+    if not targets:
+        return True, None
+    if len(targets) > 1:
+        return False, "response contains more than one primary triage question"
+
+    selected_entry_id = extract_selected_entry_id(content)
+    target = targets[0]
+    entry_id = target.entry_id or selected_entry_id
+    if not entry_id:
+        return False, "response asks a triage question without a selected entry"
+    entry = entries.get(entry_id)
+    if not entry:
+        return False, f"response asks a question for unknown entry {entry_id}"
+    branching_logic = entry.get("branching_logic")
+    if not isinstance(branching_logic, dict) or target.question_id not in branching_logic:
+        return False, f"response asks {entry_id} {target.question_id}, which is not in the active branching logic"
+    return True, None
+
+
+def extract_response_route_label(content: str | None) -> str | None:
+    if not content:
+        return None
+    routing_match = re.search(r"\*\*Routing Recommendation:\*\*\s*(Route\s+[A-Z])\b", content, flags=re.IGNORECASE)
+    if routing_match:
+        return routing_match.group(1).title()
+    return None
+
+
+def validate_response_transition(
+    content: str | None,
+    entries: dict[str, dict[str, Any]],
+    expected_transition: PBSGTransition | None,
+) -> tuple[bool, str | None]:
+    del entries
+    if not content or not expected_transition:
+        return True, None
+
+    targets = extract_question_targets(content)
+    route_label = extract_response_route_label(content)
+    selected_entry_id = extract_selected_entry_id(content)
+
+    if expected_transition.transition_type in {"proceed_question", "nested_stream"}:
+        expected_entry_id = expected_transition.target_entry_id
+        expected_question_id = expected_transition.target_question_id
+        if not targets:
+            return False, f"response did not ask expected {expected_entry_id} {expected_question_id}"
+        if len(targets) > 1:
+            return False, "response contains more than one primary triage question"
+        target = targets[0]
+        actual_entry_id = target.entry_id or selected_entry_id
+        if actual_entry_id != expected_entry_id or target.question_id != expected_question_id:
+            return (
+                False,
+                f"response asks {actual_entry_id} {target.question_id}; expected {expected_entry_id} {expected_question_id}",
+            )
+        if route_label and expected_transition.transition_type == "proceed_question":
+            return False, f"response routed {route_label}; expected a local question"
+        return True, None
+
+    if expected_transition.transition_type == "terminal_route":
+        if route_label != expected_transition.route_label:
+            return False, f"response route {route_label}; expected {expected_transition.route_label}"
+        if targets:
+            return False, "terminal route response must not ask another primary question"
+        return True, None
+
+    if expected_transition.transition_type == "handoff_entry":
+        if selected_entry_id != expected_transition.target_entry_id:
+            return False, f"response selected {selected_entry_id}; expected handoff to {expected_transition.target_entry_id}"
+        return True, None
+
+    return True, None
+
+
+def find_escalation_route(entry: dict[str, Any] | None) -> str:
+    routing = entry.get("routing") if entry else None
+    if isinstance(routing, list):
+        for route in routing:
+            if isinstance(route, str) and "Escalate to PBSG Staff" in route:
+                match = re.match(r"(Route [A-Z](?: \([^)]*\))?)", route)
+                if match:
+                    return match.group(1)
+    return "Escalate to PBSG Staff"
+
+
+def safe_escalation_response(content: str | None, entries: dict[str, dict[str, Any]], reason: str) -> str:
+    # Keep the validator reason out of intern-facing output; it may contain raw internal question ids.
+    del reason
+    selected_entry_id = extract_selected_entry_id(content)
+    entry = entries.get(selected_entry_id) if selected_entry_id else None
+    route = find_escalation_route(entry)
+    source = f" [{selected_entry_id}.json]" if selected_entry_id else ""
+
+    return "\n".join(
+        [
+            f"**Selected Entry:** {selected_entry_id or 'Unclear'}",
+            "",
+            "**Routing Recommendation:** "
+            f"{route} (safe escalation because the generated transition could not be verified)",
+            "",
+            "**Tell the applicant:**",
+            "",
+            '> **"I need to check this with PBSG Staff before going further. Let me take down your details and have PBSG Staff follow up."**',
+            "",
+            "**Next steps for you (the intern):**",
+            f"- Take down the applicant's full name, contact number, email if any, brief matter description, and any urgency or vulnerability factors noted.{source}",
+            f"- Email the information to PBSG Staff on the same day. Do not attempt to advise further.{source}",
+        ]
+    )
+
+
+class PBSGRoutingEngine:
+    def __init__(self, entries: dict[str, dict[str, Any]] | None = None):
+        self.entries = entries or load_golden_set_entries()
+
+    @classmethod
+    def from_default_golden_set(cls) -> "PBSGRoutingEngine":
+        return cls(load_golden_set_entries())
+
+    def execute_locked_turn(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        latest_user_query: str,
+        branch_key_override: str | None = None,
+    ) -> PBSGDeterministicResult | None:
+        if not self.entries:
+            return None
+        state = build_triage_state(messages, self.entries, latest_user_query)
+        if state.mode != "FAST_ROUTING":
+            return None
+        transition = self.resolve_transition_from_branch(state, branch_key_override)
+        if not transition:
+            transition = resolve_expected_transition(self.entries, state, latest_user_query)
+        if not transition:
+            return None
+        content = self.render_transition(transition)
+        if not content:
+            return None
+        return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+    def resolve_transition_from_branch(
+        self,
+        state: PBSGTriageState,
+        branch_key: str | None,
+    ) -> PBSGTransition | None:
+        if not branch_key or not state.pending_entry_id or not state.current_question_id:
+            return None
+        entry = self.entries.get(state.pending_entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict) or branch_key not in question_node:
+            return None
+        outcome = question_node.get(branch_key)
+        if not isinstance(outcome, str):
+            return None
+        return parse_transition_outcome(
+            self.entries,
+            state.pending_entry_id,
+            state.current_question_id,
+            branch_key,
+            outcome,
+        )
+
+    def render_transition(self, transition: PBSGTransition) -> str | None:
+        if transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question"}:
+            return self.render_question_transition(transition)
+        if transition.transition_type in {"handoff_entry", "cross_reference"}:
+            return self.render_handoff_transition(transition)
+        if transition.transition_type == "terminal_route":
+            return self.render_terminal_route(transition)
+        if transition.transition_type == "clarification":
+            return self.render_clarification(transition)
+        return None
+
+    def render_question_transition(self, transition: PBSGTransition) -> str | None:
+        if not transition.target_entry_id or not transition.target_question_id:
+            return None
+        question = self.question_text(transition.target_entry_id, transition.target_question_id)
+        if not question:
+            return None
+
+        selected_entry_id = transition.entry_id
+        next_label = f"{transition.target_question_id} from {transition.target_entry_id}"
+        question_prefix = transition.target_question_id
+        if transition.transition_type == "nested_stream":
+            next_label = f"{transition.target_entry_id} {transition.target_question_id} (Urgent concurrent path)"
+            question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
+
+        lines = self.render_header_and_answered_state(selected_entry_id, transition)
+        if transition.transition_type == "concurrent_route_question" and transition.route_label:
+            route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
+            lines.extend(["", "**Concurrent routing note:**", "", f"- {route_text or transition.outcome} [{transition.entry_id}.json]"])
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
+                f"- Next question: {next_label}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **{question_prefix}: "{convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+            ]
+        )
+        return "\n".join(lines)
+
+    def render_handoff_transition(self, transition: PBSGTransition) -> str | None:
+        if not transition.target_entry_id:
+            return None
+        question = self.question_text(transition.target_entry_id, "Q1")
+        if not question:
+            return None
+        lines = self.render_header_and_answered_state(transition.target_entry_id, transition)
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
+                f"- Handoff: {transition.entry_id} → {transition.target_entry_id}",
+                f"- Next question: Q1 from {transition.target_entry_id}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **Q1: "{convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+            ]
+        )
+        return "\n".join(lines)
+
+    def render_terminal_route(self, transition: PBSGTransition) -> str | None:
+        route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
+        if not transition.route_label or not route_text:
+            return None
+        lines = self.render_header_and_answered_state(transition.entry_id, transition)
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
+                "- Next step: final routing recommendation",
+                "",
+                f"**Routing Recommendation:** {transition.route_label}",
+                "",
+                "**Tell the applicant:**",
+                "",
+                f'> **"{route_text}"**',
+            ]
+        )
+        return "\n".join(lines)
+
+    def render_clarification(self, transition: PBSGTransition) -> str | None:
+        clarification = transition.clarification_text or first_quoted_text(transition.outcome)
+        if not clarification:
+            return None
+        lines = self.render_header_and_answered_state(transition.entry_id, transition)
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → clarification needed [{transition.entry_id}.json]",
+                f"- Current question remains: {transition.question_id} from {transition.entry_id}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **{transition.question_id}: "{convert_question_to_second_person(clarification)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.entry_id}.json]",
+            ]
+        )
+        return "\n".join(lines)
+
+    def render_header_and_answered_state(self, selected_entry_id: str, transition: PBSGTransition) -> list[str]:
+        return [
+            f"**Selected Entry:** {selected_entry_id}",
+            "",
+            "What I gathered from your description:",
+            "",
+            f"- {transition.question_id}: {label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
+        ]
+
+    def question_text(self, entry_id: str, question_id: str) -> str | None:
+        entry = self.entries.get(entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+        question = question_node.get("question") if isinstance(question_node, dict) else None
+        return question if isinstance(question, str) else None

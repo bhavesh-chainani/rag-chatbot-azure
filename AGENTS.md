@@ -120,6 +120,8 @@ python scripts/build_pbsg_golden_set_json.py --legacy
 
 **Do not index the Word file for RAG:** keep the `.docx` in `data/` for regeneration if you like, but `prepdocs.sh` / `prepdocs.ps1` skip the golden-set source Word files so Azure Search only gets the structured JSON (avoid duplicate, messier chunks from the document extractor). Skipped basenames include `PBSG_Golden_Set_Complete_v2.docx`, `2026_03_31_PBSG_Golden_Set_v3_MCA.docx`, and `2026.04.16 PBSG_Golden_Set_General_Enquiries_v3.docx`. `prepdocs.py` also skips Microsoft Office lock files (basenames starting with `~$`, e.g. `~$26.04.16 … .docx`) so an open Word document does not break ingestion or `azd` postprovision. For any other build-only `.docx`, pass `--exclude YourFile.docx` to `prepdocs.py`.
 
+The deployed backend container also needs the Golden Set JSON files at runtime for the deterministic PBSG transition guard. `azd` prebuild/prepackage hooks run `scripts/sync_backend_golden_set.py` from `app/backend` to mirror the canonical files into `app/backend/data/pbsg_golden_set_by_id/` before packaging the backend Docker context. If you run a manual Docker build from `app/backend`, run that sync script first.
+
 ## Adding a new azd environment variable
 
 An azd environment variable is stored by the azd CLI for each environment. It is passed to the "azd up" command and can configure both provisioning options and application settings.

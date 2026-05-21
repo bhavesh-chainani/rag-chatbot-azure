@@ -155,6 +155,8 @@ app/functions/*/prepdocslib/
 app/functions/*/requirements.txt
 
 data/**/*.md5
+# Runtime mirror generated from canonical data/pbsg_golden_set_by_id/ before backend Docker packaging.
+app/backend/data/pbsg_golden_set_by_id/
 # Microsoft Office lock files while a document is open (~$Name.docx)
 **/~$*
 

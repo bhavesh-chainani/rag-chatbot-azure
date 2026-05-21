@@ -20,24 +20,24 @@ services:
       prepackage:
         windows:
           shell: pwsh
-          run:  cd ../frontend;npm install;npm run build
+          run:  python ../../scripts/sync_backend_golden_set.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cd ../frontend; npm install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           interactive: false
           continueOnError: false
         posix:
           shell: sh
-          run:  cd ../frontend;npm install;npm run build
+          run:  if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" && NODE_VERSION="$(tr -d '\r\n' < ../frontend/.nvmrc)" && nvm install "$NODE_VERSION" && nvm use "$NODE_VERSION" && export PATH="$NVM_BIN:$PATH"; fi && python3 ../../scripts/sync_backend_golden_set.py && cd ../frontend && npm install && npm run build
           interactive: false
           continueOnError: false
       # This hook is called when Azure Container Apps is the host
       prebuild:
         windows:
           shell: pwsh
-          run:  cd ../frontend;npm install;npm run build
+          run:  python ../../scripts/sync_backend_golden_set.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cd ../frontend; npm install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           interactive: false
           continueOnError: false
         posix:
           shell: sh
-          run:  cd ../frontend;npm install;npm run build
+          run:  if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" && NODE_VERSION="$(tr -d '\r\n' < ../frontend/.nvmrc)" && nvm install "$NODE_VERSION" && nvm use "$NODE_VERSION" && export PATH="$NVM_BIN:$PATH"; fi && python3 ../../scripts/sync_backend_golden_set.py && cd ../frontend && npm install && npm run build
           interactive: false
           continueOnError: false
   # Un-comment this section if using USE_CLOUD_INGESTION option

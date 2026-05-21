@@ -360,8 +360,8 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert '**GEN3-T06 Q1: "Is there an immediate threat to your (or someone else\'s) life or physical safety right now?"**' in content
-    assert "> **GEN3-T06 Q1" not in content
+    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
+    assert "**Ask the applicant (read verbatim):**" not in content
 
 
 def test_pbsg_known_cross_routing_regressions():

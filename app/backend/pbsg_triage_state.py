@@ -1798,7 +1798,16 @@ class PBSGRoutingEngine:
                 f"- {transition.question_id}: {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
             ]
         )
-        lines.extend(["", "**Tell the applicant:**", "", f'"{applicant_script}"'])
+        lines.extend(
+            [
+                "",
+                "**Tell the applicant:**",
+                "",
+                f'"{applicant_script}"',
+                "",
+                f'> **{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
+            ]
+        )
         lines.extend(
             [
                 "",
@@ -1807,10 +1816,6 @@ class PBSGRoutingEngine:
                 f"- Last answered: {transition.entry_id} {transition.question_id} = {label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
                 f"- Now checking: {transition.target_entry_id} {transition.target_question_id}",
                 f"- After this urgent path: resume {resume_label}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'**{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
                 "",
                 f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
             ]

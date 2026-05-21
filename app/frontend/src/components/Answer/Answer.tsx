@@ -45,9 +45,10 @@ function collectPlainTextPrefix(children: ReactNode, maxLen = 160): string {
     return collectPlainTextFromNodes(children, maxLen);
 }
 
-/** Q1: / Q3A: / Q2 follow-up: / Clarification Q: verbatim script. */
+/** Q1: / GEN3-T06 Q1: / Q3A: / Clarification Q: verbatim script. */
 const VERBATIM_QUESTION_ID = "Q\\d+(?:[A-Za-z]+(?:\\s+[-\\w]+)*|(?:\\s+[-\\w]+)+)?|Clarification Q";
-const APPLICANT_VERBATIM_QUESTION_BODY = new RegExp(`^\\s*(?:${VERBATIM_QUESTION_ID})\\s*:`, "i");
+const ENTRY_QUALIFIED_QUESTION_ID = `(?:GEN3-T\\d+\\s+)?${VERBATIM_QUESTION_ID}`;
+const APPLICANT_VERBATIM_QUESTION_BODY = new RegExp(`^\\s*(?:${ENTRY_QUALIFIED_QUESTION_ID})\\s*:`, "i");
 
 /** OUTPUT A routing script: intern reads quoted text aloud (after optional `>`). */
 const APPLICANT_VERBATIM_QUOTED_SCRIPT = /^\s*"/;
@@ -152,6 +153,7 @@ function ensureVerbatimBlockquoteNewline(markdown: string): string {
     s = s.replace(new RegExp(`(${label})${h}*(>)`, "g"), "$1\n\n$2");
     s = s.replace(new RegExp(`(${label})${h}*(")`, "g"), "$1\n\n> $2");
     s = s.replace(new RegExp(`(${label})${h}*(Q\\d)`, "g"), "$1\n\n> $2");
+    s = s.replace(new RegExp(`(${label})${h}*(GEN3-T\\d+\\s+Q\\d+)`, "gi"), "$1\n\n> $2");
     return addMissingQuestionIdsToApplicantQuotes(s);
 }
 

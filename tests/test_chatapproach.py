@@ -310,9 +310,11 @@ def test_build_quick_reply_works_for_structured_nested_urgent_card(chat_approach
 
 **Active stream:** GEN3-T06 urgent concurrent path
 
-**Ask the applicant (read verbatim):**
+**Tell the applicant:**
 
-**GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"**
+"Your criminal matter may also have an urgent deadline or safety concern."
+
+> **GEN3-T06 Q1: "Is there an immediate threat to your life or physical safety right now?"**
 """
 
     quick_reply = chat_approach.build_quick_reply(content, extra_info)

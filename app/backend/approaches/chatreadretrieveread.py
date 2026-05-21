@@ -188,6 +188,7 @@ class ChatReadRetrieveReadApproach(Approach):
 
         ask_markers = [
             "Ask the applicant (read verbatim):",
+            "Tell the applicant:",
             "Back to triage",
         ]
         question_region = content
@@ -242,6 +243,7 @@ class ChatReadRetrieveReadApproach(Approach):
 
         ask_markers = [
             "Ask the applicant (read verbatim):",
+            "Tell the applicant:",
             "Back to triage",
         ]
         marker_positions = [content.rfind(marker) for marker in ask_markers]

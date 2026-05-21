@@ -35,12 +35,9 @@ class PBSGTriageState:
     )
     repair_required: bool = False
     escalation_required: bool = False
-<<<<<<< HEAD
     parent_workflow: str | None = None
     resume_question_id: str | None = None
     triggered_overlays: list[str] = field(default_factory=list)
-=======
->>>>>>> legal_develop
 
 
 @dataclass
@@ -60,7 +57,6 @@ class PBSGTransition:
 
 
 @dataclass
-<<<<<<< HEAD
 class PBSGWorkflowEdge:
     entry_id: str
     question_id: str
@@ -69,8 +65,6 @@ class PBSGWorkflowEdge:
 
 
 @dataclass
-=======
->>>>>>> legal_develop
 class PBSGDeterministicResult:
     content: str
     state: PBSGTriageState
@@ -96,7 +90,6 @@ class PBSGTurnClassification:
     affects_prior_answer: bool = False
 
 
-<<<<<<< HEAD
 @dataclass
 class StructuredRoute:
     route_label: str
@@ -109,8 +102,6 @@ class StructuredRoute:
     caveats: list[str] = field(default_factory=list)
 
 
-=======
->>>>>>> legal_develop
 ASK_MARKERS = [
     "Ask the applicant (read verbatim):",
     "Back to triage",
@@ -152,7 +143,6 @@ TOPIC_SIGNAL_RULES = [
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
-<<<<<<< HEAD
 URL_PATTERN = re.compile(r"https?://[^\s|,)\"“”]+")
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", flags=re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"\b(?:\d{4}\s?\d{4}|1800\s?\d{4}\s?\d{3}|65\d{6})\b")
@@ -161,8 +151,6 @@ ADDRESS_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 HOURS_PATTERN = re.compile(r"\b(?:Mon|Mondays?|Fri|Fridays?|weekends?|PH|am|pm|appointment)[^.]*(?:\.|$)", flags=re.IGNORECASE)
-=======
->>>>>>> legal_develop
 
 
 def candidate_golden_set_dirs() -> list[Path]:
@@ -395,12 +383,9 @@ def label_from_branch_key(branch_key: str) -> str:
         "yes_lab_able_or_not_sure": "Yes, LAB able or not sure",
         "no_marginal_or_exceptional": "No, marginal or exceptional",
         "no_well_over_no_exceptions": "No, well over, no exceptions",
-<<<<<<< HEAD
         "helper_present": "Helper present",
         "no_or_unclear": "No or unclear",
         "under_18": "Under 18",
-=======
->>>>>>> legal_develop
     }
     suffix = branch_key.removeprefix("if_")
     if suffix in labels:
@@ -496,12 +481,9 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
         (r"\b(criminal|charge|charged|arrest|police)\b", "if_criminal"),
         (r"\b(divorce|matrimonial|family|custody|maintenance)\b", "if_matrimonial"),
         (r"\b(civil|employment|contract|property|estate|neighbou?r|others?)\b", "if_civil_or_others"),
-<<<<<<< HEAD
         (r"\b(helper|caregiver|someone helped|calling for)\b", "if_helper_present"),
         (r"\b(unsafe|not safe|no shelter|no place|homeless)\b", "if_no_or_unclear"),
         (r"\b(under 18|minor|child|17|16|15)\b", "if_under_18"),
-=======
->>>>>>> legal_develop
     ]
     for pattern, branch_key in keyword_rules:
         if branch_key in branch_keys and re.search(pattern, normalized_query):
@@ -583,7 +565,6 @@ def concurrent_monitors_from_flags(flags: dict[str, bool]) -> list[str]:
     return monitors
 
 
-<<<<<<< HEAD
 def triggered_overlays_from_flags(flags: dict[str, bool]) -> list[str]:
     overlays: list[str] = []
     if flags.get("urgent"):
@@ -593,8 +574,6 @@ def triggered_overlays_from_flags(flags: dict[str, bool]) -> list[str]:
     return overlays
 
 
-=======
->>>>>>> legal_develop
 def detect_candidate_topics(
     text: str,
     entries: dict[str, dict[str, Any]],
@@ -714,11 +693,8 @@ def build_triage_state(
         for workflow_id in topic_workflows
         if workflow_id != active_workflow and workflow_id not in completed_workflows
     ]
-<<<<<<< HEAD
     parent_workflow = selected_entry_id if pending_entry_id == "GEN3-T06" and selected_entry_id != "GEN3-T06" else None
     resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
-=======
->>>>>>> legal_develop
 
     return PBSGTriageState(
         mode=mode,
@@ -738,12 +714,9 @@ def build_triage_state(
         contradiction_signals=contradiction_signals,
         active_monitors=flags,
         repair_required=bool(contradiction_signals),
-<<<<<<< HEAD
         parent_workflow=parent_workflow,
         resume_question_id=resume_question_id,
         triggered_overlays=triggered_overlays_from_flags(flags),
-=======
->>>>>>> legal_develop
     )
 
 
@@ -802,7 +775,6 @@ def find_route_text(entry: dict[str, Any] | None, route_label: str | None) -> st
     return None
 
 
-<<<<<<< HEAD
 def structured_route_from_entry(entry: dict[str, Any] | None, route_label: str | None) -> StructuredRoute | None:
     if not entry or not route_label:
         return None
@@ -1050,8 +1022,6 @@ def structure_route(route_text: str, entry: dict[str, Any] | None = None, route_
     )
 
 
-=======
->>>>>>> legal_develop
 def extract_route_label(outcome: str) -> str | None:
     match = ROUTE_PATTERN.search(outcome)
     return f"Route {match.group(1).upper()}" if match else None
@@ -1137,7 +1107,6 @@ def parse_transition_outcome(
             resume_question_id=resume_match.group(1).upper() if resume_match else None,
         )
 
-<<<<<<< HEAD
     if entry_id == "GEN3-T06" and route_label == "Route D" and re.search(r"\bReturn to\s+GEN3-T01\b", route_context, flags=re.IGNORECASE):
         return PBSGTransition(
             entry_id=entry_id,
@@ -1150,8 +1119,6 @@ def parse_transition_outcome(
             route_label=route_label,
         )
 
-=======
->>>>>>> legal_develop
     if route_label:
         return PBSGTransition(
             entry_id=entry_id,
@@ -1183,7 +1150,6 @@ def parse_transition_outcome(
     )
 
 
-<<<<<<< HEAD
 class PBSGWorkflowGraph:
     def __init__(self, entries: dict[str, dict[str, Any]]):
         self.entries = entries
@@ -1284,8 +1250,6 @@ def resolve_gen3_t13_cue_transition(latest_user_query: str, question_id: str | N
     )
 
 
-=======
->>>>>>> legal_develop
 def resolve_expected_transition(
     entries: dict[str, dict[str, Any]],
     state: PBSGTriageState,
@@ -1293,11 +1257,8 @@ def resolve_expected_transition(
 ) -> PBSGTransition | None:
     if state.mode != "FAST_ROUTING" or not state.pending_entry_id or not state.current_question_id:
         return None
-<<<<<<< HEAD
     if state.pending_entry_id == "GEN3-T13":
         return resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
-=======
->>>>>>> legal_develop
     entry = entries.get(state.pending_entry_id)
     branching_logic = entry.get("branching_logic") if entry else None
     question_node = branching_logic.get(state.current_question_id) if isinstance(branching_logic, dict) else None
@@ -1310,13 +1271,9 @@ def resolve_expected_transition(
     outcome = question_node.get(branch_key)
     if not isinstance(outcome, str):
         return None
-<<<<<<< HEAD
     graph = PBSGWorkflowGraph(entries)
     transition = graph.transition_for(state.pending_entry_id, state.current_question_id, branch_key)
     return transition or parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
-=======
-    return parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
->>>>>>> legal_develop
 
 
 def validate_response_questions(content: str | None, entries: dict[str, dict[str, Any]]) -> tuple[bool, str | None]:
@@ -1362,11 +1319,7 @@ def validate_response_transition(
     route_label = extract_response_route_label(content)
     selected_entry_id = extract_selected_entry_id(content)
 
-<<<<<<< HEAD
     if expected_transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question", "cross_reference"}:
-=======
-    if expected_transition.transition_type in {"proceed_question", "nested_stream"}:
->>>>>>> legal_develop
         expected_entry_id = expected_transition.target_entry_id
         expected_question_id = expected_transition.target_question_id
         if not targets:
@@ -1394,7 +1347,6 @@ def validate_response_transition(
     if expected_transition.transition_type == "handoff_entry":
         if selected_entry_id != expected_transition.target_entry_id:
             return False, f"response selected {selected_entry_id}; expected handoff to {expected_transition.target_entry_id}"
-<<<<<<< HEAD
         if targets:
             target = targets[0]
             actual_entry_id = target.entry_id or selected_entry_id
@@ -1405,8 +1357,6 @@ def validate_response_transition(
                     f"response asks {actual_entry_id} {target.question_id}; expected "
                     f"{expected_transition.target_entry_id} {expected_question_id}",
                 )
-=======
->>>>>>> legal_develop
         return True, None
 
     return True, None
@@ -1452,10 +1402,7 @@ def safe_escalation_response(content: str | None, entries: dict[str, dict[str, A
 class PBSGRoutingEngine:
     def __init__(self, entries: dict[str, dict[str, Any]] | None = None):
         self.entries = entries or load_golden_set_entries()
-<<<<<<< HEAD
         self.graph = PBSGWorkflowGraph(self.entries)
-=======
->>>>>>> legal_develop
 
     @classmethod
     def from_default_golden_set(cls) -> "PBSGRoutingEngine":
@@ -1472,7 +1419,6 @@ class PBSGRoutingEngine:
         state = build_triage_state(messages, self.entries, latest_user_query)
         if state.mode != "FAST_ROUTING":
             return None
-<<<<<<< HEAD
         if state.pending_entry_id == "GEN3-T13":
             transition = resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
             if transition:
@@ -1480,17 +1426,12 @@ class PBSGRoutingEngine:
                 if not content:
                     return None
                 return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
-=======
->>>>>>> legal_develop
         transition = self.resolve_transition_from_branch(state, branch_key_override)
         if not transition:
             transition = resolve_expected_transition(self.entries, state, latest_user_query)
         if not transition:
             return None
-<<<<<<< HEAD
         transition = self.resume_parent_after_nested_urgent(state, transition)
-=======
->>>>>>> legal_develop
         content = self.render_transition(transition)
         if not content:
             return None
@@ -1511,7 +1452,6 @@ class PBSGRoutingEngine:
         outcome = question_node.get(branch_key)
         if not isinstance(outcome, str):
             return None
-<<<<<<< HEAD
         transition = self.graph.transition_for(state.pending_entry_id, state.current_question_id, branch_key)
         if not transition:
             transition = parse_transition_outcome(
@@ -1550,18 +1490,6 @@ class PBSGRoutingEngine:
         if transition.transition_type == "nested_stream":
             return self.render_nested_stream_transition(transition)
         if transition.transition_type in {"proceed_question", "concurrent_route_question"}:
-=======
-        return parse_transition_outcome(
-            self.entries,
-            state.pending_entry_id,
-            state.current_question_id,
-            branch_key,
-            outcome,
-        )
-
-    def render_transition(self, transition: PBSGTransition) -> str | None:
-        if transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question"}:
->>>>>>> legal_develop
             return self.render_question_transition(transition)
         if transition.transition_type in {"handoff_entry", "cross_reference"}:
             return self.render_handoff_transition(transition)
@@ -1571,7 +1499,6 @@ class PBSGRoutingEngine:
             return self.render_clarification(transition)
         return None
 
-<<<<<<< HEAD
     def render_nested_stream_transition(self, transition: PBSGTransition) -> str | None:
         if not transition.target_entry_id or not transition.target_question_id:
             return None
@@ -1634,8 +1561,6 @@ class PBSGRoutingEngine:
             return "I need to check the urgent issue first, then I will continue the main triage questions after that."
         return "I need to check this related pathway first, then I will continue the main triage questions after that."
 
-=======
->>>>>>> legal_develop
     def render_question_transition(self, transition: PBSGTransition) -> str | None:
         if not transition.target_entry_id or not transition.target_question_id:
             return None
@@ -1697,17 +1622,11 @@ class PBSGRoutingEngine:
         return "\n".join(lines)
 
     def render_terminal_route(self, transition: PBSGTransition) -> str | None:
-<<<<<<< HEAD
         entry = self.entries.get(transition.entry_id)
         route_text = find_route_text(entry, transition.route_label)
         if not transition.route_label or not route_text:
             return None
         structured_route = structure_route(route_text, entry, transition.route_label)
-=======
-        route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
-        if not transition.route_label or not route_text:
-            return None
->>>>>>> legal_develop
         lines = self.render_header_and_answered_state(transition.entry_id, transition)
         lines.extend(
             [
@@ -1717,7 +1636,6 @@ class PBSGRoutingEngine:
                 f"- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
                 "- Next step: final routing recommendation",
                 "",
-<<<<<<< HEAD
                 f"**Routing Recommendation:** {structured_route.route_label}"
                 + (f" ({structured_route.route_name})" if structured_route.route_name else ""),
                 "",
@@ -1743,17 +1661,6 @@ class PBSGRoutingEngine:
         lines.extend(["", f"**{title}**", ""])
         lines.extend(f"- {item} [{entry_id}.json]" for item in items)
 
-=======
-                f"**Routing Recommendation:** {transition.route_label}",
-                "",
-                "**Tell the applicant:**",
-                "",
-                f'> **"{route_text}"**',
-            ]
-        )
-        return "\n".join(lines)
-
->>>>>>> legal_develop
     def render_clarification(self, transition: PBSGTransition) -> str | None:
         clarification = transition.clarification_text or first_quoted_text(transition.outcome)
         if not clarification:

@@ -80,6 +80,14 @@ class PBSGQueuedTopic:
 
 
 @dataclass
+class PBSGTopicResolution:
+    entry_id: str
+    confidence: float
+    reason: str
+    overlays: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PBSGTurnClassification:
     turn_type: str
     should_call_llm: bool
@@ -128,6 +136,10 @@ REPRESENTED_PATTERN = re.compile(
 WORKFLOW_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b", flags=re.IGNORECASE)
 ROUTE_PATTERN = re.compile(r"\bRoute\s+([A-Z])\b", flags=re.IGNORECASE)
 GOLDEN_SET_RELATIVE_DIR = Path("data") / "pbsg_golden_set_by_id"
+CAPITAL_OFFENCE_PATTERN = re.compile(
+    r"\b(murder|capital offence|capital offense|death penalty|punishable with death)\b",
+    flags=re.IGNORECASE,
+)
 ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
 CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
 CLARIFICATION_QUESTION_PATTERN = re.compile(
@@ -143,6 +155,41 @@ TOPIC_SIGNAL_RULES = [
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
+INITIAL_TOPIC_PATTERNS = {
+    "GEN3-T02": re.compile(
+        r"\b(criminal|charged|charge|police|arrest|offence|offense|murder|bail|remand|court date)\b",
+        flags=re.IGNORECASE,
+    ),
+    "GEN3-T03": re.compile(
+        r"\b(divorce|custody|maintenance|matrimonial|family violence|ppo|personal protection order|spouse|ex[- ]?(?:wife|husband|spouse)|children?)\b",
+        flags=re.IGNORECASE,
+    ),
+    "GEN3-T04": re.compile(
+        r"\b(employment|employer|salary|wages?|dismissal|fired|landlord|tenant|contract|estate|probate|civil|debt)\b",
+        flags=re.IGNORECASE,
+    ),
+    "GEN3-T06": re.compile(
+        r"\b(urgent|immediate|danger|homeless|no shelter|deadline|court tomorrow|court date|next week)\b",
+        flags=re.IGNORECASE,
+    ),
+    "GEN3-T13": re.compile(
+        r"\b(vulnerable|elderly|minor|under 18|disabled|disability|language barrier|interpreter|social worker|fsc|confused)\b",
+        flags=re.IGNORECASE,
+    ),
+}
+GEN3_T13_PRIMARY_PATTERN = re.compile(
+    r"\b(vulnerable applicant|assess (?:this )?vulnerab|adapt my response|handle (?:a )?vulnerable|elderly and confused|speaks very little english|under 18|minor)\b",
+    flags=re.IGNORECASE,
+)
+SUBSTANTIVE_FACT_PATTERN = re.compile(
+    r"\b(applicant|charged|charge|court|divorce|custody|maintenance|employer|salary|landlord|tenant|debt|"
+    r"estate|probate|criminal|police|arrest|urgent|deadline|vulnerable|elderly|minor|disabled|social worker)\b",
+    flags=re.IGNORECASE,
+)
+BARE_START_PATTERN = re.compile(
+    r"^\s*(hi|hello|hey|thanks|thank you|ok|okay|start triage|i need help|need help|help|general enquiry|general inquiry)\s*[.!?]*\s*$",
+    flags=re.IGNORECASE,
+)
 URL_PATTERN = re.compile(r"https?://[^\s|,)\"“”]+")
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", flags=re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"\b(?:\d{4}\s?\d{4}|1800\s?\d{4}\s?\d{3}|65\d{6})\b")
@@ -572,6 +619,111 @@ def triggered_overlays_from_flags(flags: dict[str, bool]) -> list[str]:
     if flags.get("vulnerable"):
         overlays.append("GEN3-T13")
     return overlays
+
+
+def initial_topic_overlays(text: str, primary_entry_id: str, entries: dict[str, dict[str, Any]]) -> list[str]:
+    overlays: list[str] = []
+    flags = monitor_flags(text)
+    if flags.get("urgent") and primary_entry_id != "GEN3-T06" and "GEN3-T06" in entries:
+        overlays.append("GEN3-T06")
+    if flags.get("vulnerable") and primary_entry_id != "GEN3-T13" and "GEN3-T13" in entries:
+        overlays.append("GEN3-T13")
+    return overlays
+
+
+def topic_metadata_text(entry: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for field in ("id", "topic", "user_query", "part_a_general_info"):
+        value = entry.get(field)
+        if isinstance(value, str):
+            parts.append(value)
+    variations = entry.get("variations")
+    if isinstance(variations, list):
+        parts.extend(variation for variation in variations if isinstance(variation, str))
+    return " ".join(parts)
+
+
+def metadata_overlap_score(query: str, entry: dict[str, Any]) -> float:
+    query_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", query.lower())
+        if len(token) > 2 and token not in {"applicant", "help", "need", "what", "should", "can"}
+    }
+    if not query_tokens:
+        return 0.0
+    metadata_tokens = set(re.findall(r"[a-z0-9]+", topic_metadata_text(entry).lower()))
+    return min(len(query_tokens & metadata_tokens) / max(len(query_tokens), 1), 0.35)
+
+
+def resolve_initial_topic(
+    entries: dict[str, dict[str, Any]],
+    latest_user_query: str,
+) -> PBSGTopicResolution | None:
+    if not entries:
+        return None
+    fallback_entry_id = "GEN3-T01" if "GEN3-T01" in entries else sorted(entries)[0]
+    normalized = re.sub(r"\s+", " ", latest_user_query).strip()
+    if not normalized or BARE_START_PATTERN.match(normalized) or not SUBSTANTIVE_FACT_PATTERN.search(normalized):
+        return PBSGTopicResolution(
+            entry_id=fallback_entry_id,
+            confidence=0.55,
+            reason="defaulted to first-contact triage because no clear specialty facts were present",
+            overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
+        )
+    if CAPITAL_OFFENCE_PATTERN.search(normalized) and "GEN3-T02" in entries:
+        return PBSGTopicResolution(
+            entry_id="GEN3-T02",
+            confidence=1.0,
+            reason="capital offence signal",
+            overlays=initial_topic_overlays(normalized, "GEN3-T02", entries),
+        )
+
+    scores: dict[str, float] = {}
+    evidence: dict[str, str] = {}
+    for entry_id, pattern in INITIAL_TOPIC_PATTERNS.items():
+        if entry_id not in entries:
+            continue
+        match = pattern.search(normalized)
+        score = metadata_overlap_score(normalized, entries[entry_id])
+        if match:
+            score += 0.65
+            evidence[entry_id] = match.group(0)
+        if entry_id == "GEN3-T13" and match and not GEN3_T13_PRIMARY_PATTERN.search(normalized):
+            score -= 0.45
+        if entry_id == "GEN3-T06" and match and any(
+            candidate in scores or INITIAL_TOPIC_PATTERNS[candidate].search(normalized)
+            for candidate in ("GEN3-T02", "GEN3-T03", "GEN3-T04")
+            if candidate in INITIAL_TOPIC_PATTERNS
+        ):
+            score -= 0.35
+        if score > 0:
+            scores[entry_id] = score
+
+    if not scores:
+        return PBSGTopicResolution(
+            entry_id=fallback_entry_id,
+            confidence=0.55,
+            reason="defaulted to first-contact triage because no Golden Set topic matched confidently",
+            overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
+        )
+
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    best_entry_id, best_score = ranked[0]
+    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+    if best_score < 0.6 or (second_score >= 0.6 and best_score - second_score < 0.2):
+        return PBSGTopicResolution(
+            entry_id=fallback_entry_id,
+            confidence=0.55,
+            reason="defaulted to first-contact triage because topic signals were weak or ambiguous",
+            overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
+        )
+
+    return PBSGTopicResolution(
+        entry_id=best_entry_id,
+        confidence=min(best_score, 1.0),
+        reason=evidence.get(best_entry_id, "metadata match"),
+        overlays=initial_topic_overlays(normalized, best_entry_id, entries),
+    )
 
 
 def detect_candidate_topics(
@@ -1306,6 +1458,38 @@ def extract_response_route_label(content: str | None) -> str | None:
     return None
 
 
+def collapse_duplicate_route_cards(content: str | None) -> str | None:
+    if not content:
+        return content
+    selected_matches = list(re.finditer(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE))
+    if len(selected_matches) < 2:
+        return content
+    blocks: list[tuple[int, int, str, str, str | None]] = []
+    for index, match in enumerate(selected_matches):
+        start = match.start()
+        end = selected_matches[index + 1].start() if index + 1 < len(selected_matches) else len(content)
+        block = content[start:end]
+        blocks.append((start, end, block, match.group(1).upper(), extract_response_route_label(block)))
+
+    prefix = content[: blocks[0][0]]
+    kept_blocks: list[str] = []
+    seen_route_cards: set[tuple[str, str]] = set()
+    changed = False
+
+    for _, _, block, entry_id, route_label in blocks:
+        if route_label:
+            key = (entry_id, route_label)
+            if key in seen_route_cards:
+                changed = True
+                continue
+            seen_route_cards.add(key)
+        kept_blocks.append(block)
+
+    if not changed:
+        return content
+    return f"{prefix}{''.join(kept_blocks)}".rstrip()
+
+
 def validate_response_transition(
     content: str | None,
     entries: dict[str, dict[str, Any]],
@@ -1408,6 +1592,54 @@ class PBSGRoutingEngine:
     def from_default_golden_set(cls) -> "PBSGRoutingEngine":
         return cls(load_golden_set_entries())
 
+    def execute_initial_turn(self, latest_user_query: str) -> PBSGDeterministicResult | None:
+        if not self.entries:
+            return None
+        resolution = resolve_initial_topic(self.entries, latest_user_query)
+        if not resolution:
+            return None
+        if resolution.entry_id == "GEN3-T02" and CAPITAL_OFFENCE_PATTERN.search(latest_user_query):
+            transition = self.graph.transition_for("GEN3-T02", "Q1", "if_yes")
+            if not transition:
+                return None
+            content = self.render_transition(transition)
+            state = PBSGTriageState(
+                mode="FAST_ROUTING",
+                workflow_id="GEN3-T02",
+                workflow_locked=True,
+                active_workflow="GEN3-T02",
+                current_question_id="Q1",
+                pending_entry_id="GEN3-T02",
+                latest_answer_classification="YES",
+                concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
+                triggered_overlays=resolution.overlays,
+            )
+            return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+        transition = PBSGTransition(
+            entry_id=resolution.entry_id,
+            question_id="START",
+            branch_key="initial_topic",
+            outcome=resolution.reason,
+            transition_type="proceed_question",
+            target_entry_id=resolution.entry_id,
+            target_question_id="Q1",
+        )
+        content = self.render_initial_question(resolution)
+        if not content:
+            return None
+        state = PBSGTriageState(
+            mode="FAST_ROUTING",
+            workflow_id=resolution.entry_id,
+            workflow_locked=True,
+            active_workflow=resolution.entry_id,
+            current_question_id="Q1",
+            pending_entry_id=resolution.entry_id,
+            concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
+            triggered_overlays=resolution.overlays,
+        )
+        return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
     def execute_locked_turn(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -1499,6 +1731,39 @@ class PBSGRoutingEngine:
             return self.render_clarification(transition)
         return None
 
+    def render_initial_question(self, resolution: PBSGTopicResolution) -> str | None:
+        question = self.question_text(resolution.entry_id, "Q1")
+        if not question:
+            return None
+        lines = [
+            f"**Selected Entry:** {resolution.entry_id}",
+            "",
+            "Triage progress:",
+            "",
+            f"- Topic resolved: {resolution.reason} [{resolution.entry_id}.json]",
+            f"- Next question: Q1 from {resolution.entry_id}",
+        ]
+        if resolution.overlays:
+            lines.extend(
+                [
+                    "",
+                    "**Concurrent monitors:**",
+                    "",
+                    *[f"- {overlay} noted as a monitor, not the active workflow [{overlay}.json]" for overlay in resolution.overlays],
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **Q1: "{convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{resolution.entry_id}.json]",
+            ]
+        )
+        return "\n".join(lines)
+
     def render_nested_stream_transition(self, transition: PBSGTransition) -> str | None:
         if not transition.target_entry_id or not transition.target_question_id:
             return None
@@ -1533,7 +1798,16 @@ class PBSGRoutingEngine:
                 f"- {transition.question_id}: {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
             ]
         )
-        lines.extend(["", "**Tell the applicant:**", "", f'"{applicant_script}"'])
+        lines.extend(
+            [
+                "",
+                "**Tell the applicant:**",
+                "",
+                f'"{applicant_script}"',
+                "",
+                f'> **{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
+            ]
+        )
         lines.extend(
             [
                 "",
@@ -1542,10 +1816,6 @@ class PBSGRoutingEngine:
                 f"- Last answered: {transition.entry_id} {transition.question_id} = {label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
                 f"- Now checking: {transition.target_entry_id} {transition.target_question_id}",
                 f"- After this urgent path: resume {resume_label}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'**{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
                 "",
                 f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
             ]

@@ -12,10 +12,12 @@ from pbsg_triage_state import (
     PBSGWorkflowGraph,
     branch_key_for_answer,
     candidate_golden_set_dirs,
+    collapse_duplicate_route_cards,
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
     resolve_gen3_t13_cue_transition,
+    resolve_initial_topic,
 )
 
 
@@ -43,6 +45,54 @@ def test_golden_set_candidates_include_local_and_container_layouts():
 
     assert (Path.cwd() / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
     assert (Path(__file__).resolve().parents[1] / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
+
+
+@pytest.mark.parametrize("query", ["hi", "I need help", "start triage", "general enquiry"])
+def test_initial_topic_resolver_defaults_vague_starts_to_gen3_t01(query):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert resolution.confidence < 0.7
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_entry_id"),
+    [
+        ("Applicant has a criminal charge in court.", "GEN3-T02"),
+        ("Applicant wants a divorce and has custody issues.", "GEN3-T03"),
+        ("Applicant's employer has not paid salary for three months.", "GEN3-T04"),
+    ],
+)
+def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_entry_id):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == expected_entry_id
+    assert resolution.confidence >= 0.6
+
+
+def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Elderly applicant is confused and has a debt issue.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T04"
+    assert "GEN3-T13" in resolution.overlays
+
+
+def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is elderly and confused.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T13"
 
 
 def route_labels(entry: dict[str, Any]) -> set[str]:
@@ -84,6 +134,71 @@ def test_gen3_routes_all_have_structured_read_aloud_cards():
             access = card.get("access")
             if isinstance(access, list) and any(isinstance(item, str) and "http" in item for item in access):
                 assert "http" not in script, f"{entry_id} {route_label} script should keep raw URLs in access"
+
+
+def test_duplicate_route_card_guard_keeps_first_matching_route_card():
+    content = """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    collapsed = collapse_duplicate_route_cards(content)
+
+    assert collapsed is not None
+    assert collapsed.count("**Selected Entry:**") == 1
+    assert "First LASCO wording" in collapsed
+    assert "Repeated LASCO wording" not in collapsed
+
+
+def test_duplicate_route_card_guard_collapses_repeated_cards_without_dropping_distinct_routes():
+    content = """Intro note.
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T03
+
+**Routing Recommendation:** Route B (LAB)
+
+**Tell the applicant:**
+
+> "Family wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    collapsed = collapse_duplicate_route_cards(content)
+
+    assert collapsed is not None
+    assert collapsed.startswith("Intro note.")
+    assert collapsed.count("**Selected Entry:** GEN3-T02") == 1
+    assert collapsed.count("**Selected Entry:** GEN3-T03") == 1
+    assert "First LASCO wording" in collapsed
+    assert "Family wording" in collapsed
+    assert "Repeated LASCO wording" not in collapsed
 
 
 def test_pbsg_golden_set_branching_graph_targets_are_valid():
@@ -140,7 +255,6 @@ def test_pbsg_branch_resolver_supports_every_branch_label():
                 assert resolved == branch_key, f"{entry_id} {question_id} did not resolve label {label}"
 
 
-<<<<<<< HEAD
 def test_pbsg_workflow_graph_has_edge_for_every_gen3_branch():
     entries = load_entries()
     graph = PBSGWorkflowGraph(entries)
@@ -156,8 +270,6 @@ def test_pbsg_workflow_graph_has_edge_for_every_gen3_branch():
                     assert graph.edge_for(entry_id, question_id, branch_key), f"Missing graph edge for {entry_id} {question_id}.{branch_key}"
 
 
-=======
->>>>>>> legal_develop
 def test_pbsg_routing_engine_renders_every_deterministic_branch():
     entries = load_entries()
     engine = PBSGRoutingEngine(entries)
@@ -176,6 +288,28 @@ def test_pbsg_routing_engine_renders_every_deterministic_branch():
                     continue
                 assert content, f"{entry_id} {question_id}.{branch_key} did not render"
                 assert "**Selected Entry:**" in content
+
+
+def test_pbsg_terminal_routes_render_single_route_card_for_every_gen3_branch():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+
+    for entry_id, entry in entries.items():
+        if not entry_id.startswith("GEN3-"):
+            continue
+        for question_id, question_node in entry["branching_logic"].items():
+            if not isinstance(question_node, dict):
+                continue
+            for branch_key, outcome in question_node.items():
+                if not branch_key.startswith("if_") or not isinstance(outcome, str):
+                    continue
+                transition = parse_transition_outcome(entries, entry_id, question_id, branch_key, outcome)
+                if transition.transition_type != "terminal_route":
+                    continue
+                content = engine.render_transition(transition)
+                assert content is not None
+                assert content.count("**Selected Entry:**") == 1, f"{entry_id} {question_id}.{branch_key}"
+                assert content.count("**Routing Recommendation:**") == 1, f"{entry_id} {question_id}.{branch_key}"
 
 
 def test_pbsg_cross_reference_routes_are_explicit_nested_edges():
@@ -206,7 +340,6 @@ def test_pbsg_cross_reference_routes_are_explicit_nested_edges():
     assert t03_q1_yes.resume_question_id == "Q2"
 
 
-<<<<<<< HEAD
 def test_nested_urgent_transition_renders_structured_card():
     entries = load_entries()
     engine = PBSGRoutingEngine(entries)
@@ -227,12 +360,10 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert '**GEN3-T06 Q1: "Is there an immediate threat to your (or someone else\'s) life or physical safety right now?"**' in content
-    assert "> **GEN3-T06 Q1" not in content
+    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
+    assert "**Ask the applicant (read verbatim):**" not in content
 
 
-=======
->>>>>>> legal_develop
 def test_pbsg_known_cross_routing_regressions():
     entries = load_entries()
 
@@ -289,7 +420,6 @@ def test_pbsg_known_cross_routing_regressions():
     assert t04_q1_foreigner.target_entry_id == "GEN3-T04"
     assert t04_q1_foreigner.target_question_id == "Q4"
 
-<<<<<<< HEAD
     t06_q2_not_sure = parse_transition_outcome(
         entries,
         "GEN3-T06",
@@ -422,8 +552,6 @@ def test_routing_engine_executes_gen3_t13_cue_without_llm():
     assert result.transition.route_label == "Route B"
     assert "Minor — Special Handling" in result.content
 
-=======
->>>>>>> legal_develop
 
 def test_pbsg_routing_engine_renders_terminal_route_from_active_entry():
     entries = load_entries()
@@ -442,11 +570,8 @@ def test_pbsg_routing_engine_renders_terminal_route_from_active_entry():
     assert "**Selected Entry:** GEN3-T02" in content
     assert "**Routing Recommendation:** Route A" in content
     assert "LASCO" in content
-<<<<<<< HEAD
     assert "**Tell the applicant:**" in content
     assert f'> **"{entries["GEN3-T02"]["routing"][0]}"**' not in content
-=======
->>>>>>> legal_develop
 
 
 def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
@@ -466,7 +591,6 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     assert "**Selected Entry:** GEN3-T04" in content
     assert "Handoff: GEN3-T02 → GEN3-T04" in content
     assert "Next question: Q1 from GEN3-T04" in content
-<<<<<<< HEAD
 
 
 @pytest.mark.parametrize(
@@ -635,5 +759,3 @@ def test_gen3_t13_structured_route_card_renders_overlay_script():
     assert "**Routing Recommendation:** Route B (Minor — Special Handling)" in content
     assert "I need PBSG Staff to handle this carefully" in content
     assert "Do not continue triage independently" in content
-=======
->>>>>>> legal_develop

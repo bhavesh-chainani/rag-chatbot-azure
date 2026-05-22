@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from azure.cosmos.aio import ContainerProxy, CosmosClient
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from azure.identity.aio import AzureDeveloperCliCredential, ManagedIdentityCredential
 from openai import AsyncOpenAI
 from quart import Blueprint, current_app, jsonify, make_response, request
@@ -49,6 +50,18 @@ def _cosmos_message_pair_to_answer_row(item: dict[str, Any]) -> list[Any]:
         except (TypeError, ValueError):
             pass
     return row
+
+
+def _message_pair_sort_key(item: dict[str, Any]) -> int:
+    """Order message pairs by index suffix in id ({session_id}-{ind})."""
+    doc_id = item.get("id", "")
+    if "-" not in doc_id:
+        return 0
+    suffix = doc_id.rsplit("-", 1)[-1]
+    try:
+        return int(suffix)
+    except ValueError:
+        return 0
 
 TITLE_GENERATION_PROMPT = (
     "Generate a short chat title that summarizes the message topic. "
@@ -118,8 +131,19 @@ async def post_chat_history(auth_claims: dict[str, Any]):
         session_id = request_json.get("id")
         message_pairs = request_json.get("answers")
         first_question = message_pairs[0][0]
-        title = await generate_chat_title(first_question)
         timestamp = int(time.time() * 1000)
+
+        title: str
+        try:
+            existing_session = await container.read_item(
+                item=session_id, partition_key=[entra_oid, session_id]
+            )
+            if existing_session.get("type") == "session" and existing_session.get("title"):
+                title = existing_session["title"]
+            else:
+                title = await generate_chat_title(first_question)
+        except CosmosResourceNotFoundError:
+            title = await generate_chat_title(first_question)
 
         # Insert the session item:
         session_item = {
@@ -289,10 +313,13 @@ async def get_chat_history_session(auth_claims: dict[str, Any], session_id: str)
             partition_key=[entra_oid, session_id],
         )
 
-        message_pairs = []
+        raw_items: list[dict[str, Any]] = []
         async for page in res.by_page():
             async for item in page:
-                message_pairs.append(_cosmos_message_pair_to_answer_row(item))
+                raw_items.append(item)
+
+        raw_items.sort(key=_message_pair_sort_key)
+        message_pairs = [_cosmos_message_pair_to_answer_row(item) for item in raw_items]
 
         return (
             jsonify(

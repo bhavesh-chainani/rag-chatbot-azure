@@ -4,7 +4,9 @@ from typing import Any
 
 import pytest
 from azure.cosmos.aio import ContainerProxy
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
+from chat_history import cosmosdb as cosmosdb_module
 from .mocks import MockAsyncPageIterator
 
 for_sessions_query = [
@@ -75,6 +77,10 @@ for_message_pairs_query = [
 ]
 
 
+async def mock_read_item_session_not_found(container_proxy, item, partition_key, **kwargs):
+    raise CosmosResourceNotFoundError(message="Not found")
+
+
 class MockCosmosDBResultsIterator:
     def __init__(self, data=[]):
         self.data = copy.deepcopy(data)
@@ -122,6 +128,7 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
         assert message["question"] == "This is a test message"
         assert message["response"] == "This is a test answer"
 
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item_session_not_found)
     monkeypatch.setattr(ContainerProxy, "execute_item_batch", mock_execute_item_batch)
 
     response = await auth_public_documents_client.post(
@@ -136,6 +143,98 @@ async def test_chathistory_newitem(auth_public_documents_client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chathistory_getitem_sorts_message_pairs(auth_public_documents_client, monkeypatch):
+    unsorted_pairs = [
+        [
+            {
+                "id": "123-2",
+                "session_id": "123",
+                "entra_oid": "OID_X",
+                "type": "message_pair",
+                "question": "Third question",
+                "response": "Third answer",
+            },
+            {
+                "id": "123-0",
+                "session_id": "123",
+                "entra_oid": "OID_X",
+                "type": "message_pair",
+                "question": "First question",
+                "response": "First answer",
+            },
+            {
+                "id": "123-1",
+                "session_id": "123",
+                "entra_oid": "OID_X",
+                "type": "message_pair",
+                "question": "Second question",
+                "response": "Second answer",
+            },
+        ]
+    ]
+
+    def mock_query_items(container_proxy, query, **kwargs):
+        return MockCosmosDBResultsIterator(unsorted_pairs)
+
+    monkeypatch.setattr(ContainerProxy, "query_items", mock_query_items)
+
+    response = await auth_public_documents_client.get(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+    )
+    assert response.status_code == 200
+    result = await response.get_json()
+    assert [row[0] for row in result["answers"]] == [
+        "First question",
+        "Second question",
+        "Third question",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chathistory_update_reuses_existing_title(auth_public_documents_client, monkeypatch):
+    created_sessions: set[str] = set()
+    title_generation_calls: list[str] = []
+
+    async def mock_generate_chat_title(message: str) -> str:
+        title_generation_calls.append(message)
+        return "Generated Title"
+
+    async def mock_read_item(container_proxy, item, partition_key, **kwargs):
+        if item in created_sessions:
+            return {
+                "id": item,
+                "type": "session",
+                "title": "Existing Title",
+                "session_id": item,
+                "entra_oid": "OID_X",
+            }
+        raise CosmosResourceNotFoundError(message="Not found")
+
+    async def mock_execute_item_batch(container_proxy, **kwargs):
+        session = kwargs["batch_operations"][0][1][0]
+        created_sessions.add(session["id"])
+
+    monkeypatch.setattr(cosmosdb_module, "generate_chat_title", mock_generate_chat_title)
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item)
+    monkeypatch.setattr(ContainerProxy, "execute_item_batch", mock_execute_item_batch)
+
+    payload = {
+        "id": "123",
+        "answers": [["First question", "First answer"], ["Second question", "Second answer"]],
+    }
+    headers = {"Authorization": "Bearer MockToken"}
+
+    first = await auth_public_documents_client.post("/chat_history", headers=headers, json=payload)
+    assert first.status_code == 201
+
+    second = await auth_public_documents_client.post("/chat_history", headers=headers, json=payload)
+    assert second.status_code == 201
+
+    assert len(title_generation_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_chathistory_newitem_persists_user_sent_at(auth_public_documents_client, monkeypatch):
     captured: dict[str, Any] = {}
 
@@ -143,6 +242,7 @@ async def test_chathistory_newitem_persists_user_sent_at(auth_public_documents_c
         operations = kwargs["batch_operations"]
         captured["message"] = operations[1][1][0]
 
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item_session_not_found)
     monkeypatch.setattr(ContainerProxy, "execute_item_batch", mock_execute_item_batch)
 
     ts = 1_700_000_000_000
@@ -247,22 +347,23 @@ async def test_chathistory_newitem_error_entra(auth_public_documents_client, mon
 @pytest.mark.asyncio
 async def test_chathistory_newitem_error_runtime(auth_public_documents_client, monkeypatch):
 
-    async def mock_upsert_item(container_proxy, item, **kwargs):
+    async def mock_execute_item_batch(container_proxy, **kwargs):
         raise Exception("Test Exception")
 
-    monkeypatch.setattr(ContainerProxy, "upsert_item", mock_upsert_item)
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item_session_not_found)
+    monkeypatch.setattr(ContainerProxy, "execute_item_batch", mock_execute_item_batch)
 
     response = await auth_public_documents_client.post(
         "/chat_history",
         headers={"Authorization": "Bearer MockToken"},
         json={
             "id": "123",
-            "answers": [["This is a test message"]],
+            "answers": [["This is a test message", "This is a test answer"]],
         },
     )
     assert response.status_code == 500
     assert (await response.get_json()) == {
-        "error": "The app encountered an error processing your request.\nIf you are an administrator of the app, check the application logs for a full traceback.\nError type: <class 'IndexError'>\n"
+        "error": "The app encountered an error processing your request.\nIf you are an administrator of the app, check the application logs for a full traceback.\nError type: <class 'Exception'>\n"
     }
 
 

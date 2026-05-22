@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useContext } from "react";
+import { useRef, useState, useEffect, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Helmet } from "react-helmet-async";
 import {
@@ -35,6 +35,21 @@ import { TokenClaimsDisplay } from "../../components/TokenClaimsDisplay";
 import { LoginContext } from "../../loginContext";
 import { LanguagePicker } from "../../i18n/LanguagePicker";
 import { Settings } from "../../components/Settings/Settings";
+import { enqueueHistorySave, flushHistorySave } from "../../chatHistorySaveQueue";
+import { useChatSession } from "../../chatSessionContext";
+
+function normalizeHistoryAnswers(sessionId: string, answers: Answers): Answers {
+    return answers.map(([question, response, sentAt]) => {
+        const normalized: [string, ChatAppResponse, number?] = [
+            question,
+            { ...response, session_state: sessionId }
+        ];
+        if (sentAt !== undefined) {
+            normalized[2] = sentAt;
+        }
+        return normalized;
+    });
+}
 
 function useCitationPanelIframeHeight(): string {
     const [height, setHeight] = useState("810px");
@@ -100,6 +115,7 @@ const Chat = () => {
 
     const [selectedAnswer, setSelectedAnswer] = useState<number>(0);
     const [answers, setAnswers] = useState<Answers>([]);
+    const answersRef = useRef<Answers>([]);
     const [streamedAnswers, setStreamedAnswers] = useState<Answers>([]);
     const [pendingQuestionSentAt, setPendingQuestionSentAt] = useState<number | null>(null);
     const [speechUrls, setSpeechUrls] = useState<(string | null)[]>([]);
@@ -254,6 +270,15 @@ const Chat = () => {
         return HistoryProviderOptions.None;
     })();
     const historyManager = useHistoryManager(historyProvider);
+    const { registerClearChat } = useChatSession();
+
+    useEffect(() => {
+        answersRef.current = answers;
+    }, [answers]);
+
+    const getHistoryToken = useCallback(async (): Promise<string | undefined> => {
+        return client ? await getToken(client) : undefined;
+    }, [client]);
 
     const updateStreamingPreference = (isStreamingEnabledOverride: boolean, disablesStreamingOverride: boolean) => {
         if (!isStreamingEnabledOverride) {
@@ -356,11 +381,17 @@ const Chat = () => {
                 );
                 // Only add to answers if we got content, otherwise restore question to input
                 if (parsedResponse.message.content) {
-                    setAnswers([...answers, [question, parsedResponse, questionSentAt]]);
+                    const newAnswers: Answers = [...answers, [question, parsedResponse, questionSentAt]];
+                    setAnswers(newAnswers);
+                    answersRef.current = newAnswers;
                     setPendingQuestionSentAt(null);
                     if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
-                        const token = client ? await getToken(client) : undefined;
-                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse, questionSentAt]], token);
+                        enqueueHistorySave(
+                            parsedResponse.session_state,
+                            newAnswers,
+                            getHistoryToken,
+                            historyManager
+                        );
                     }
                 } else {
                     // Stopped before any content arrived - restore question to input
@@ -373,11 +404,12 @@ const Chat = () => {
                 if (parsedResponse.error) {
                     throw Error(parsedResponse.error);
                 }
-                setAnswers([...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]]);
+                const newAnswers: Answers = [...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]];
+                setAnswers(newAnswers);
+                answersRef.current = newAnswers;
                 setPendingQuestionSentAt(null);
                 if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
-                    const token = client ? await getToken(client) : undefined;
-                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]], token);
+                    enqueueHistorySave(parsedResponse.session_state, newAnswers, getHistoryToken, historyManager);
                 }
             }
             setSpeechUrls([...speechUrls, null]);
@@ -398,13 +430,10 @@ const Chat = () => {
         }
     };
 
-    const clearChat = async () => {
+    const clearChat = useCallback(async () => {
         clearingForNewChatRef.current = true;
-        // Capture current conversation to save to history before clearing
         const hasStreaming = streamedAnswers.length > 0;
-        const toSave: Answers = hasStreaming
-            ? [...streamedAnswers]
-            : [...answers];
+        const toSave: Answers = hasStreaming ? [...streamedAnswers] : [...answersRef.current];
         const lastResponse = toSave.length > 0 ? toSave[toSave.length - 1][1] : null;
         let sessionId: string | null =
             lastResponse && typeof lastResponse.session_state === "string" && lastResponse.session_state !== ""
@@ -414,18 +443,8 @@ const Chat = () => {
             sessionId = crypto.randomUUID();
         }
 
-        // Abort in-flight request so the current chat can be saved and we start fresh
         if (abortController) {
             abortController.abort();
-        }
-
-        if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && sessionId) {
-            try {
-                const token = client ? await getToken(client) : undefined;
-                await historyManager.addItem(sessionId, toSave, token);
-            } catch (e) {
-                console.error("Failed to save chat to history:", e);
-            }
         }
 
         lastQuestionRef.current = "";
@@ -433,6 +452,7 @@ const Chat = () => {
         setActiveCitation(undefined);
         setActiveAnalysisPanelTab(undefined);
         setAnswers([]);
+        answersRef.current = [];
         setSpeechUrls([]);
         setStreamedAnswers([]);
         setPendingQuestionSentAt(null);
@@ -442,7 +462,25 @@ const Chat = () => {
         setTimeout(() => {
             clearingForNewChatRef.current = false;
         }, 0);
-    };
+
+        if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && sessionId) {
+            void flushHistorySave(sessionId, toSave, getHistoryToken, historyManager).catch(e => {
+                console.error("Failed to save chat to history:", e);
+            });
+        }
+    }, [
+        abortController,
+        error,
+        getHistoryToken,
+        historyManager,
+        historyProvider,
+        streamedAnswers
+    ]);
+
+    useEffect(() => {
+        registerClearChat(clearChat);
+        return () => registerClearChat(null);
+    }, [clearChat, registerClearChat]);
 
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "smooth" }), [isLoading]);
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "auto" }), [streamedAnswers]);
@@ -752,11 +790,13 @@ const Chat = () => {
                         isOpen={isHistoryPanelOpen}
                         notify={!isStreaming && !isLoading}
                         onClose={() => setIsHistoryPanelOpen(false)}
-                        onChatSelected={answers => {
+                        onChatSelected={(sessionId, answers) => {
                             if (answers.length === 0) return;
-                            setAnswers(answers);
+                            const normalized = normalizeHistoryAnswers(sessionId, answers);
+                            setAnswers(normalized);
+                            answersRef.current = normalized;
                             setPendingQuestionSentAt(null);
-                            lastQuestionRef.current = answers[answers.length - 1][0];
+                            lastQuestionRef.current = normalized[normalized.length - 1][0];
                         }}
                     />
                 )}

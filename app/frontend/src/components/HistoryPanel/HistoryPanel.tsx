@@ -24,7 +24,7 @@ export const HistoryPanel = ({
     isOpen: boolean;
     notify: boolean;
     onClose: () => void;
-    onChatSelected: (answers: Answers) => void;
+    onChatSelected: (sessionId: string, answers: Answers) => void;
 }) => {
     const historyManager = useHistoryManager(provider);
     const [history, setHistory] = useState<HistoryMetaData[]>([]);
@@ -67,7 +67,7 @@ export const HistoryPanel = ({
         const token = client ? await getToken(client) : undefined;
         const item = await historyManager.getItem(id, token);
         if (item) {
-            onChatSelected(item);
+            onChatSelected(id, item);
         }
     };
 

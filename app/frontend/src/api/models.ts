@@ -84,6 +84,7 @@ export type ResponseContext = {
     quick_reply?: QuickReply | null;
     thoughts: Thoughts[];
     answer?: string;
+    pbsg_triage_state?: Record<string, unknown>;
 };
 
 export type QuickReplyOption = {

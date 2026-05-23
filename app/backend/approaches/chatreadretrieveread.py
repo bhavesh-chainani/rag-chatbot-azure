@@ -27,10 +27,12 @@ from approaches.approach import (
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGDeterministicResult,
+    PBSGInterruption,
     PBSGQueuedTopic,
     PBSGRoutingEngine,
     PBSGTransition,
     PBSGTurnClassification,
+    active_fact_for_question,
     build_triage_state,
     classify_turn_interrupt,
     collapse_duplicate_route_cards,
@@ -38,6 +40,7 @@ from pbsg_triage_state import (
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
+    question_text_from_entry,
     resolve_expected_transition,
     resolve_initial_topic,
     safe_escalation_response,
@@ -78,6 +81,14 @@ COMMON_QUERY_TERMS = {
     "who",
     "why",
     "you",
+}
+
+PBSG_GLOSSARY_ANSWERS = {
+    "lasco": "LASCO is the Legal Assistance Scheme for Capital Offences. It provides representation for people charged with capital offences.",
+    "clas": "CLAS is the Criminal Legal Aid Scheme. It may provide free or low-cost criminal defence representation for eligible low-income applicants facing non-capital criminal charges.",
+    "lab": "LAB is the Legal Aid Bureau, the government legal aid office for eligible Singapore Citizens or PRs facing civil or family proceedings.",
+    "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
+    "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
 
 
@@ -479,7 +490,11 @@ class ChatReadRetrieveReadApproach(Approach):
         content = self.apply_triage_response_guard(deterministic_result.content, extra_info)
         if content and queued_topics:
             content = self.append_queued_topic_note(content, deterministic_result.state.active_workflow, queued_topics)
-        extra_info.quick_reply = self.build_quick_reply(content, extra_info)
+        if content:
+            content = self.append_route_completion_note(content, deterministic_result.state)
+        extra_info.quick_reply = self.build_continue_queued_topic_quick_reply(deterministic_result.state)
+        if not extra_info.quick_reply:
+            extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         extra_info.thoughts.append(
             ThoughtStep(
                 "Deterministic PBSG routing",
@@ -507,6 +522,51 @@ class ChatReadRetrieveReadApproach(Approach):
             },
             "session_state": session_state,
         }
+
+    def build_continue_queued_topic_quick_reply(self, triage_state: Any) -> Optional[QuickReply]:
+        if getattr(triage_state, "routing_completion_status", None) != "awaiting_topic_resolution":
+            return None
+        queued_workflows = getattr(triage_state, "queued_workflows", None) or []
+        if not queued_workflows:
+            return None
+        workflow_id = queued_workflows[0]
+        entry = self.pbsg_golden_set_entries.get(workflow_id, {})
+        topic = entry.get("topic") if isinstance(entry, dict) else None
+        label_suffix = f" - {topic}" if isinstance(topic, str) and topic else ""
+        return QuickReply(
+            mode="single",
+            entryId=workflow_id,
+            questionId="CONTINUE",
+            options=[
+                QuickReplyOption(
+                    id=f"continue_queued_workflow:{workflow_id}",
+                    label=f"Topic resolved - continue to {workflow_id}",
+                    value=f"Continue queued workflow: {workflow_id}{label_suffix}",
+                )
+            ],
+        )
+
+    def append_route_completion_note(self, content: str, triage_state: Any) -> str:
+        quick_reply = self.build_continue_queued_topic_quick_reply(triage_state)
+        if not quick_reply:
+            return content
+        workflow_id = quick_reply.entryId
+        entry = self.pbsg_golden_set_entries.get(workflow_id, {})
+        topic = entry.get("topic") if isinstance(entry, dict) else workflow_id
+        note = "\n".join(
+            [
+                "",
+                "**Queued topic ready:**",
+                "",
+                f"- {workflow_id}: {topic}",
+                "- Click the button when this routed topic has been resolved and you are ready to continue.",
+                "",
+                "Topics identified:",
+                f"1. {triage_state.active_workflow or triage_state.workflow_id or 'Current workflow'} — routed workflow",
+                f"2. {workflow_id} — queued workflow",
+            ]
+        )
+        return f"{content}{note}"
 
     def append_queued_topic_note(
         self,
@@ -570,6 +630,198 @@ class ChatReadRetrieveReadApproach(Approach):
         if not deterministic_result:
             return None
         return self.build_deterministic_chat_response(deterministic_result, session_state)
+
+    def local_side_enquiry_answer(self, latest_content: str) -> str | None:
+        normalized = latest_content.lower()
+        if not re.search(r"\b(what is|what's|what does|explain|meaning of)\b", normalized):
+            return None
+        for term, answer in PBSG_GLOSSARY_ANSWERS.items():
+            if re.search(rf"\b{re.escape(term)}\b", normalized):
+                return answer
+        return None
+
+    def try_local_side_enquiry_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
+            return None
+        answer = self.local_side_enquiry_answer(latest_content)
+        if not answer:
+            return None
+        triage_state.active_side_enquiry = PBSGInterruption(
+            question=latest_content,
+            parent_workflow=triage_state.pending_entry_id,
+            parent_question_id=triage_state.current_question_id,
+        )
+        triage_state.interruption_stack.append(triage_state.active_side_enquiry)
+        turn_classification = PBSGTurnClassification(
+            turn_type="clarification",
+            should_call_llm=False,
+            reason=answer,
+        )
+        return self.build_pending_question_response(
+            triage_state,
+            turn_classification,
+            "I answered the side question and preserved the current routing point.",
+            session_state,
+        )
+
+    def parse_continue_queued_workflow(self, latest_content: str) -> str | None:
+        match = re.search(r"\bContinue queued workflow:\s*(GEN3-[A-Z0-9-]+)\b", latest_content, flags=re.IGNORECASE)
+        return match.group(1).upper() if match else None
+
+    def is_route_completion_acknowledgement(self, latest_content: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9\s]", " ", latest_content.lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized in {"ok", "okay", "yes", "done", "resolved", "thanks", "thank you", "next"}
+
+    def build_awaiting_topic_resolution_response(
+        self,
+        triage_state: Any,
+        session_state: Any = None,
+    ) -> dict[str, Any]:
+        active_workflow = triage_state.workflow_id or triage_state.active_workflow or "Current topic"
+        next_workflow = triage_state.queued_workflows[0] if triage_state.queued_workflows else None
+        next_entry = self.pbsg_golden_set_entries.get(next_workflow or "", {})
+        next_topic = next_entry.get("topic") if isinstance(next_entry, dict) else next_workflow
+        content = "\n".join(
+            [
+                f"**Selected Entry:** {active_workflow}",
+                "",
+                f"**Note:** {active_workflow} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
+                "",
+                "**Queued topic ready:**",
+                "",
+                f"- {next_workflow}: {next_topic}",
+                "- Click the button when you are ready to continue.",
+                "",
+                "Topics identified:",
+                f"1. {active_workflow} — routed workflow",
+                f"2. {next_workflow} — queued workflow",
+            ]
+        )
+        data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
+        extra_info = ExtraInfo(data_points=data_points)
+        extra_info.quick_reply = self.build_continue_queued_topic_quick_reply(triage_state)
+        extra_info.thoughts.append(
+            ThoughtStep(
+                "Deterministic PBSG queued topic hold",
+                "Preserved the queued workflow and waited for explicit intern confirmation before continuing.",
+                {
+                    "routing_completion_status": triage_state.routing_completion_status,
+                    "queued_workflows": triage_state.queued_workflows,
+                },
+            )
+        )
+        return {
+            "message": {"content": content, "role": "assistant"},
+            "context": {
+                "thoughts": extra_info.thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(triage_state),
+            },
+            "session_state": session_state,
+        }
+
+    def try_queued_topic_control_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        if triage_state.routing_completion_status != "awaiting_topic_resolution" or not triage_state.queued_workflows:
+            return None
+        workflow_to_continue = self.parse_continue_queued_workflow(latest_content)
+        if workflow_to_continue:
+            deterministic_result = self.pbsg_routing_engine.start_queued_workflow(messages[:-1], workflow_to_continue)
+            if deterministic_result:
+                return self.build_deterministic_chat_response(deterministic_result, session_state)
+            return None
+        return self.build_awaiting_topic_resolution_response(triage_state, session_state)
+
+    def first_missing_prerequisite_question(
+        self,
+        entry_id: str,
+        target_question_id: str,
+        triage_state: Any,
+    ) -> str | None:
+        match = re.fullmatch(r"Q(\d+)([A-Z]?)", target_question_id.upper())
+        if not match:
+            return None
+        target_number = int(match.group(1))
+        if target_number <= 1:
+            return None
+        entry = self.pbsg_golden_set_entries.get(entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        if not isinstance(branching_logic, dict):
+            return None
+        for question_number in range(1, target_number):
+            question_id = f"Q{question_number}"
+            if question_id not in branching_logic:
+                continue
+            question = question_text_from_entry(self.pbsg_golden_set_entries, entry_id, question_id)
+            if not active_fact_for_question(triage_state.fact_ledger, question):
+                return question_id
+        return None
+
+    def repair_unvalidated_prerequisite_skip(
+        self,
+        content: Optional[str],
+        messages: list[ChatCompletionMessageParam],
+        latest_content: str,
+    ) -> Optional[str]:
+        if not content:
+            return content
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*(GEN3-[A-Z0-9-]+)", content, flags=re.IGNORECASE)
+        selected_entry_id = selected_entry_matches[-1].upper() if selected_entry_matches else None
+        if not selected_entry_id or selected_entry_id not in self.pbsg_golden_set_entries:
+            return content
+        targets = re.findall(r"Next question:\s*(Q\d+[A-Z]?)\b|>\s*\**(Q\d+[A-Z]?)\s*:", content, flags=re.IGNORECASE)
+        target_question_id = None
+        for first_match, second_match in targets:
+            target_question_id = (first_match or second_match).upper()
+        if not target_question_id:
+            return content
+        missing_question_id = self.first_missing_prerequisite_question(selected_entry_id, target_question_id, triage_state)
+        if not missing_question_id:
+            return content
+        question = self.pbsg_routing_engine.question_text(selected_entry_id, missing_question_id)
+        if not question:
+            return content
+        return "\n".join(
+            [
+                f"**Selected Entry:** {selected_entry_id}",
+                "",
+                "**Note:** I cannot rely on unverified answers for this workflow. We need to ask the first unanswered required question.",
+                "",
+                "Triage progress:",
+                "",
+                f"- Repaired skipped prerequisite: {missing_question_id} from {selected_entry_id}",
+                f"- Next question: {missing_question_id} from {selected_entry_id}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **{missing_question_id}: "{self.convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{selected_entry_id}.json]",
+            ]
+        )
 
     async def try_structured_llm_locked_response(
         self,
@@ -901,6 +1153,12 @@ class ChatReadRetrieveReadApproach(Approach):
         deterministic_response = self.try_deterministic_locked_response(messages, session_state)
         if deterministic_response:
             return deterministic_response
+        side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
+        if side_enquiry_response:
+            return side_enquiry_response
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            return queued_topic_response
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
             return structured_response
@@ -917,6 +1175,9 @@ class ChatReadRetrieveReadApproach(Approach):
         content = self.normalize_asked_question_text(content, extra_info)
         content = collapse_duplicate_route_cards(content)
         content = self.apply_triage_response_guard(content, extra_info)
+        latest_content = messages[-1].get("content") if messages else ""
+        if isinstance(latest_content, str):
+            content = self.repair_unvalidated_prerequisite_skip(content, messages, latest_content)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
         # TODO: Update for agentic? This isn't still true?
@@ -955,6 +1216,18 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
             return
+        side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
+        if side_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": side_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": side_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": side_enquiry_response["context"], "session_state": session_state}
+            return
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": queued_topic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            return
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
             yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
@@ -984,6 +1257,9 @@ class ChatReadRetrieveReadApproach(Approach):
             content = self.normalize_asked_question_text(content, extra_info)
             content = collapse_duplicate_route_cards(content)
             content = self.apply_triage_response_guard(content, extra_info)
+            latest_content = messages[-1].get("content") if messages else ""
+            if isinstance(latest_content, str):
+                content = self.repair_unvalidated_prerequisite_skip(content, messages, latest_content)
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
             if self.include_token_usage and extra_info.thoughts and chat_result.usage:
@@ -1056,6 +1332,9 @@ class ChatReadRetrieveReadApproach(Approach):
             streamed_content = self.normalize_asked_question_text(streamed_content, extra_info) or streamed_content
             streamed_content = collapse_duplicate_route_cards(streamed_content) or streamed_content
             streamed_content = self.apply_triage_response_guard(streamed_content, extra_info) or streamed_content
+            latest_content = messages[-1].get("content") if messages else ""
+            if isinstance(latest_content, str):
+                streamed_content = self.repair_unvalidated_prerequisite_skip(streamed_content, messages, latest_content) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
             if buffer_pbsg_stream:
                 yield {"delta": {"role": "assistant", "content": streamed_content}}

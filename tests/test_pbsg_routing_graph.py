@@ -11,6 +11,7 @@ from pbsg_triage_state import (
     PBSGTriageState,
     PBSGWorkflowGraph,
     branch_key_for_answer,
+    build_triage_state,
     candidate_golden_set_dirs,
     collapse_duplicate_route_cards,
     label_from_branch_key,
@@ -591,6 +592,77 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     assert "**Selected Entry:** GEN3-T04" in content
     assert "Handoff: GEN3-T02 → GEN3-T04" in content
     assert "Next question: Q1 from GEN3-T04" in content
+
+
+def test_pbsg_routing_engine_reuses_fact_on_handoff_to_avoid_reasking_q1():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q2: No, foreigner [GEN3-T03.json]
+
+Triage progress:
+
+- Last answered: Q2 = No, foreigner → Proceed to Q4 [GEN3-T03.json]
+- Next question: Q4 from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "(Foreigner path) Does the applicant have at least one Singaporean child (under 21)?"**""",
+        }
+    ]
+
+    result = engine.execute_locked_turn(messages, "No")
+
+    assert result is not None
+    content = result.content
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over from GEN3-T03.Q2: No, foreigner" in content
+    assert "Next question: Q4 from GEN3-T04" in content
+    assert 'Q1: "Are you a Singapore Citizen or PR?"' not in content
+    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.current_question_id == "Q4"
+    assert result.state.unanswered_required_fields == ["applicant.means_status"]
+
+
+def test_pbsg_triage_state_preserves_queued_workflows_after_terminal_route():
+    entries = load_entries()
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+Topics identified:
+1. GEN3-T02 — active workflow
+2. GEN3-T03 — queued workflow (noted from: divorce)
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "Yes"},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        },
+    ]
+
+    state = build_triage_state(messages, entries, "ok")
+
+    assert state.completed_workflows == ["GEN3-T02"]
+    assert state.queued_workflows == ["GEN3-T03"]
+    assert state.routing_completion_status == "awaiting_topic_resolution"
 
 
 @pytest.mark.parametrize(

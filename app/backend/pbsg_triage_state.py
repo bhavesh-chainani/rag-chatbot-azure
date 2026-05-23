@@ -14,6 +14,28 @@ class PBSGTriageQuestionTarget:
 
 
 @dataclass
+class PBSGTriageFact:
+    fact_key: str
+    value: str
+    normalized_value: str
+    source: str
+    scope: str = "global"
+    confidence: float = 1.0
+    status: str = "active"
+    provenance: str | None = None
+    source_type: str = "assistant_visible_state"
+
+
+@dataclass
+class PBSGInterruption:
+    question: str
+    parent_workflow: str | None
+    parent_question_id: str | None
+    status: str = "active"
+    depth: int = 1
+
+
+@dataclass
 class PBSGTriageState:
     mode: str = "ORCHESTRATION"
     workflow_id: str | None = None
@@ -38,6 +60,12 @@ class PBSGTriageState:
     parent_workflow: str | None = None
     resume_question_id: str | None = None
     triggered_overlays: list[str] = field(default_factory=list)
+    fact_ledger: list[PBSGTriageFact] = field(default_factory=list)
+    unanswered_required_fields: list[str] = field(default_factory=list)
+    suspended_workflows: list[str] = field(default_factory=list)
+    active_side_enquiry: PBSGInterruption | None = None
+    interruption_stack: list[PBSGInterruption] = field(default_factory=list)
+    routing_completion_status: str = "not_started"
 
 
 @dataclass
@@ -309,6 +337,136 @@ def extract_answered_lines(content: str | None) -> list[str]:
     return lines[-8:]
 
 
+def normalize_question_text_for_fact(question: str) -> str:
+    normalized = re.sub(r"^\([^)]*\)\s*", "", question.lower()).strip()
+    normalized = re.sub(r"[^a-z0-9\s/]", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def canonical_fact_key_for_question(question: str | None) -> str | None:
+    if not question:
+        return None
+    normalized = normalize_question_text_for_fact(question)
+    if (
+        "singapore citizen" in normalized
+        or re.search(r"\bpr\b", normalized)
+        or "permanent resident" in normalized
+    ):
+        return "applicant.residency_status"
+    if "represented by a lawyer" in normalized or "currently represented" in normalized:
+        return "applicant.representation_status"
+    if "received legal advice" in normalized:
+        return "applicant.prior_legal_advice"
+    if "court date" in normalized or "deadline" in normalized or "family violence" in normalized:
+        return "matter.urgency_or_safety"
+    if "capital offence" in normalized or "punishable with death" in normalized:
+        return "matter.capital_offence"
+    if "legal aid bureau" in normalized or " lab" in f" {normalized}":
+        return "applicant.lab_application_status"
+    if "public defender" in normalized or " pdo" in f" {normalized}":
+        return "applicant.pdo_application_status"
+    if "per capita household income" in normalized or " pchi" in f" {normalized}":
+        return "applicant.means_status"
+    if "singaporean child" in normalized or "child under 21" in normalized:
+        return "applicant.singaporean_child_under_21"
+    if "representation" in normalized and "guidance" in normalized:
+        return "applicant.help_type_requested"
+    if "business commercial" in normalized or "company dispute" in normalized:
+        return "matter.business_or_commercial"
+    if "what type of matter" in normalized:
+        return "matter.legal_topic"
+    if "person who needs legal help" in normalized or "calling on behalf" in normalized:
+        return "applicant.caller_capacity"
+    slug = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")[:80]
+    return f"workflow.question.{slug}" if slug else None
+
+
+def question_text_from_entry(entries: dict[str, dict[str, Any]], entry_id: str | None, question_id: str | None) -> str | None:
+    if not entry_id or not question_id:
+        return None
+    entry = entries.get(entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+    question = node.get("question") if isinstance(node, dict) else None
+    return question if isinstance(question, str) else None
+
+
+def fact_from_answered_line(entries: dict[str, dict[str, Any]], default_entry_id: str | None, line: str) -> PBSGTriageFact | None:
+    match = re.search(
+        r"(?:(GEN3-[A-Z0-9-]+)\s+)?(Q\d+[A-Z]?)\b[^=→-]*(?:=|→|->)\s*([^;\[\n]+)",
+        line,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    entry_id = (match.group(1) or default_entry_id or "").upper()
+    question_id = match.group(2).upper()
+    value = match.group(3).strip(" .")
+    question = question_text_from_entry(entries, entry_id, question_id)
+    fact_key = canonical_fact_key_for_question(question)
+    if not fact_key:
+        return None
+    normalized_value = normalize_branch_label(value)
+    scope = "workflow" if fact_key.startswith("workflow.question.") else "global"
+    return PBSGTriageFact(
+        fact_key=fact_key,
+        value=value,
+        normalized_value=normalized_value,
+        source=f"{entry_id}.{question_id}",
+        scope=scope,
+        provenance=line,
+    )
+
+
+def extract_fact_ledger(
+    entries: dict[str, dict[str, Any]],
+    selected_entry_id: str | None,
+    answered_lines: list[str],
+) -> list[PBSGTriageFact]:
+    facts: list[PBSGTriageFact] = []
+    seen: set[tuple[str, str]] = set()
+    for line in answered_lines:
+        fact = fact_from_answered_line(entries, selected_entry_id, line)
+        if not fact:
+            continue
+        dedupe_key = (fact.fact_key, fact.source)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        facts.append(fact)
+    return facts
+
+
+def active_fact_for_question(
+    facts: list[PBSGTriageFact],
+    question: str | None,
+    excluded_source_prefixes: list[str] | None = None,
+) -> PBSGTriageFact | None:
+    fact_key = canonical_fact_key_for_question(question)
+    if not fact_key:
+        return None
+    excluded_source_prefixes = excluded_source_prefixes or []
+    for fact in reversed(facts):
+        if any(fact.source.startswith(prefix) for prefix in excluded_source_prefixes):
+            continue
+        if fact.fact_key == fact_key and fact.status == "active":
+            return fact
+    return None
+
+
+def unanswered_required_fields_for_state(
+    entries: dict[str, dict[str, Any]],
+    pending_entry_id: str | None,
+    current_question_id: str | None,
+    facts: list[PBSGTriageFact],
+) -> list[str]:
+    question = question_text_from_entry(entries, pending_entry_id, current_question_id)
+    fact_key = canonical_fact_key_for_question(question)
+    if not fact_key or active_fact_for_question(facts, question):
+        return []
+    return [fact_key]
+
+
 def extract_topic_workflows(content: str | None) -> list[str]:
     if not content or "Topics identified:" not in content:
         return []
@@ -322,6 +480,17 @@ def extract_topic_workflows(content: str | None) -> list[str]:
     return workflows
 
 
+def extract_topic_workflows_from_messages(messages: list[ChatCompletionMessageParam]) -> list[str]:
+    workflows: list[str] = []
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for workflow_id in extract_topic_workflows(message_content_to_text(message.get("content"))):
+            if workflow_id not in workflows:
+                workflows.append(workflow_id)
+    return workflows
+
+
 def extract_completed_workflows(content: str | None) -> list[str]:
     if not content:
         return []
@@ -330,6 +499,20 @@ def extract_completed_workflows(content: str | None) -> list[str]:
         workflow_id = match.upper()
         if workflow_id not in completed:
             completed.append(workflow_id)
+    selected_entry_id = extract_selected_entry_id(content)
+    if selected_entry_id and "**Routing Recommendation:**" in content and selected_entry_id not in completed:
+        completed.append(selected_entry_id)
+    return completed
+
+
+def extract_completed_workflows_from_messages(messages: list[ChatCompletionMessageParam]) -> list[str]:
+    completed: list[str] = []
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for workflow_id in extract_completed_workflows(message_content_to_text(message.get("content"))):
+            if workflow_id not in completed:
+                completed.append(workflow_id)
     return completed
 
 
@@ -827,10 +1010,17 @@ def build_triage_state(
     conversation_text = "\n".join(message_content_to_text(message.get("content")) for message in messages)
     conversation_text = f"{conversation_text}\n{latest_user_query}"
     flags = monitor_flags(conversation_text)
-    topic_workflows = extract_topic_workflows(assistant_content)
-    completed_workflows = extract_completed_workflows(assistant_content)
+    topic_workflows = extract_topic_workflows_from_messages(messages)
+    completed_workflows = extract_completed_workflows_from_messages(messages)
+    for workflow_id in extract_topic_workflows(assistant_content):
+        if workflow_id not in topic_workflows:
+            topic_workflows.append(workflow_id)
+    for workflow_id in extract_completed_workflows(assistant_content):
+        if workflow_id not in completed_workflows:
+            completed_workflows.append(workflow_id)
     active_workflow = pending_entry_id or selected_entry_id
     answered_lines = extract_answered_lines(assistant_content)
+    fact_ledger = extract_fact_ledger(entries, selected_entry_id, answered_lines)
     branch_keys = allowed_branch_keys(entries, pending_entry_id, current_question_id)
     contradiction_signals = detect_contradiction_signals(answered_lines, latest_user_query)
     workflow_locked = bool(selected_entry_id and selected_entry_id in entries)
@@ -847,6 +1037,16 @@ def build_triage_state(
     ]
     parent_workflow = selected_entry_id if pending_entry_id == "GEN3-T06" and selected_entry_id != "GEN3-T06" else None
     resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
+    is_terminal_route = bool(assistant_content and "**Routing Recommendation:**" in assistant_content and selected_entry_id)
+    routing_completion_status = "not_started"
+    if contradiction_signals:
+        routing_completion_status = "repair_required"
+    elif is_terminal_route and queued_workflows:
+        routing_completion_status = "awaiting_topic_resolution"
+    elif is_terminal_route:
+        routing_completion_status = "completed"
+    elif workflow_locked:
+        routing_completion_status = "in_progress"
 
     return PBSGTriageState(
         mode=mode,
@@ -869,6 +1069,12 @@ def build_triage_state(
         parent_workflow=parent_workflow,
         resume_question_id=resume_question_id,
         triggered_overlays=triggered_overlays_from_flags(flags),
+        fact_ledger=fact_ledger,
+        unanswered_required_fields=unanswered_required_fields_for_state(
+            entries, pending_entry_id, current_question_id, fact_ledger
+        ),
+        suspended_workflows=queued_workflows.copy(),
+        routing_completion_status=routing_completion_status,
     )
 
 
@@ -895,6 +1101,20 @@ def format_state_prompt(state: PBSGTriageState) -> str:
         lines.append(f"- Concurrent monitors: {', '.join(state.concurrent_monitors)}. They may interrupt only for urgency threshold, safety issue, or required escalation.")
     if state.pending_entry_id and state.current_question_id:
         lines.append(f"- Pending question: {state.pending_entry_id} {state.current_question_id}. Treat the user's latest message as the answer to this question.")
+    if state.routing_completion_status:
+        lines.append(f"- Routing completion status: {state.routing_completion_status}.")
+    if state.unanswered_required_fields:
+        lines.append(f"- Unanswered required fields: {', '.join(state.unanswered_required_fields)}.")
+    if state.fact_ledger:
+        lines.append("- Known facts in the case ledger:")
+        lines.extend(
+            f"  - {fact.fact_key} = {fact.value} (source: {fact.source}, confidence: {fact.confidence:.2f})"
+            for fact in state.fact_ledger[-8:]
+        )
+    if state.active_side_enquiry:
+        lines.append(
+            f"- Active side enquiry: {state.active_side_enquiry.question}. Preserve the pending routing question and resume it after answering."
+        )
     if state.latest_answer_classification:
         lines.append(f"- Latest answer classification: {state.latest_answer_classification}. In FAST_ROUTING mode, execute the matching branch without filler.")
     if state.allowed_transitions:
@@ -1614,6 +1834,7 @@ class PBSGRoutingEngine:
                 concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
                 triggered_overlays=resolution.overlays,
             )
+            self.apply_transition_to_state(state, transition)
             return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
 
         transition = PBSGTransition(
@@ -1637,6 +1858,8 @@ class PBSGRoutingEngine:
             pending_entry_id=resolution.entry_id,
             concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
             triggered_overlays=resolution.overlays,
+            unanswered_required_fields=unanswered_required_fields_for_state(self.entries, resolution.entry_id, "Q1", []),
+            routing_completion_status="in_progress",
         )
         return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
 
@@ -1664,10 +1887,233 @@ class PBSGRoutingEngine:
         if not transition:
             return None
         transition = self.resume_parent_after_nested_urgent(state, transition)
+        transition = self.resolve_handoff_carryover(state, transition)
         content = self.render_transition(transition)
         if not content:
             return None
+        self.apply_transition_to_state(state, transition)
         return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+    def start_queued_workflow(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        workflow_id: str,
+    ) -> PBSGDeterministicResult | None:
+        if workflow_id not in self.entries:
+            return None
+        state = build_triage_state(messages, self.entries, "")
+        if workflow_id not in state.queued_workflows:
+            return None
+        state.active_workflow = workflow_id
+        state.workflow_id = workflow_id
+        state.workflow_locked = True
+        state.pending_entry_id = workflow_id
+        state.current_question_id = "Q1"
+        state.queued_workflows = [entry_id for entry_id in state.queued_workflows if entry_id != workflow_id]
+        state.routing_completion_status = "in_progress"
+
+        transition = PBSGTransition(
+            entry_id=workflow_id,
+            question_id="START",
+            branch_key="continue_queued_workflow",
+            outcome="Continue queued workflow",
+            transition_type="proceed_question",
+            target_entry_id=workflow_id,
+            target_question_id="Q1",
+        )
+
+        # For a newly queued workflow, do not trust visible facts that the LLM may have invented for that
+        # same workflow. Cross-workflow facts can still carry over when they answer the target question.
+        current_question_id = "Q1"
+        excluded_prefixes = [f"{workflow_id}."]
+        while current_question_id:
+            question = question_text_from_entry(self.entries, workflow_id, current_question_id)
+            carried_fact = active_fact_for_question(state.fact_ledger, question, excluded_prefixes)
+            if not carried_fact:
+                transition = PBSGTransition(
+                    entry_id=workflow_id,
+                    question_id="START" if current_question_id == "Q1" else transition.question_id,
+                    branch_key="continue_queued_workflow" if current_question_id == "Q1" else transition.branch_key,
+                    outcome="Continue queued workflow" if current_question_id == "Q1" else transition.outcome,
+                    transition_type="proceed_question",
+                    target_entry_id=workflow_id,
+                    target_question_id=current_question_id,
+                )
+                break
+            entry = self.entries.get(workflow_id)
+            branching_logic = entry.get("branching_logic") if entry else None
+            question_node = branching_logic.get(current_question_id) if isinstance(branching_logic, dict) else None
+            if not isinstance(question_node, dict):
+                return None
+            branch_key = branch_key_for_answer(question_node, carried_fact.value)
+            if not branch_key:
+                transition = PBSGTransition(
+                    entry_id=workflow_id,
+                    question_id="START",
+                    branch_key="continue_queued_workflow",
+                    outcome="Continue queued workflow",
+                    transition_type="proceed_question",
+                    target_entry_id=workflow_id,
+                    target_question_id=current_question_id,
+                )
+                break
+            carried_transition = self.resolve_transition_from_branch(
+                PBSGTriageState(
+                    mode="FAST_ROUTING",
+                    workflow_id=workflow_id,
+                    workflow_locked=True,
+                    active_workflow=workflow_id,
+                    pending_entry_id=workflow_id,
+                    current_question_id=current_question_id,
+                    fact_ledger=state.fact_ledger,
+                ),
+                branch_key,
+            )
+            if not carried_transition:
+                return None
+            transition = carried_transition
+            self.record_transition_fact(state, transition)
+            if transition.transition_type == "proceed_question" and transition.target_question_id:
+                current_question_id = transition.target_question_id
+                continue
+            break
+
+        content = self.render_queued_workflow_start(transition, workflow_id)
+        if not content:
+            return None
+        self.apply_transition_to_state(state, transition)
+        return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+    def render_queued_workflow_start(self, transition: PBSGTransition, workflow_id: str) -> str | None:
+        if transition.transition_type == "proceed_question" and transition.target_entry_id and transition.target_question_id:
+            question = self.question_text(transition.target_entry_id, transition.target_question_id)
+            if not question:
+                return None
+            lines = [
+                f"**Selected Entry:** {workflow_id}",
+                "",
+                f"**Continuing queued topic:** {workflow_id}",
+                "",
+                "Triage progress:",
+                "",
+                f"- Activated queued workflow: {workflow_id}",
+                f"- Next question: {transition.target_question_id} from {transition.target_entry_id}",
+                "",
+                "**Ask the applicant (read verbatim):**",
+                "",
+                f'> **{transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
+                "",
+                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+            ]
+            return "\n".join(lines)
+        return self.render_transition(transition)
+
+    def resolve_handoff_carryover(
+        self,
+        state: PBSGTriageState,
+        transition: PBSGTransition,
+    ) -> PBSGTransition:
+        if transition.transition_type not in {"handoff_entry", "cross_reference"} or not transition.target_entry_id:
+            return transition
+        target_question_id = "Q1"
+        target_question = question_text_from_entry(self.entries, transition.target_entry_id, target_question_id)
+        carried_fact = active_fact_for_question(state.fact_ledger, target_question)
+        if not carried_fact:
+            return transition
+        target_entry = self.entries.get(transition.target_entry_id)
+        branching_logic = target_entry.get("branching_logic") if target_entry else None
+        question_node = branching_logic.get(target_question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict):
+            return transition
+        carried_branch_key = branch_key_for_answer(question_node, carried_fact.value)
+        if not carried_branch_key or carried_branch_key not in question_node:
+            return transition
+        carried_transition = self.graph.transition_for(transition.target_entry_id, target_question_id, carried_branch_key)
+        if not carried_transition:
+            outcome = question_node.get(carried_branch_key)
+            if not isinstance(outcome, str):
+                return transition
+            carried_transition = parse_transition_outcome(
+                self.entries,
+                transition.target_entry_id,
+                target_question_id,
+                carried_branch_key,
+                outcome,
+            )
+        return PBSGTransition(
+            entry_id=carried_transition.entry_id,
+            question_id=carried_transition.question_id,
+            branch_key=carried_transition.branch_key,
+            outcome=f"Carried over from {carried_fact.source}: {carried_fact.value}. {carried_transition.outcome}",
+            transition_type=carried_transition.transition_type,
+            target_entry_id=carried_transition.target_entry_id,
+            target_question_id=carried_transition.target_question_id,
+            route_label=carried_transition.route_label,
+            nested_entry_id=carried_transition.nested_entry_id,
+            resume_entry_id=carried_transition.resume_entry_id,
+            resume_question_id=carried_transition.resume_question_id,
+            clarification_text=carried_transition.clarification_text,
+        )
+
+    def record_transition_fact(self, state: PBSGTriageState, transition: PBSGTransition) -> None:
+        question = question_text_from_entry(self.entries, transition.entry_id, transition.question_id)
+        fact_key = canonical_fact_key_for_question(question)
+        if not fact_key:
+            return
+        value = label_from_branch_key(transition.branch_key)
+        fact = PBSGTriageFact(
+            fact_key=fact_key,
+            value=value,
+            normalized_value=normalize_branch_label(value),
+            source=f"{transition.entry_id}.{transition.question_id}",
+            scope="workflow" if fact_key.startswith("workflow.question.") else "global",
+            confidence=1.0,
+            provenance=f"{transition.entry_id} {transition.question_id} = {value}",
+        )
+        state.fact_ledger = [
+            existing
+            for existing in state.fact_ledger
+            if not (existing.fact_key == fact.fact_key and existing.source == fact.source)
+        ]
+        state.fact_ledger.append(fact)
+
+    def apply_transition_to_state(self, state: PBSGTriageState, transition: PBSGTransition) -> None:
+        self.record_transition_fact(state, transition)
+        state.latest_answer_classification = label_from_branch_key(transition.branch_key).upper()
+        state.repair_required = False
+        state.active_side_enquiry = None
+        state.interruption_stack = []
+        if transition.transition_type in {"proceed_question", "concurrent_route_question"}:
+            state.active_workflow = transition.target_entry_id
+            state.pending_entry_id = transition.target_entry_id
+            state.current_question_id = transition.target_question_id
+            state.routing_completion_status = "in_progress"
+        elif transition.transition_type in {"handoff_entry", "cross_reference"}:
+            state.active_workflow = transition.target_entry_id
+            state.pending_entry_id = transition.target_entry_id
+            state.current_question_id = "Q1"
+            state.workflow_id = transition.target_entry_id
+            state.routing_completion_status = "in_progress"
+        elif transition.transition_type == "nested_stream":
+            state.active_workflow = transition.target_entry_id
+            state.pending_entry_id = transition.target_entry_id
+            state.current_question_id = transition.target_question_id
+            state.parent_workflow = transition.resume_entry_id or transition.entry_id
+            state.resume_question_id = transition.resume_question_id
+            state.routing_completion_status = "suspended"
+            if transition.entry_id not in state.suspended_workflows:
+                state.suspended_workflows.append(transition.entry_id)
+        elif transition.transition_type == "terminal_route":
+            if transition.entry_id not in state.completed_workflows:
+                state.completed_workflows.append(transition.entry_id)
+            state.current_question_id = None
+            state.pending_entry_id = None
+            state.routing_completion_status = (
+                "awaiting_topic_resolution" if state.queued_workflows else "completed"
+            )
+        state.unanswered_required_fields = unanswered_required_fields_for_state(
+            self.entries, state.pending_entry_id, state.current_question_id, state.fact_ledger
+        )
 
     def resolve_transition_from_branch(
         self,

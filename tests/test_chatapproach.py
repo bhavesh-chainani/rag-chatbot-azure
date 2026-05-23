@@ -1234,6 +1234,167 @@ def gen3_t04_q4_messages(user_content):
     ]
 
 
+def gen3_t02_q1_with_queued_divorce_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+Triage progress:
+
+- Topic resolved: criminal [GEN3-T02.json]
+- Next question: Q1 from GEN3-T02
+
+Topics identified:
+1. GEN3-T02 — active workflow
+2. GEN3-T03 — queued workflow (noted from: divorce)
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_local_side_enquiry_answers_glossary_and_preserves_routing(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known glossary side enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("What is PCHI?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "PCHI means per capita household income" in content
+    assert "Current question remains: Q4 from GEN3-T04" in content
+    assert result["context"]["pbsg_triage_state"]["active_side_enquiry"]["question"] == "What is PCHI?"
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T04"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q4"
+
+
+@pytest.mark.asyncio
+async def test_terminal_route_with_queued_topic_returns_continue_button(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("terminal route with queued topic should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "**Routing Recommendation:** Route A" in content
+    assert "**Queued topic ready:**" in content
+    assert "GEN3-T03" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+    assert result["context"]["pbsg_triage_state"]["routing_completion_status"] == "awaiting_topic_resolution"
+    assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
+    assert result["context"]["quick_reply"]["options"][0]["id"] == "continue_queued_workflow:GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_ack_after_terminal_route_does_not_start_queued_topic(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("route-complete acknowledgement should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "ok"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "GEN3-T02 has been routed" in content
+    assert "GEN3-T03" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+    assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
+    assert "Have you applied to the Legal Aid Bureau" not in content
+
+
+@pytest.mark.asyncio
+async def test_continue_queued_topic_starts_at_q1_without_validated_facts(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("queued workflow continuation should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "Continue queued workflow: GEN3-T03"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert "family violence" in content
+    assert "Have you applied to the Legal Aid Bureau" not in content
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+def test_prerequisite_guard_repairs_hallucinated_queued_topic_answers(chat_approach):
+    hallucinated_content = """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q1: family violence or court deadline within 14 days → No [GEN3-T03.json]
+- Q2: Singapore Citizen or PR → Yes [GEN3-T03.json]
+
+Triage progress:
+
+- Next question: Q3 from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q3: "Have you applied to the Legal Aid Bureau (LAB) for civil legal aid?"**"""
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        },
+        {"role": "user", "content": "ok"},
+    ]
+
+    repaired = chat_approach.repair_unvalidated_prerequisite_skip(hallucinated_content, messages, "ok")
+
+    assert repaired is not None
+    assert "Repaired skipped prerequisite: Q1 from GEN3-T03" in repaired
+    assert "Next question: Q1 from GEN3-T03" in repaired
+    assert "Have you applied to the Legal Aid Bureau" not in repaired
+
+
 @pytest.mark.asyncio
 async def test_structured_switch_queues_new_topic_while_routing_active_answer(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):

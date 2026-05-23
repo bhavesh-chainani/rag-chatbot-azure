@@ -17,6 +17,7 @@ from pbsg_triage_state import (
     load_golden_set_entries,
     parse_transition_outcome,
     resolve_gen3_t13_cue_transition,
+    resolve_initial_topic,
 )
 
 
@@ -44,6 +45,54 @@ def test_golden_set_candidates_include_local_and_container_layouts():
 
     assert (Path.cwd() / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
     assert (Path(__file__).resolve().parents[1] / GOLDEN_SET_RELATIVE_DIR).resolve(strict=False) in candidates
+
+
+@pytest.mark.parametrize("query", ["hi", "I need help", "start triage", "general enquiry"])
+def test_initial_topic_resolver_defaults_vague_starts_to_gen3_t01(query):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert resolution.confidence < 0.7
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_entry_id"),
+    [
+        ("Applicant has a criminal charge in court.", "GEN3-T02"),
+        ("Applicant wants a divorce and has custody issues.", "GEN3-T03"),
+        ("Applicant's employer has not paid salary for three months.", "GEN3-T04"),
+    ],
+)
+def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_entry_id):
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, query)
+
+    assert resolution is not None
+    assert resolution.entry_id == expected_entry_id
+    assert resolution.confidence >= 0.6
+
+
+def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Elderly applicant is confused and has a debt issue.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T04"
+    assert "GEN3-T13" in resolution.overlays
+
+
+def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is elderly and confused.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T13"
 
 
 def route_labels(entry: dict[str, Any]) -> set[str]:
@@ -110,6 +159,45 @@ def test_duplicate_route_card_guard_keeps_first_matching_route_card():
     assert collapsed is not None
     assert collapsed.count("**Selected Entry:**") == 1
     assert "First LASCO wording" in collapsed
+    assert "Repeated LASCO wording" not in collapsed
+
+
+def test_duplicate_route_card_guard_collapses_repeated_cards_without_dropping_distinct_routes():
+    content = """Intro note.
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "First LASCO wording."
+
+**Selected Entry:** GEN3-T03
+
+**Routing Recommendation:** Route B (LAB)
+
+**Tell the applicant:**
+
+> "Family wording."
+
+**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+**Tell the applicant:**
+
+> "Repeated LASCO wording."
+"""
+
+    collapsed = collapse_duplicate_route_cards(content)
+
+    assert collapsed is not None
+    assert collapsed.startswith("Intro note.")
+    assert collapsed.count("**Selected Entry:** GEN3-T02") == 1
+    assert collapsed.count("**Selected Entry:** GEN3-T03") == 1
+    assert "First LASCO wording" in collapsed
+    assert "Family wording" in collapsed
     assert "Repeated LASCO wording" not in collapsed
 
 
@@ -202,6 +290,28 @@ def test_pbsg_routing_engine_renders_every_deterministic_branch():
                 assert "**Selected Entry:**" in content
 
 
+def test_pbsg_terminal_routes_render_single_route_card_for_every_gen3_branch():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+
+    for entry_id, entry in entries.items():
+        if not entry_id.startswith("GEN3-"):
+            continue
+        for question_id, question_node in entry["branching_logic"].items():
+            if not isinstance(question_node, dict):
+                continue
+            for branch_key, outcome in question_node.items():
+                if not branch_key.startswith("if_") or not isinstance(outcome, str):
+                    continue
+                transition = parse_transition_outcome(entries, entry_id, question_id, branch_key, outcome)
+                if transition.transition_type != "terminal_route":
+                    continue
+                content = engine.render_transition(transition)
+                assert content is not None
+                assert content.count("**Selected Entry:**") == 1, f"{entry_id} {question_id}.{branch_key}"
+                assert content.count("**Routing Recommendation:**") == 1, f"{entry_id} {question_id}.{branch_key}"
+
+
 def test_pbsg_cross_reference_routes_are_explicit_nested_edges():
     entries = load_entries()
 
@@ -250,8 +360,8 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert '**GEN3-T06 Q1: "Is there an immediate threat to your (or someone else\'s) life or physical safety right now?"**' in content
-    assert "> **GEN3-T06 Q1" not in content
+    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
+    assert "**Ask the applicant (read verbatim):**" not in content
 
 
 def test_pbsg_known_cross_routing_regressions():

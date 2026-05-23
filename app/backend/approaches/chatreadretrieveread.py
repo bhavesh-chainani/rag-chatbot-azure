@@ -39,6 +39,7 @@ from pbsg_triage_state import (
     load_golden_set_entries,
     parse_transition_outcome,
     resolve_expected_transition,
+    resolve_initial_topic,
     safe_escalation_response,
     validate_response_transition,
     validate_response_questions,
@@ -187,6 +188,7 @@ class ChatReadRetrieveReadApproach(Approach):
 
         ask_markers = [
             "Ask the applicant (read verbatim):",
+            "Tell the applicant:",
             "Back to triage",
         ]
         question_region = content
@@ -241,6 +243,7 @@ class ChatReadRetrieveReadApproach(Approach):
 
         ask_markers = [
             "Ask the applicant (read verbatim):",
+            "Tell the applicant:",
             "Back to triage",
         ]
         marker_positions = [content.rfind(marker) for marker in ask_markers]
@@ -367,10 +370,24 @@ class ChatReadRetrieveReadApproach(Approach):
             ]
         )
 
+    def render_deterministic_transition_response(
+        self, transition: PBSGTransition | None, entries: dict[str, dict[str, Any]]
+    ) -> Optional[str]:
+        if not transition or transition.transition_type != "terminal_route":
+            return None
+        return PBSGRoutingEngine(entries).render_transition(transition)
+
     def apply_triage_response_guard(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
         entries = self.extract_golden_set_entries(extra_info.data_points.text)
         if not content or not entries:
             return content
+
+        deterministic_response = self.render_deterministic_transition_response(
+            extra_info.deterministic_transition,
+            entries,
+        )
+        if deterministic_response:
+            return deterministic_response
 
         is_valid, reason = validate_response_questions(content, entries)
         if not is_valid:
@@ -386,11 +403,61 @@ class ChatReadRetrieveReadApproach(Approach):
                 return deterministic_response
         return safe_escalation_response(content, entries, reason or "unknown transition error")
 
+    def chat_completion_from_content(self, content: str, completion_id: str = "no-final-call") -> ChatCompletion:
+        return ChatCompletion(
+            id=completion_id,
+            object="chat.completion",
+            created=0,
+            model=self.chatgpt_model,
+            choices=[
+                Choice(
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content=content,
+                    ),
+                    finish_reason="stop",
+                    index=0,
+                )
+            ],
+        )
+
     def golden_set_data_points(self, entries: dict[str, dict[str, Any]]) -> DataPoints:
         return DataPoints(
             text=[f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}" for entry_id, entry in sorted(entries.items())],
             citations=[f"{entry_id}.json" for entry_id in sorted(entries)],
         )
+
+    def ensure_golden_set_source_entries(
+        self,
+        data_points: DataPoints,
+        entry_ids: list[str],
+    ) -> None:
+        if not entry_ids:
+            return
+        data_points.text = data_points.text or []
+        data_points.citations = data_points.citations or []
+        existing_entries = self.extract_golden_set_entries(data_points.text)
+        for entry_id in entry_ids:
+            entry = self.pbsg_golden_set_entries.get(entry_id)
+            if not entry or entry_id in existing_entries:
+                continue
+            data_points.text.append(f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}")
+            citation = f"{entry_id}.json"
+            if citation not in data_points.citations:
+                data_points.citations.append(citation)
+
+    def ensure_initial_topic_sources(
+        self,
+        data_points: DataPoints,
+        messages: list[ChatCompletionMessageParam],
+        original_user_query: Any,
+    ) -> None:
+        if len(messages) != 1 or not isinstance(original_user_query, str):
+            return
+        resolution = resolve_initial_topic(self.pbsg_golden_set_entries, original_user_query)
+        if not resolution:
+            return
+        self.ensure_golden_set_source_entries(data_points, [resolution.entry_id, *resolution.overlays])
 
     def build_deterministic_chat_response(
         self,
@@ -398,19 +465,20 @@ class ChatReadRetrieveReadApproach(Approach):
         session_state: Any = None,
         turn_classification: PBSGTurnClassification | None = None,
     ) -> dict[str, Any]:
+        queued_topics: list[PBSGQueuedTopic] = []
         if turn_classification and turn_classification.new_topics:
             for topic in turn_classification.new_topics:
                 if topic.entry_id not in deterministic_result.state.queued_workflows:
                     deterministic_result.state.queued_workflows.append(topic.entry_id)
-            deterministic_result.content = self.append_queued_topic_note(
-                deterministic_result.content, deterministic_result.state.active_workflow, turn_classification.new_topics
-            )
+            queued_topics = turn_classification.new_topics
 
         extra_info = ExtraInfo(
             data_points=self.golden_set_data_points(deterministic_result.entries),
             deterministic_transition=deterministic_result.transition,
         )
         content = self.apply_triage_response_guard(deterministic_result.content, extra_info)
+        if content and queued_topics:
+            content = self.append_queued_topic_note(content, deterministic_result.state.active_workflow, queued_topics)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         extra_info.thoughts.append(
             ThoughtStep(
@@ -897,6 +965,7 @@ class ChatReadRetrieveReadApproach(Approach):
         extra_info, chat_coroutine = await self.run_until_final_call(
             messages, overrides, auth_claims, should_stream=True
         )
+        buffer_pbsg_stream = bool(self.extract_golden_set_entries(extra_info.data_points.text))
         yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
 
         followup_questions_started = False
@@ -959,10 +1028,13 @@ class ChatReadRetrieveReadApproach(Approach):
                     if earlier_content:
                         completion["delta"]["content"] = earlier_content
                         streamed_content += earlier_content
-                        yield completion
+                        if not buffer_pbsg_stream:
+                            yield completion
                     followup_content += delta_content[delta_content.index("<<") :]
                 elif followup_questions_started:
                     followup_content += delta_content
+                elif buffer_pbsg_stream:
+                    streamed_content += delta_content
                 else:
                     streamed_content += delta_content
                     yield completion
@@ -985,6 +1057,8 @@ class ChatReadRetrieveReadApproach(Approach):
             streamed_content = collapse_duplicate_route_cards(streamed_content) or streamed_content
             streamed_content = self.apply_triage_response_guard(streamed_content, extra_info) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
+            if buffer_pbsg_stream:
+                yield {"delta": {"role": "assistant", "content": streamed_content}}
             yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
 
     async def run(
@@ -1034,22 +1108,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if extra_info.answer:
             # If agentic retrieval already provided an answer, skip final call to LLM
             async def return_answer() -> ChatCompletion:
-                return ChatCompletion(
-                    id="no-final-call",
-                    object="chat.completion",
-                    created=0,
-                    model=self.chatgpt_model,
-                    choices=[
-                        Choice(
-                            message=ChatCompletionMessage(
-                                role="assistant",
-                                content=extra_info.answer,
-                            ),
-                            finish_reason="stop",
-                            index=0,
-                        )
-                    ],
-                )
+                return self.chat_completion_from_content(extra_info.answer or "")
 
             return (extra_info, return_answer())
 
@@ -1061,6 +1120,28 @@ class ChatReadRetrieveReadApproach(Approach):
             extra_info.deterministic_transition = resolve_expected_transition(
                 golden_set_entries, triage_state, original_user_query
             )
+            deterministic_response = self.render_deterministic_transition_response(
+                extra_info.deterministic_transition,
+                golden_set_entries,
+            )
+            if deterministic_response:
+                extra_info.thoughts.append(
+                    ThoughtStep(
+                        "Deterministic PBSG routing",
+                        "Rendered the final route card from Golden Set branching logic without LLM generation.",
+                        {
+                            "entry_id": extra_info.deterministic_transition.entry_id,
+                            "question_id": extra_info.deterministic_transition.question_id,
+                            "branch_key": extra_info.deterministic_transition.branch_key,
+                            "transition_type": extra_info.deterministic_transition.transition_type,
+                        },
+                    )
+                )
+
+                async def return_deterministic_answer() -> ChatCompletion:
+                    return self.chat_completion_from_content(deterministic_response, "deterministic-pbsg-route")
+
+                return (extra_info, return_deterministic_answer())
 
         system_template_variables = self.get_system_prompt_variables(overrides.get("prompt_template"))
         system_template_variables.setdefault("injected_prompt", "")
@@ -1192,6 +1273,7 @@ class ChatReadRetrieveReadApproach(Approach):
             download_image_sources=send_image_sources,
             user_oid=auth_claims.get("oid"),
         )
+        self.ensure_initial_topic_sources(data_points, messages, original_user_query)
         extra_info = ExtraInfo(
             data_points,
             thoughts=[
@@ -1284,6 +1366,8 @@ class ChatReadRetrieveReadApproach(Approach):
             web_results=agentic_results.web_results,
             sharepoint_results=agentic_results.sharepoint_results,
         )
+        original_user_query = messages[-1].get("content") if messages else None
+        self.ensure_initial_topic_sources(data_points, messages, original_user_query)
 
         return ExtraInfo(
             data_points,

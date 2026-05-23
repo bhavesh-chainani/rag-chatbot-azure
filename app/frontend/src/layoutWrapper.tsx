@@ -4,6 +4,7 @@ import { useMsal } from "@azure/msal-react";
 import { useLogin, checkLoggedIn } from "./authConfig";
 import { LoginContext } from "./loginContext";
 import Layout from "./pages/layout/Layout";
+import { ChatSessionProvider } from "./chatSessionContext";
 
 const LayoutWrapper = () => {
     const [loggedIn, setLoggedIn] = useState(false);
@@ -28,7 +29,9 @@ const LayoutWrapper = () => {
         return (
             <LoginContext.Provider value={{ loggedIn, setLoggedIn }}>
                 <FluentProvider theme={webLightTheme} style={{ height: "100%", backgroundColor: "transparent" }}>
-                    <Layout />
+                    <ChatSessionProvider>
+                        <Layout />
+                    </ChatSessionProvider>
                 </FluentProvider>
             </LoginContext.Provider>
         );
@@ -41,7 +44,9 @@ const LayoutWrapper = () => {
                 }}
             >
                 <FluentProvider theme={webLightTheme} style={{ height: "100%", backgroundColor: "transparent" }}>
-                    <Layout />
+                    <ChatSessionProvider>
+                        <Layout />
+                    </ChatSessionProvider>
                 </FluentProvider>
             </LoginContext.Provider>
         );

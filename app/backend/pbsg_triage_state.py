@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import date, timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,10 @@ QUESTION_FACT_MAP = {
     ("GEN3-T01", "Q5"): "matter.legal_topic",
     ("GEN3-T02", "Q1"): "matter.capital_offence",
     ("GEN3-T02", "Q2"): "matter.urgency_or_safety",
+    ("GEN3-T02", "Q3"): "matter.charged_in_court",
+    ("GEN3-T02", "Q4"): "applicant.residency_status",
+    ("GEN3-T02", "Q5"): "applicant.pdo_application_status",
+    ("GEN3-T02", "Q6"): "applicant.means_status",
     ("GEN3-T03", "Q1"): "matter.urgency_or_safety",
     ("GEN3-T03", "Q2"): "applicant.residency_status",
     ("GEN3-T03", "Q3"): "applicant.lab_application_status",
@@ -211,6 +216,32 @@ TOPIC_SIGNAL_RULES = [
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
+MONTH_LOOKUP = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
 INITIAL_TOPIC_PATTERNS = {
     "GEN3-T02": re.compile(
         r"\b(criminal|charged|charge|police|arrest|offence|offense|murder|bail|remand|court date)\b",
@@ -502,6 +533,94 @@ def make_user_fact(
     )
 
 
+def current_local_date() -> date:
+    return date.today()
+
+
+def normalize_explicit_year(year_text: str | None) -> int | None:
+    if not year_text:
+        return None
+    year = int(year_text)
+    return 2000 + year if year < 100 else year
+
+
+def candidate_date_for_day_month(day: int, month: int, year: int | None, today: date) -> date | None:
+    resolved_year = year or today.year
+    try:
+        candidate = date(resolved_year, month, day)
+    except ValueError:
+        return None
+    if year is None and candidate < today:
+        return None
+    return candidate
+
+
+def branch_for_deadline_date(candidate: date | None, today: date) -> str | None:
+    if not candidate:
+        return "if_not_sure"
+    days_until = (candidate - today).days
+    if days_until < 0:
+        return "if_not_sure"
+    return "if_yes" if days_until <= 14 else "if_no"
+
+
+def explicit_deadline_date(text: str, today: date) -> date | None:
+    iso_match = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", text)
+    if iso_match:
+        year, month, day = (int(part) for part in iso_match.groups())
+        return candidate_date_for_day_month(day, month, year, today)
+
+    numeric_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", text)
+    if numeric_match:
+        day = int(numeric_match.group(1))
+        month = int(numeric_match.group(2))
+        year = normalize_explicit_year(numeric_match.group(3))
+        return candidate_date_for_day_month(day, month, year, today)
+
+    month_pattern = "|".join(sorted(MONTH_LOOKUP, key=len, reverse=True))
+    day_month_match = re.search(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({month_pattern})(?:\s+(\d{{2,4}}))?\b", text)
+    if day_month_match:
+        day = int(day_month_match.group(1))
+        month = MONTH_LOOKUP[day_month_match.group(2)]
+        year = normalize_explicit_year(day_month_match.group(3))
+        return candidate_date_for_day_month(day, month, year, today)
+
+    month_day_match = re.search(rf"\b({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:\s+(\d{{2,4}}))?\b", text)
+    if month_day_match:
+        month = MONTH_LOOKUP[month_day_match.group(1)]
+        day = int(month_day_match.group(2))
+        year = normalize_explicit_year(month_day_match.group(3))
+        return candidate_date_for_day_month(day, month, year, today)
+
+    return None
+
+
+def deadline_branch_key_from_text(text: str, today: date | None = None) -> str | None:
+    today = today or current_local_date()
+    normalized = normalize_branch_label(text)
+    if re.search(r"\b(no deadline|no court date|not urgent|no urgency)\b", normalized):
+        return "if_no"
+    if re.search(r"\b(today|tonight|tomorrow|next week)\b", normalized):
+        return "if_yes"
+    relative_match = re.search(r"\b(?:in|within)?\s*(\d{1,3})\s+days?\b", normalized)
+    if relative_match:
+        return "if_yes" if int(relative_match.group(1)) <= 14 else "if_no"
+    explicit_date = explicit_deadline_date(text.lower(), today) or explicit_deadline_date(normalized, today)
+    if explicit_date:
+        return branch_for_deadline_date(explicit_date, today)
+    if re.search(r"\b(court date|deadline)\b", normalized):
+        return "if_not_sure"
+    return None
+
+
+def is_deadline_question(question_node: dict[str, Any]) -> bool:
+    question = question_node.get("question")
+    if not isinstance(question, str):
+        return False
+    normalized = normalize_question_text_for_fact(question)
+    return "deadline" in normalized or "court date" in normalized
+
+
 def deterministic_facts_from_user_text(text: str, source_turn_index: int | None = None) -> list[PBSGTriageFact]:
     normalized = normalize_branch_label(text)
     facts: list[PBSGTriageFact] = []
@@ -526,30 +645,133 @@ def deterministic_facts_from_user_text(text: str, source_turn_index: int | None 
             )
         )
 
-    if re.search(r"\b(singapore citizen|sg citizen|sgc|permanent resident|\bpr\b)\b", normalized):
+    if re.search(r"\bsingaporean\b(?!\s+child)|\b(singapore citizen|sg citizen|sgc|permanent resident|\bpr\b)\b", normalized):
         add_fact("applicant.residency_status", "Singapore Citizen or PR", "sgc_pr", "if_yes")
     elif re.search(r"\b(foreigner|work permit|employment pass|s pass|dependent pass|not singapore citizen|not a citizen|not pr|not a pr)\b", normalized):
         add_fact("applicant.residency_status", "foreigner", "foreigner", "if_no_foreigner")
 
-    if re.search(r"\b(no lawyer|not represented|unrepresented|does not have a lawyer|don t have a lawyer|do not have a lawyer)\b", normalized):
+    if re.search(
+        r"\b(no lawyer|no legal representation|not represented|unrepresented|does not have a lawyer|don t have a lawyer|do not have a lawyer)\b",
+        normalized,
+    ):
         add_fact("applicant.representation_status", "No lawyer", "no", "if_no")
     elif re.search(r"\b(has a lawyer|have a lawyer|represented|lawyer filed|solicitor|counsel)\b", normalized):
         add_fact("applicant.representation_status", "Has lawyer", "yes", "if_yes")
 
     if re.search(r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence)\b", normalized):
         add_fact("matter.urgency_or_safety", "No urgency or safety issue", "no", "if_no", confidence=0.9)
-    elif re.search(r"\b(court tomorrow|deadline|within 14 days|next week|urgent|family violence|violence|unsafe|danger)\b", normalized):
+    elif deadline_branch_key_from_text(text) == "if_yes" or re.search(r"\b(urgent|family violence|violence|unsafe|danger)\b", normalized):
         add_fact("matter.urgency_or_safety", "Urgency or safety issue", "yes", "if_yes", confidence=0.9)
+    deadline_branch_key = deadline_branch_key_from_text(text)
+    if deadline_branch_key in {"if_yes", "if_no", "if_not_sure"}:
+        deadline_value = {
+            "if_yes": "Deadline within 14 days",
+            "if_no": "Deadline outside 14 days",
+            "if_not_sure": "Deadline unclear",
+        }[deadline_branch_key]
+        add_fact(
+            "matter.deadline_within_14_days",
+            deadline_value,
+            normalize_branch_label(deadline_value),
+            deadline_branch_key,
+            confidence=0.95,
+        )
 
     if re.search(r"\b(capital offence|capital offense|death penalty|punishable with death|murder)\b", normalized):
         add_fact("matter.capital_offence", "Capital offence", "yes", "if_yes")
+    elif re.search(r"\b(assault|voluntarily causing hurt|vch|theft|shoplifting|molest|outrage of modesty|rioting)\b", normalized):
+        add_fact("matter.capital_offence", "Non-capital offence", "no", "if_no", confidence=0.9)
+
+    if re.search(r"\b(charged in court|been charged|has been charged|charged with|charge sheet|court charge)\b", normalized):
+        add_fact("matter.charged_in_court", "Charged in court", "yes", "if_yes")
 
     if re.search(r"\b(no lab|not applied to lab|has not applied to lab|haven t applied to lab|never applied to lab)\b", normalized):
         add_fact("applicant.lab_application_status", "No LAB application", "no", "if_no")
     elif re.search(r"\b(lab.*failed|failed.*lab|lab rejection|rejected by lab)\b", normalized):
-        add_fact("applicant.lab_application_status", "LAB failed means test", "failed_means_test", "if_yes_failed_means_test")
+        add_fact("applicant.lab_application_status", "LAB failed means test", "lab_failed_means_test", "if_yes_failed_means_test")
     elif re.search(r"\b(lab.*processing|processing.*lab|lab.*pending|applied to lab)\b", normalized):
         add_fact("applicant.lab_application_status", "LAB applied or processing", "passed_or_processing", "if_yes_passed_or_processing")
+
+    has_no_income = bool(re.search(r"\b(no income|housewife|unemployed|not working|zero income)\b", normalized))
+    has_private_housing = bool(re.search(r"\b(condo|condominium|private property|private housing)\b", normalized))
+    has_non_private_housing = bool(
+        re.search(r"\b(hdb|[12345]\s*rm|[12345]\s*room|shelter|remand|prison|rental flat)\b", normalized)
+    )
+    age_matches = [
+        int(match)
+        for match in re.findall(r"\b(\d{1,2})\s*(?:yo|y/o|years?\s*old|yrs?\s*old)\b", normalized)
+        if int(match) >= 18
+    ]
+    if age_matches:
+        age = max(age_matches)
+        add_fact("applicant.age", f"Age {age}", str(age), None)
+    child_count_match = re.search(r"\b(\d+)\s*(?:children|kids|dependants?|dependents?)\b", normalized)
+    if child_count_match:
+        dependant_count = int(child_count_match.group(1))
+        add_fact("applicant.dependant_count", f"{dependant_count} dependant(s)", str(dependant_count), None)
+        add_fact("applicant.household_size", f"Household size {dependant_count + 1}", str(dependant_count + 1), None)
+    elif re.search(r"\b(daughter|son|child|kid|dependant|dependent)\b", normalized):
+        add_fact("applicant.dependant_count", "1 dependant", "1", None)
+        add_fact("applicant.household_size", "Household size 2", "2", None)
+    household_match = re.search(r"\b(?:household of|household size|family of)\s*(\d+)\b", normalized)
+    if household_match:
+        add_fact("applicant.household_size", f"Household size {household_match.group(1)}", household_match.group(1), None)
+    income_match = re.search(
+        r"(?:income|earning|earn|salary|monthly pay|paid)\D{0,20}(?:s\$|\$)?\s*(\d+(?:\.\d+)?)\s*(k|000)?\b|"
+        r"(?:s\$|\$)\s*(\d+(?:\.\d+)?)\s*(k|000)?\b",
+        normalized,
+    )
+    if income_match:
+        amount_text = income_match.group(1) or income_match.group(3)
+        suffix = income_match.group(2) or income_match.group(4)
+        amount = float(amount_text)
+        if suffix in {"k", "000"}:
+            amount *= 1000
+        add_fact("applicant.monthly_income", f"Monthly income S${amount:,.0f}", str(int(amount)), None)
+    savings_match = re.search(
+        r"\b(?:savings?|cash|bank balance)\D{0,20}(?:s\$|\$)?\s*(\d+(?:\.\d+)?)\s*(k|000)?\b|"
+        r"(?:s\$|\$)\s*(\d+(?:\.\d+)?)\s*(k|000)?\s*(?:savings?|cash|bank balance)\b",
+        normalized,
+    )
+    if re.search(r"\b(no savings|zero savings|no cash)\b", normalized):
+        add_fact("applicant.savings", "Savings S$0", "0", None)
+    elif savings_match:
+        savings_text = savings_match.group(1) or savings_match.group(3)
+        suffix = savings_match.group(2) or savings_match.group(4)
+        savings = float(savings_text)
+        if suffix in {"k", "000"}:
+            savings *= 1000
+        add_fact("applicant.savings", f"Savings S${savings:,.0f}", str(int(savings)), None)
+    if has_no_income:
+        add_fact("applicant.monthly_income", "Monthly income S$0", "0", None)
+        add_fact("applicant.income_status", "No income", "no_income", None)
+        add_fact("applicant.financial_hardship", "Financial hardship", "true", None)
+        add_fact("applicant.exception_cue", "Financial hardship", "true", None)
+    elif re.search(
+        r"\b(no money to hire (?:a )?lawyer|cannot afford (?:a )?lawyer|financial hardship|hardship|medical condition|medical bills?|liabilities|debt|supporting dependants?|supporting dependents?)\b",
+        normalized,
+    ):
+        add_fact("applicant.exception_cue", "Exceptional circumstances", "true", None)
+    if has_private_housing:
+        add_fact("applicant.housing_type", "Private housing", "private_housing", None)
+    elif has_non_private_housing:
+        add_fact("applicant.housing_type", "Non-private housing", "non_private_housing", None)
+    if has_no_income:
+        add_fact(
+            "applicant.means_status",
+            "No income / hardship",
+            "marginal_or_exceptional",
+            "if_no_marginal_or_exceptional",
+            confidence=0.9,
+        )
+    elif has_private_housing:
+        add_fact(
+            "applicant.means_status",
+            "Private housing only",
+            "private_housing_only",
+            None,
+            confidence=0.6,
+        )
 
     if re.search(r"\b(singaporean child|singapore citizen child|sg child)\b", normalized):
         add_fact("applicant.singaporean_child_under_21", "Has Singaporean child", "yes", "if_yes")
@@ -570,6 +792,25 @@ def branch_value_for_fact(question_node: dict[str, Any], fact: PBSGTriageFact) -
     branch_keys = [key for key in question_node if key.startswith("if_")]
     if fact.branch_value in branch_keys:
         return fact.branch_value
+    if fact.fact_key == "applicant.lab_application_status" and fact.normalized_value == "lab_failed_means_test":
+        if "if_yes_lab_unable_to_assist" in branch_keys:
+            return "if_yes_lab_unable_to_assist"
+        if "if_yes_failed_means_test" in branch_keys:
+            return "if_yes_failed_means_test"
+    if fact.fact_key == "applicant.means_status":
+        if fact.normalized_value == "fjss_pro_bono_qualifying" and "if_yes" in branch_keys:
+            return "if_yes"
+        if fact.normalized_value == "fjss_modest_means_qualifying" and "if_no_marginal" in branch_keys:
+            return "if_no_marginal"
+        if fact.normalized_value == "marginal_or_exceptional":
+            if "if_no_marginal_or_exceptional" in branch_keys:
+                return "if_no_marginal_or_exceptional"
+            if "if_no_well_over" in branch_keys:
+                return "if_no_well_over"
+            if "if_not_sure" in branch_keys:
+                return "if_not_sure"
+        if fact.normalized_value == "private_housing_only":
+            return None
     if fact.normalized_value in {"sgc_pr", "yes", "criminal", "matrimonial", "civil_or_others"}:
         preferred = {
             "sgc_pr": "if_yes",
@@ -633,10 +874,14 @@ def routing_answer_fact_from_user_turn(
     if not fact_key:
         return None
     value = label_from_branch_key(branch_key)
+    normalized_value = normalize_branch_label(value)
+    if fact_key == "applicant.lab_application_status" and branch_key == "if_yes_failed_means_test":
+        value = "LAB failed means test"
+        normalized_value = "lab_failed_means_test"
     return PBSGTriageFact(
         fact_key=fact_key,
         value=value,
-        normalized_value=normalize_branch_label(value),
+        normalized_value=normalized_value,
         source=f"{pending_entry_id}.{question_id}",
         scope="global" if not fact_key.startswith("workflow.question.") else "workflow",
         confidence=1.0,
@@ -660,6 +905,16 @@ def merge_fact_ledger(facts: list[PBSGTriageFact]) -> list[PBSGTriageFact]:
             "applicant.prior_legal_advice",
             "matter.urgency_or_safety",
             "applicant.lab_application_status",
+            "applicant.age",
+            "applicant.dependant_count",
+            "applicant.household_size",
+            "applicant.income_status",
+            "applicant.monthly_income",
+            "applicant.savings",
+            "applicant.housing_type",
+            "applicant.financial_hardship",
+            "applicant.exception_cue",
+            "applicant.means_status",
             "applicant.singaporean_child_under_21",
             "matter.legal_topic",
         }:
@@ -667,6 +922,210 @@ def merge_fact_ledger(facts: list[PBSGTriageFact]) -> list[PBSGTriageFact]:
         latest_by_key[fact.fact_key] = fact
         merged.append(fact)
     return merged
+
+
+def active_fact_by_key(facts: list[PBSGTriageFact]) -> dict[str, PBSGTriageFact]:
+    return {fact.fact_key: fact for fact in facts if fact.status == "active"}
+
+
+def numeric_fact_value(active_by_key: dict[str, PBSGTriageFact], fact_key: str) -> float | None:
+    fact = active_by_key.get(fact_key)
+    if not fact:
+        return None
+    try:
+        return float(fact.normalized_value)
+    except ValueError:
+        return None
+
+
+def bool_fact_value(active_by_key: dict[str, PBSGTriageFact], fact_key: str) -> bool | None:
+    fact = active_by_key.get(fact_key)
+    if not fact:
+        return None
+    if fact.normalized_value in {"true", "yes"}:
+        return True
+    if fact.normalized_value in {"false", "no"}:
+        return False
+    return None
+
+
+def household_size_for_means(active_by_key: dict[str, PBSGTriageFact]) -> float | None:
+    household_size = numeric_fact_value(active_by_key, "applicant.household_size")
+    if household_size and household_size > 0:
+        return household_size
+    dependant_count = numeric_fact_value(active_by_key, "applicant.dependant_count")
+    if dependant_count is not None:
+        return max(1.0, dependant_count + 1)
+    child_fact = active_by_key.get("applicant.singaporean_child_under_21")
+    if child_fact and child_fact.normalized_value in {"yes", "has_singaporean_child"}:
+        return 2
+    income = numeric_fact_value(active_by_key, "applicant.monthly_income")
+    if income == 0:
+        return 1
+    return None
+
+
+def structured_means_values(active_by_key: dict[str, PBSGTriageFact]) -> dict[str, Any]:
+    income = numeric_fact_value(active_by_key, "applicant.monthly_income")
+    household_size = household_size_for_means(active_by_key)
+    values: dict[str, Any] = {
+        "applicant.monthly_income": income,
+        "applicant.household_size": household_size,
+        "applicant.savings": numeric_fact_value(active_by_key, "applicant.savings"),
+        "applicant.age": numeric_fact_value(active_by_key, "applicant.age"),
+        "applicant.housing_type": active_by_key.get("applicant.housing_type").normalized_value
+        if active_by_key.get("applicant.housing_type")
+        else None,
+        "applicant.income_status": active_by_key.get("applicant.income_status").normalized_value
+        if active_by_key.get("applicant.income_status")
+        else None,
+        "applicant.financial_hardship": bool_fact_value(active_by_key, "applicant.financial_hardship"),
+        "applicant.exception_cue": bool_fact_value(active_by_key, "applicant.exception_cue") or False,
+    }
+    if income is not None and household_size:
+        values["applicant.pchi"] = income / household_size
+    return values
+
+
+def condition_matches(condition: dict[str, Any], values: dict[str, Any]) -> bool | None:
+    if condition.get("missing_required_facts"):
+        return values.get("missing_required_facts")
+    if condition.get("contradictory_financial_facts"):
+        return False
+    fact_key = condition.get("fact")
+    if not isinstance(fact_key, str):
+        return None
+    value = values.get(fact_key)
+    if value is None:
+        return True if condition.get("missing") == "defer_to_application" else None
+    if "equals" in condition:
+        return value == condition["equals"]
+    if "not_equals" in condition:
+        return value != condition["not_equals"]
+    if "lte" in condition and isinstance(value, (int, float)):
+        return value <= float(condition["lte"])
+    if "gt" in condition and isinstance(value, (int, float)):
+        return value > float(condition["gt"])
+    if "lte_by_age" in condition and isinstance(value, (int, float)):
+        age_thresholds = condition["lte_by_age"]
+        if not isinstance(age_thresholds, dict):
+            return None
+        age = values.get("applicant.age")
+        threshold = age_thresholds.get("60_or_over") if isinstance(age, (int, float)) and age >= 60 else age_thresholds.get("under_60")
+        return value <= float(threshold) if threshold is not None else None
+    return None
+
+
+def branch_matches(branch_rule: dict[str, Any], values: dict[str, Any]) -> bool:
+    conditions_all = branch_rule.get("conditions_all")
+    if isinstance(conditions_all, list):
+        return all(condition_matches(condition, values) is True for condition in conditions_all if isinstance(condition, dict))
+    conditions_any = branch_rule.get("conditions_any")
+    if isinstance(conditions_any, list):
+        return any(condition_matches(condition, values) is True for condition in conditions_any if isinstance(condition, dict))
+    return False
+
+
+def means_status_value_for_branch(branch_key: str, branch_rule: dict[str, Any]) -> tuple[str, str]:
+    label = branch_rule.get("label") if isinstance(branch_rule.get("label"), str) else label_from_branch_key(branch_key)
+    normalized_label = normalize_branch_label(label)
+    if "fjss pro bono" in normalized_label:
+        return label, "fjss_pro_bono_qualifying"
+    if "fjss modest means" in normalized_label:
+        return label, "fjss_modest_means_qualifying"
+    if "clas" in normalized_label:
+        return label, "clas_qualifying"
+    if "legal clinic" in normalized_label:
+        return label, "legal_clinic_qualifying"
+    normalized_by_branch = {
+        "if_yes": "standard_eligible",
+        "if_no_marginal": "marginal_eligible",
+        "if_no_marginal_or_exceptional": "marginal_or_exceptional",
+        "if_no_well_over": "well_over",
+        "if_no_well_over_no_exceptions": "well_over_no_exceptions",
+        "if_no": "not_eligible",
+        "if_not_sure": "not_sure",
+    }
+    return label, normalized_by_branch.get(branch_key, normalize_branch_label(label))
+
+
+def evaluate_means_test_structured(
+    question_node: dict[str, Any],
+    facts: list[PBSGTriageFact],
+) -> PBSGTriageFact | None:
+    means_test_structured = question_node.get("means_test_structured")
+    if not isinstance(means_test_structured, dict):
+        return None
+    active_by_key = active_fact_by_key(facts)
+    existing_means = active_by_key.get("applicant.means_status")
+    if existing_means and existing_means.branch_value in question_node:
+        return existing_means
+    values = structured_means_values(active_by_key)
+    has_any_means_fact = any(
+        active_by_key.get(fact_key)
+        for fact_key in (
+            "applicant.monthly_income",
+            "applicant.household_size",
+            "applicant.dependant_count",
+            "applicant.savings",
+            "applicant.housing_type",
+            "applicant.financial_hardship",
+            "applicant.exception_cue",
+            "applicant.income_status",
+        )
+    )
+    values["missing_required_facts"] = bool(
+        has_any_means_fact and (values.get("applicant.monthly_income") is None or values.get("applicant.housing_type") is None)
+    )
+    branches = means_test_structured.get("branches")
+    if not isinstance(branches, dict):
+        return None
+    for branch_key, branch_rule in branches.items():
+        if not isinstance(branch_key, str) or branch_key not in question_node or not isinstance(branch_rule, dict):
+            continue
+        if branch_key == "if_not_sure":
+            continue
+        if not branch_matches(branch_rule, values):
+            continue
+        value, normalized_value = means_status_value_for_branch(branch_key, branch_rule)
+        source_fact = next((fact for fact in reversed(facts) if fact.status == "active" and fact.fact_key in active_by_key), None)
+        return PBSGTriageFact(
+            fact_key="applicant.means_status",
+            value=value,
+            normalized_value=normalized_value,
+            source=f"derived_from_{source_fact.source if source_fact else 'means_test_structured'}",
+            scope="global",
+            confidence=0.9,
+            provenance=source_fact.source_text if source_fact else None,
+            source_type="structured_extraction",
+            branch_value=branch_key,
+            source_text=source_fact.source_text if source_fact else None,
+            source_turn_index=source_fact.source_turn_index if source_fact else None,
+            workflow_scope="global",
+        )
+    return None
+
+
+def synthesize_means_status_facts(entries: dict[str, dict[str, Any]], facts: list[PBSGTriageFact]) -> list[PBSGTriageFact]:
+    active_by_key = active_fact_by_key(facts)
+    existing_means = active_by_key.get("applicant.means_status")
+    if existing_means and existing_means.normalized_value in {"marginal_or_exceptional", "fjss_pro_bono_qualifying"}:
+        return facts
+    for entry_id, question_id in (("GEN3-T03", "Q5"), ("GEN3-T04", "Q4"), ("GEN3-T02", "Q6")):
+        entry = entries.get(entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict):
+            continue
+        means_fact = evaluate_means_test_structured(question_node, facts)
+        if means_fact:
+            if means_fact.branch_value == "if_not_sure":
+                continue
+            if existing_means:
+                existing_means.status = "superseded"
+            facts.append(means_fact)
+            break
+    return facts
 
 
 def extract_user_fact_ledger(
@@ -693,7 +1152,7 @@ def extract_user_fact_ledger(
         routing_fact = routing_answer_fact_from_user_turn(entries, latest_assistant_content(messages), latest_user_query, len(messages))
         if routing_fact:
             facts.append(routing_fact)
-    return merge_fact_ledger(facts)
+    return synthesize_means_status_facts(entries, merge_fact_ledger(facts))
 
 
 def active_fact_for_question(
@@ -947,16 +1406,25 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
         if "if_not_sure_or_both" in branch_keys:
             return "if_not_sure_or_both"
 
+    if is_deadline_question(question_node):
+        deadline_branch_key = deadline_branch_key_from_text(latest_user_query)
+        if deadline_branch_key in branch_keys:
+            return deadline_branch_key
+
     keyword_rules = [
         (r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", "if_no_foreigner"),
         (r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence|no violence)\b", "if_no"),
-        (r"\b(urgent|deadline|court date|family violence|violence|unsafe|danger)\b", "if_yes"),
+        (r"\b(urgent|within 14 days|within fourteen days|\d+\s+days?|family violence|violence|unsafe|danger)\b", "if_yes"),
         (r"\b(no children|no child|no singaporean child|no singapore citizen child|child is not singaporean)\b", "if_no"),
         (r"\b(singaporean child|singapore citizen child|sg child|child under 21)\b", "if_yes"),
-        (r"\b(representation|represent|lawyer to act|lawyer)\b", "if_representation"),
+        (r"\b(rep|representation|represent|lawyer to act|lawyer)\b", "if_representation"),
         (r"\b(guidance|initial advice|advice|consultation)\b", "if_guidance"),
         (r"\b(nonprofit|non profit|charity|social enterprise)\b", "if_yes_and_nonprofit"),
         (r"\b(for profit|company|business|commercial)\b", "if_yes_and_for_profit"),
+        (
+            r"\b(applicant is calling|person who needs help|calling for myself|for myself|my matter)\b",
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+        ),
         (r"\b(can call|able to call|can contact|able to contact)\b", "if_calling_on_behalf_and_able_to_self_help"),
         (
             r"\b(cannot call|can't call|unable to call|cannot contact|detained|hospitali[sz]ed|minor|overseas)\b",
@@ -967,6 +1435,7 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
         (r"\b(pdo.*unable|unable.*pdo|pdo.*reject|reject.*pdo)\b", "if_yes_pdo_unable_to_assist"),
         (r"\b(lab.*unable|unable.*lab|lab.*reject|reject.*lab)\b", "if_yes_lab_unable_to_assist"),
         (r"\b(lab.*able|able.*lab|lab.*not sure|not sure.*lab)\b", "if_yes_lab_able_or_not_sure"),
+        (r"\b(no income|housewife|unemployed|not working|financial hardship)\b", "if_no_marginal_or_exceptional"),
         (r"\b(marginal|exceptional|hardship|medical|liabilities|dependents?)\b", "if_no_marginal_or_exceptional"),
         (r"\b(marginal)\b", "if_no_marginal"),
         (r"\b(well over|over threshold|no exceptions?)\b", "if_no_well_over_no_exceptions"),
@@ -1299,6 +1768,14 @@ def build_triage_state(
         if workflow_id != active_workflow and workflow_id not in completed_workflows
     ]
     parent_workflow = selected_entry_id if pending_entry_id == "GEN3-T06" and selected_entry_id != "GEN3-T06" else None
+    if not parent_workflow and pending_entry_id == "GEN3-T06":
+        resume_matches = re.findall(
+            r"After this urgent path:\s*resume\s+(GEN3-[A-Z0-9-]+)\s+(Q\d+[A-Z]?)",
+            conversation_text,
+            flags=re.IGNORECASE,
+        )
+        if resume_matches:
+            parent_workflow = resume_matches[-1][0].upper()
     resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
     is_terminal_route = bool(assistant_content and "**Routing Recommendation:**" in assistant_content and selected_entry_id)
     routing_completion_status = "not_started"
@@ -1313,7 +1790,7 @@ def build_triage_state(
 
     return PBSGTriageState(
         mode=mode,
-        workflow_id=selected_entry_id,
+        workflow_id=parent_workflow or selected_entry_id,
         workflow_locked=workflow_locked,
         active_workflow=active_workflow,
         queued_workflows=queued_workflows,
@@ -2152,6 +2629,8 @@ class PBSGRoutingEngine:
         if not transition:
             transition = resolve_expected_transition(self.entries, state, latest_user_query)
         if not transition:
+            transition = self.resolve_fact_transition(state, state.pending_entry_id, state.current_question_id)
+        if not transition:
             return None
         transition = self.resume_parent_after_nested_urgent(state, transition)
         transition = self.resolve_handoff_carryover(state, transition)
@@ -2170,13 +2649,15 @@ class PBSGRoutingEngine:
     ) -> PBSGTransition | None:
         if not entry_id or not question_id:
             return None
-        fact = user_fact_for_question(self.entries, state.fact_ledger, entry_id, question_id)
-        if not fact or fact.confidence < 0.7:
-            return None
         entry = self.entries.get(entry_id)
         branching_logic = entry.get("branching_logic") if entry else None
         question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
         if not isinstance(question_node, dict):
+            return None
+        means_fact = evaluate_means_test_structured(question_node, state.fact_ledger)
+        fact = user_fact_for_question(self.entries, state.fact_ledger, entry_id, question_id)
+        fact = means_fact or fact
+        if not fact or fact.confidence < 0.7:
             return None
         branch_key = branch_value_for_fact(question_node, fact)
         if not branch_key or branch_key not in question_node:
@@ -2217,7 +2698,10 @@ class PBSGRoutingEngine:
     ) -> PBSGTransition:
         current = transition
         visited: set[tuple[str | None, str | None]] = set()
-        while current.transition_type in {"proceed_question", "handoff_entry", "cross_reference"}:
+        concurrent_origin: PBSGTransition | None = None
+        while current.transition_type in {"proceed_question", "concurrent_route_question", "handoff_entry", "cross_reference"}:
+            if current.transition_type == "concurrent_route_question" and current.route_label and not concurrent_origin:
+                concurrent_origin = current
             target_entry_id = current.target_entry_id
             target_question_id = current.target_question_id or ("Q1" if current.transition_type in {"handoff_entry", "cross_reference"} else None)
             visit_key = (target_entry_id, target_question_id)
@@ -2229,8 +2713,26 @@ class PBSGRoutingEngine:
                 break
             self.record_transition_fact(state, fact_transition)
             current = self.resume_parent_after_nested_urgent(state, fact_transition)
-            if current.transition_type in {"terminal_route", "nested_stream", "concurrent_route_question", "clarification"}:
+            if current.transition_type in {"terminal_route", "nested_stream", "clarification"}:
                 break
+        if (
+            concurrent_origin
+            and current.transition_type == "proceed_question"
+            and current.target_entry_id
+            and current.target_question_id
+        ):
+            return PBSGTransition(
+                entry_id=concurrent_origin.entry_id,
+                question_id=concurrent_origin.question_id,
+                branch_key=concurrent_origin.branch_key,
+                outcome=concurrent_origin.outcome,
+                transition_type="concurrent_route_question",
+                target_entry_id=current.target_entry_id,
+                target_question_id=current.target_question_id,
+                route_label=concurrent_origin.route_label,
+                resume_entry_id=concurrent_origin.resume_entry_id,
+                resume_question_id=concurrent_origin.resume_question_id,
+            )
         return current
 
     def start_queued_workflow(
@@ -2273,14 +2775,13 @@ class PBSGRoutingEngine:
             question = self.question_text(transition.target_entry_id, transition.target_question_id)
             if not question:
                 return None
+            is_queued_continuation = transition.branch_key == "continue_queued_workflow"
             lines = [
                 f"**Selected Entry:** {workflow_id}",
                 "",
-                f"**Continuing queued topic:** {workflow_id}",
-                "",
                 "Triage progress:",
                 "",
-                f"- Activated queued workflow: {workflow_id}",
+                *([f"- Activated queued workflow: {workflow_id}"] if is_queued_continuation else []),
                 *(
                     [f"- Carried over: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]"]
                     if transition.question_id != "START"
@@ -2543,6 +3044,8 @@ class PBSGRoutingEngine:
                 "",
                 f'"{applicant_script}"',
                 "",
+                "**Ask the applicant (read verbatim):**",
+                "",
                 f'> **{transition.target_entry_id} {transition.target_question_id}: "{convert_question_to_second_person(question)}"**',
             ]
         )
@@ -2582,11 +3085,21 @@ class PBSGRoutingEngine:
         if transition.transition_type == "nested_stream":
             next_label = f"{transition.target_entry_id} {transition.target_question_id} (Urgent concurrent path)"
             question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
+        elif transition.transition_type == "concurrent_route_question" and transition.target_entry_id != transition.entry_id:
+            question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
 
         lines = self.render_header_and_answered_state(selected_entry_id, transition)
         if transition.transition_type == "concurrent_route_question" and transition.route_label:
-            route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
-            lines.extend(["", "**Concurrent routing note:**", "", f"- {route_text or transition.outcome} [{transition.entry_id}.json]"])
+            if transition.resume_entry_id:
+                route_note = (
+                    f"{transition.route_label}: {transition.outcome}. "
+                    f"Because this urgent stream is nested under {transition.resume_entry_id}, resume the parent stream at "
+                    f"{transition.target_entry_id} {transition.target_question_id}."
+                )
+            else:
+                route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
+                route_note = route_text or transition.outcome
+            lines.extend(["", "**Concurrent routing note:**", "", f"- {route_note} [{transition.entry_id}.json]"])
         lines.extend(
             [
                 "",

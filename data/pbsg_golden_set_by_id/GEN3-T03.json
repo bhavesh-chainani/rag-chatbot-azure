@@ -50,7 +50,55 @@
       "if_yes": "Route D (FJSS Pro Bono — Standard Intake)",
       "if_no_marginal": "Route E (FJSS Modest Means). Marginal thresholds: PCHI ≤ S$1,400, savings ≤ $12,000 if younger than 60 (or ≤ $48,000 if 60+), non-private housing.",
       "if_no_well_over": "Proceed to GEN3-T04 — Civil and Guidance Stream Triage",
-      "if_not_sure": "Walk through the thresholds; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff)."
+      "if_not_sure": "Walk through the thresholds; if still unclear, take down figures and proceed to Route F (Escalate to PBSG Staff).",
+      "means_test_structured": {
+        "fact_requirements": [
+          "applicant.monthly_income",
+          "applicant.household_size",
+          "applicant.savings",
+          "applicant.age",
+          "applicant.housing_type"
+        ],
+        "pchi": {
+          "income_fact": "applicant.monthly_income",
+          "household_size_fact": "applicant.household_size",
+          "formula": "monthly_income / household_size"
+        },
+        "branches": {
+          "if_yes": {
+            "route": "Route D",
+            "label": "FJSS Pro Bono",
+            "conditions_all": [
+              { "fact": "applicant.pchi", "lte": 1050 },
+              { "fact": "applicant.housing_type", "equals": "non_private_housing" },
+              { "fact": "applicant.savings", "lte_by_age": { "under_60": 10000, "60_or_over": 40000 }, "missing": "defer_to_application" }
+            ]
+          },
+          "if_no_marginal": {
+            "route": "Route E",
+            "label": "FJSS Modest Means",
+            "conditions_all": [
+              { "fact": "applicant.pchi", "lte": 1400 },
+              { "fact": "applicant.housing_type", "equals": "non_private_housing" },
+              { "fact": "applicant.savings", "lte_by_age": { "under_60": 12000, "60_or_over": 48000 }, "missing": "defer_to_application" }
+            ]
+          },
+          "if_no_well_over": {
+            "label": "Civil and Guidance handoff",
+            "conditions_all": [
+              { "fact": "applicant.pchi", "gt": 1400 },
+              { "fact": "applicant.housing_type", "not_equals": "non_private_housing" }
+            ]
+          },
+          "if_not_sure": {
+            "label": "Clarify or escalate",
+            "conditions_any": [
+              { "missing_required_facts": true },
+              { "contradictory_financial_facts": true }
+            ]
+          }
+        }
+      }
     }
   },
   "routing": [

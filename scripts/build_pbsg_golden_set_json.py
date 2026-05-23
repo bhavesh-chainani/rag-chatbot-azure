@@ -426,11 +426,56 @@ def load_existing_routing_structured() -> dict[str, dict[str, Any]]:
     return structured_by_entry
 
 
+def load_existing_means_test_structured() -> dict[str, dict[str, dict[str, Any]]]:
+    """Preserve structured means-test policy across Word-to-JSON regeneration."""
+    structured_by_entry: dict[str, dict[str, dict[str, Any]]] = {}
+    if not OUTPUT_DIR.exists():
+        return structured_by_entry
+    for path in OUTPUT_DIR.glob("*.json"):
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        entry_id = entry.get("id")
+        branching_logic = entry.get("branching_logic")
+        if not isinstance(entry_id, str) or not isinstance(branching_logic, dict):
+            continue
+        question_blocks: dict[str, dict[str, Any]] = {}
+        for question_id, question_node in branching_logic.items():
+            if not isinstance(question_id, str) or not isinstance(question_node, dict):
+                continue
+            means_test_structured = question_node.get("means_test_structured")
+            if isinstance(means_test_structured, dict):
+                question_blocks[question_id] = means_test_structured
+        if question_blocks:
+            structured_by_entry[entry_id] = question_blocks
+    return structured_by_entry
+
+
 def preserve_routing_structured(entries: list[dict], structured_by_entry: dict[str, dict[str, Any]]) -> list[dict]:
     for entry in entries:
         entry_id = entry.get("id")
         if isinstance(entry_id, str) and entry_id in structured_by_entry:
             entry["routing_structured"] = structured_by_entry[entry_id]
+    return entries
+
+
+def preserve_means_test_structured(
+    entries: list[dict],
+    structured_by_entry: dict[str, dict[str, dict[str, Any]]],
+) -> list[dict]:
+    for entry in entries:
+        entry_id = entry.get("id")
+        branching_logic = entry.get("branching_logic")
+        if not isinstance(entry_id, str) or not isinstance(branching_logic, dict):
+            continue
+        question_blocks = structured_by_entry.get(entry_id)
+        if not question_blocks:
+            continue
+        for question_id, means_test_structured in question_blocks.items():
+            question_node = branching_logic.get(question_id)
+            if isinstance(question_node, dict):
+                question_node["means_test_structured"] = means_test_structured
     return entries
 
 
@@ -464,8 +509,10 @@ def main() -> None:
     text = docx_to_text(source)
     legacy = args.legacy or source.name == "PBSG_Golden_Set_Complete_v2.docx"
     existing_routing_structured = load_existing_routing_structured()
+    existing_means_test_structured = load_existing_means_test_structured()
     entries = build_legacy_entries(text) if legacy else build_gen3_entries(text)
     entries = preserve_routing_structured(entries, existing_routing_structured)
+    entries = preserve_means_test_structured(entries, existing_means_test_structured)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for entry in entries:

@@ -90,6 +90,58 @@ PBSG_GLOSSARY_ANSWERS = {
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
 
+PBSG_QUICK_REPLY_LABELS = {
+    ("GEN3-T01", "Q2"): {
+        "if_calling_on_behalf_and_able_to_self_help": "Calling for someone else; they can contact PBSG directly",
+        "if_self_or_calling_on_behalf_and_unable_to_self_help": (
+            "Applicant is calling, or cannot contact PBSG themselves"
+        ),
+    },
+    ("GEN3-T01", "Q3"): {
+        "if_yes_and_nonprofit": "Yes, for a non-profit or charity",
+        "if_yes_and_for_profit": "Yes, for a for-profit business",
+        "if_no": "No, personal legal matter",
+    },
+    ("GEN3-T01", "Q4A"): {
+        "if_guidance": "Legal guidance or clinic consultation",
+        "if_representation": "Legal representation by a lawyer",
+        "if_not_sure_or_both": "Not sure or both",
+    },
+    ("GEN3-T01", "Q5"): {
+        "if_criminal": "Criminal matter",
+        "if_matrimonial": "Family or matrimonial matter",
+        "if_civil_or_others": "Civil or other matter",
+    },
+    ("GEN3-T02", "Q4"): {
+        "if_no_foreigner": "No, not a Singapore Citizen or PR",
+    },
+    ("GEN3-T02", "Q5"): {
+        "if_no_or_has_not_applied": "No, has not applied to PDO",
+        "if_yes_passed_or_processing": "Yes, PDO approved or still processing",
+        "if_yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
+    },
+    ("GEN3-T03", "Q2"): {
+        "if_no_foreigner": "No, not a Singapore Citizen or PR",
+    },
+    ("GEN3-T03", "Q3"): {
+        "if_no": "No, has not applied to LAB",
+        "if_yes_passed_or_processing": "Yes, LAB approved or still processing",
+        "if_yes_failed_means_test": "Yes, LAB means test failed",
+    },
+    ("GEN3-T04", "Q1"): {
+        "if_no_foreigner": "No, not a Singapore Citizen or PR",
+    },
+    ("GEN3-T04", "Q3"): {
+        "if_no": "No, has not applied to LAB",
+        "if_yes_lab_unable_to_assist": "Yes, LAB unable to assist",
+        "if_yes_lab_able_or_not_sure": "Yes, LAB can assist or applicant is not sure",
+    },
+    ("GEN3-T06", "Q3"): {
+        "if_yes": "Yes, deadline or court date within 14 days",
+        "if_no": "No deadline or court date within 14 days",
+    },
+}
+
 
 class ChatReadRetrieveReadApproach(Approach):
     """
@@ -297,6 +349,10 @@ class ChatReadRetrieveReadApproach(Approach):
     def label_from_branch_key(self, branch_key: str) -> str:
         return label_from_branch_key(branch_key)
 
+    def quick_reply_label(self, entry_id: str, question_id: str, branch_key: str) -> str:
+        question_labels = PBSG_QUICK_REPLY_LABELS.get((entry_id, question_id), {})
+        return question_labels.get(branch_key, self.label_from_branch_key(branch_key))
+
     def quick_reply_outcome_is_supported(self, outcome: Any) -> bool:
         if not isinstance(outcome, str):
             return False
@@ -332,7 +388,11 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
 
         options = [
-            QuickReplyOption(id=key, label=self.label_from_branch_key(key), value=self.label_from_branch_key(key))
+            QuickReplyOption(
+                id=key,
+                label=self.quick_reply_label(entry_id, question_id, key),
+                value=self.quick_reply_label(entry_id, question_id, key),
+            )
             for key in branch_keys
         ]
         return QuickReply(mode="single", entryId=entry_id, questionId=question_id, options=options)
@@ -608,9 +668,9 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
-        if turn_classification.should_call_llm:
-            return None
         deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
+        if turn_classification.should_call_llm and not deterministic_result:
+            return None
         if not deterministic_result:
             return None
         return self.build_deterministic_chat_response(deterministic_result, session_state, turn_classification)
@@ -820,6 +880,33 @@ class ChatReadRetrieveReadApproach(Approach):
                 f"Type the applicant's answer here and I will determine the next question or route. [{selected_entry_id}.json]",
             ]
         )
+
+    def repair_hardship_rejection(
+        self,
+        content: Optional[str],
+        messages: list[ChatCompletionMessageParam],
+        latest_content: str,
+    ) -> Optional[str]:
+        if not content or "**Selected Entry:** GEN3-T04" not in content or "Route D" not in content:
+            return content
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        has_hardship = any(
+            fact.status == "active"
+            and fact.fact_key in {"applicant.financial_hardship", "applicant.income_status", "applicant.means_status"}
+            and fact.normalized_value in {"true", "no_income", "marginal_or_exceptional"}
+            for fact in triage_state.fact_ledger
+        )
+        if not has_hardship:
+            return content
+        transition = self.pbsg_routing_engine.graph.transition_for(
+            "GEN3-T04", "Q4", "if_no_marginal_or_exceptional"
+        )
+        if not transition:
+            return content
+        repaired = self.pbsg_routing_engine.render_transition(transition)
+        if not repaired:
+            return content
+        return repaired + "\n\n**Repair note:** I treated the no-income hardship information as a possible exceptional circumstance, so this must not be rejected as well-over/no-exceptions."
 
     async def try_structured_llm_locked_response(
         self,
@@ -1176,6 +1263,7 @@ class ChatReadRetrieveReadApproach(Approach):
         latest_content = messages[-1].get("content") if messages else ""
         if isinstance(latest_content, str):
             content = self.repair_unvalidated_prerequisite_skip(content, messages, latest_content)
+            content = self.repair_hardship_rejection(content, messages, latest_content)
         extra_info.quick_reply = self.build_quick_reply(content, extra_info)
         # Assume last thought is for generating answer
         # TODO: Update for agentic? This isn't still true?
@@ -1258,6 +1346,7 @@ class ChatReadRetrieveReadApproach(Approach):
             latest_content = messages[-1].get("content") if messages else ""
             if isinstance(latest_content, str):
                 content = self.repair_unvalidated_prerequisite_skip(content, messages, latest_content)
+                content = self.repair_hardship_rejection(content, messages, latest_content)
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
 
             if self.include_token_usage and extra_info.thoughts and chat_result.usage:
@@ -1333,6 +1422,7 @@ class ChatReadRetrieveReadApproach(Approach):
             latest_content = messages[-1].get("content") if messages else ""
             if isinstance(latest_content, str):
                 streamed_content = self.repair_unvalidated_prerequisite_skip(streamed_content, messages, latest_content) or streamed_content
+                streamed_content = self.repair_hardship_rejection(streamed_content, messages, latest_content) or streamed_content
             extra_info.quick_reply = self.build_quick_reply(streamed_content, extra_info)
             if buffer_pbsg_stream:
                 yield {"delta": {"role": "assistant", "content": streamed_content}}

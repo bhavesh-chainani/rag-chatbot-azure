@@ -20,6 +20,7 @@ from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGTransition,
+    branch_key_for_answer,
     build_triage_state,
     format_state_prompt,
     normalize_simple_answer,
@@ -230,6 +231,48 @@ def test_build_quick_reply_from_selected_entry_and_question(chat_approach):
         ("if_no", "No", "No"),
         ("if_not_sure", "Not sure", "Not sure"),
     ]
+
+
+def test_build_quick_reply_uses_question_specific_labels(chat_approach):
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant the person who needs legal help, or are they calling on behalf of someone else?",
+                "if_calling_on_behalf_and_able_to_self_help": "Route B",
+                "if_self_or_calling_on_behalf_and_unable_to_self_help": "Proceed to Q3",
+                "if_not_sure": "Clarify caller capacity.",
+            }
+        },
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> Q2: "Are you the person who needs legal help, or are they calling on behalf of someone else?"
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert [(option.id, option.label, option.value) for option in quick_reply.options] == [
+        (
+            "if_calling_on_behalf_and_able_to_self_help",
+            "Calling for someone else; they can contact PBSG directly",
+            "Calling for someone else; they can contact PBSG directly",
+        ),
+        (
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+            "Applicant is calling, or cannot contact PBSG themselves",
+            "Applicant is calling, or cannot contact PBSG themselves",
+        ),
+        ("if_not_sure", "Not sure", "Not sure"),
+    ]
+    assert (
+        branch_key_for_answer(entry["branching_logic"]["Q2"], "Applicant is calling, or cannot contact PBSG themselves")
+        == "if_self_or_calling_on_behalf_and_unable_to_self_help"
+    )
 
 
 def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
@@ -1497,6 +1540,175 @@ Topics identified:
     assert "Repaired skipped prerequisite: Q1 from GEN3-T03" in repaired
     assert "Next question: Q1 from GEN3-T03" in repaired
     assert "Have you applied to the Legal Aid Bureau" not in repaired
+
+
+@pytest.mark.asyncio
+async def test_pilot_no_income_condo_reuses_lab_and_routes_hardship_to_staff(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("pilot path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    await ask("Applicant married in December 2025, stays in condo and seeks help with divorce")
+    await ask("No")
+    await ask("Yes")
+    await ask("Yes, failed means test")
+    handoff = await ask("no income, stays condo")
+
+    assert "**Selected Entry:** GEN3-T04" in handoff["message"]["content"]
+    assert "Have you applied to the Legal Aid Bureau" not in handoff["message"]["content"]
+    assert "Per Capita Household Income" not in handoff["message"]["content"]
+    assert "Next question: Q2 from GEN3-T04" in handoff["message"]["content"]
+
+    final = await ask("rep")
+    content = final["message"]["content"]
+
+    assert "**Routing Recommendation:** Route C" in content
+    assert "Route D" not in content
+    assert "No, marginal or exceptional" in content
+    assert "No income / hardship" in content
+    assert "Have you applied to the Legal Aid Bureau" not in content
+    assert "Per Capita Household Income" not in content
+
+
+@pytest.mark.asyncio
+async def test_pilot_low_income_hdb_foreigner_with_child_routes_to_fjss(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("low-income HDB FJSS path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    await ask("35 yo, with 3 yo daughter seeks divorce")
+    await ask("No")
+    await ask("No, foreigner")
+    await ask("Yes")
+    final = await ask("currently earning $2k, staying in 3 rm HDB")
+    content = final["message"]["content"]
+
+    assert "**Routing Recommendation:** Route D (FJSS Pro Bono" in content
+    assert "FJSS Pro Bono" in content
+    assert "Route F" not in content
+    assert "Not sure" not in content
+    assert "Carried over from" in content
+
+
+@pytest.mark.asyncio
+async def test_pilot_criminal_urgent_reuses_initial_context_and_avoids_loop(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("criminal urgent pilot path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    first = await ask(
+        "caller said he has been charged in court for assault and has no legal representation. "
+        "he is singaporean, no money to hire a lawyer"
+    )
+    assert "Next question: Q2 from GEN3-T02" in first["message"]["content"]
+    assert "Is the offence a capital offence" not in first["message"]["content"]
+
+    urgent = await ask("yes, 7 days")
+    assert "GEN3-T06 Q1" in urgent["message"]["content"]
+    assert "After this urgent path: resume GEN3-T02 Q3" in urgent["message"]["content"]
+
+    await ask("no")
+    resumed = await ask("no")
+    content = resumed["message"]["content"]
+
+    assert "Concurrent routing note" in content
+    assert "Next question: Q5 from GEN3-T02" in content
+    assert "Have you applied to, or been told about, the Public Defender" in content
+    assert "Have you been charged in court?" not in content
+    assert "Is the applicant a Singapore Citizen or PR?" not in content
+    assert "GEN3-T01" not in content
+
+    final = await ask("no")
+    assert "**Routing Recommendation:** Route B (Refer to PDO First)" in final["message"]["content"]
+
+
+def test_hardship_guard_repairs_llm_route_d_rejection(chat_approach):
+    hallucinated_rejection = """**Selected Entry:** GEN3-T04
+
+Triage progress:
+
+- Last answered: Q4 = No, well over, no exceptions → Route D
+
+**Routing Recommendation:** Route D (Reject and Share Self-Help Resources)"""
+    messages = [
+        {"role": "assistant", "content": """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "Is your Per Capita Household Income (PCHI) ≤ S$5,000, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"**"""},
+        {"role": "user", "content": "no income, stays condo"},
+    ]
+
+    repaired = chat_approach.repair_hardship_rejection(
+        hallucinated_rejection,
+        messages,
+        "no income, stays condo",
+    )
+
+    assert repaired is not None
+    assert "**Routing Recommendation:** Route C" in repaired
+    assert "Route D (Reject" not in repaired
+    assert "Repair note" in repaired
 
 
 @pytest.mark.asyncio

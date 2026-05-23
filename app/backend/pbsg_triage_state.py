@@ -24,6 +24,10 @@ class PBSGTriageFact:
     status: str = "active"
     provenance: str | None = None
     source_type: str = "assistant_visible_state"
+    branch_value: str | None = None
+    source_text: str | None = None
+    source_turn_index: int | None = None
+    workflow_scope: str = "global"
 
 
 @dataclass
@@ -136,6 +140,30 @@ class StructuredRoute:
     prepare: list[str] = field(default_factory=list)
     intern_steps: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+
+
+QUESTION_FACT_MAP = {
+    ("GEN3-T01", "Q1"): "applicant.representation_status",
+    ("GEN3-T01", "Q2"): "applicant.caller_capacity",
+    ("GEN3-T01", "Q3"): "matter.business_or_commercial",
+    ("GEN3-T01", "Q4"): "applicant.prior_legal_advice",
+    ("GEN3-T01", "Q5"): "matter.legal_topic",
+    ("GEN3-T02", "Q1"): "matter.capital_offence",
+    ("GEN3-T02", "Q2"): "matter.urgency_or_safety",
+    ("GEN3-T03", "Q1"): "matter.urgency_or_safety",
+    ("GEN3-T03", "Q2"): "applicant.residency_status",
+    ("GEN3-T03", "Q3"): "applicant.lab_application_status",
+    ("GEN3-T03", "Q4"): "applicant.singaporean_child_under_21",
+    ("GEN3-T03", "Q5"): "applicant.means_status",
+    ("GEN3-T04", "Q1"): "applicant.residency_status",
+    ("GEN3-T04", "Q2"): "applicant.help_type_requested",
+    ("GEN3-T04", "Q3"): "applicant.lab_application_status",
+    ("GEN3-T04", "Q4"): "applicant.means_status",
+    ("GEN3-T06", "Q1"): "matter.immediate_safety",
+    ("GEN3-T06", "Q2"): "matter.urgent_deprivation",
+    ("GEN3-T06", "Q3"): "matter.deadline_within_14_days",
+    ("GEN3-T13", "Q1"): "applicant.vulnerability_status",
+}
 
 
 ASK_MARKERS = [
@@ -381,6 +409,14 @@ def canonical_fact_key_for_question(question: str | None) -> str | None:
     return f"workflow.question.{slug}" if slug else None
 
 
+def canonical_fact_key_for_node(entry_id: str | None, question_id: str | None, question: str | None = None) -> str | None:
+    if entry_id and question_id:
+        mapped = QUESTION_FACT_MAP.get((entry_id, question_id))
+        if mapped:
+            return mapped
+    return canonical_fact_key_for_question(question)
+
+
 def question_text_from_entry(entries: dict[str, dict[str, Any]], entry_id: str | None, question_id: str | None) -> str | None:
     if not entry_id or not question_id:
         return None
@@ -403,7 +439,7 @@ def fact_from_answered_line(entries: dict[str, dict[str, Any]], default_entry_id
     question_id = match.group(2).upper()
     value = match.group(3).strip(" .")
     question = question_text_from_entry(entries, entry_id, question_id)
-    fact_key = canonical_fact_key_for_question(question)
+    fact_key = canonical_fact_key_for_node(entry_id, question_id, question)
     if not fact_key:
         return None
     normalized_value = normalize_branch_label(value)
@@ -415,6 +451,8 @@ def fact_from_answered_line(entries: dict[str, dict[str, Any]], default_entry_id
         source=f"{entry_id}.{question_id}",
         scope=scope,
         provenance=line,
+        source_type="assistant_visible_state",
+        source_text=line,
     )
 
 
@@ -435,6 +473,227 @@ def extract_fact_ledger(
         seen.add(dedupe_key)
         facts.append(fact)
     return facts
+
+
+def make_user_fact(
+    fact_key: str,
+    value: str,
+    normalized_value: str,
+    source: str,
+    source_text: str,
+    source_turn_index: int | None,
+    branch_value: str | None,
+    confidence: float = 0.95,
+    workflow_scope: str = "global",
+) -> PBSGTriageFact:
+    return PBSGTriageFact(
+        fact_key=fact_key,
+        value=value,
+        normalized_value=normalized_value,
+        source=source,
+        scope=workflow_scope,
+        confidence=confidence,
+        provenance=source_text,
+        source_type="user_message",
+        branch_value=branch_value,
+        source_text=source_text,
+        source_turn_index=source_turn_index,
+        workflow_scope=workflow_scope,
+    )
+
+
+def deterministic_facts_from_user_text(text: str, source_turn_index: int | None = None) -> list[PBSGTriageFact]:
+    normalized = normalize_branch_label(text)
+    facts: list[PBSGTriageFact] = []
+
+    def add_fact(
+        fact_key: str,
+        value: str,
+        normalized_value: str,
+        branch_value: str | None,
+        confidence: float = 0.95,
+    ) -> None:
+        facts.append(
+            make_user_fact(
+                fact_key=fact_key,
+                value=value,
+                normalized_value=normalized_value,
+                source=f"user_turn_{source_turn_index}" if source_turn_index is not None else "latest_user_turn",
+                source_text=text,
+                source_turn_index=source_turn_index,
+                branch_value=branch_value,
+                confidence=confidence,
+            )
+        )
+
+    if re.search(r"\b(singapore citizen|sg citizen|sgc|permanent resident|\bpr\b)\b", normalized):
+        add_fact("applicant.residency_status", "Singapore Citizen or PR", "sgc_pr", "if_yes")
+    elif re.search(r"\b(foreigner|work permit|employment pass|s pass|dependent pass|not singapore citizen|not a citizen|not pr|not a pr)\b", normalized):
+        add_fact("applicant.residency_status", "foreigner", "foreigner", "if_no_foreigner")
+
+    if re.search(r"\b(no lawyer|not represented|unrepresented|does not have a lawyer|don t have a lawyer|do not have a lawyer)\b", normalized):
+        add_fact("applicant.representation_status", "No lawyer", "no", "if_no")
+    elif re.search(r"\b(has a lawyer|have a lawyer|represented|lawyer filed|solicitor|counsel)\b", normalized):
+        add_fact("applicant.representation_status", "Has lawyer", "yes", "if_yes")
+
+    if re.search(r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence)\b", normalized):
+        add_fact("matter.urgency_or_safety", "No urgency or safety issue", "no", "if_no", confidence=0.9)
+    elif re.search(r"\b(court tomorrow|deadline|within 14 days|next week|urgent|family violence|violence|unsafe|danger)\b", normalized):
+        add_fact("matter.urgency_or_safety", "Urgency or safety issue", "yes", "if_yes", confidence=0.9)
+
+    if re.search(r"\b(capital offence|capital offense|death penalty|punishable with death|murder)\b", normalized):
+        add_fact("matter.capital_offence", "Capital offence", "yes", "if_yes")
+
+    if re.search(r"\b(no lab|not applied to lab|has not applied to lab|haven t applied to lab|never applied to lab)\b", normalized):
+        add_fact("applicant.lab_application_status", "No LAB application", "no", "if_no")
+    elif re.search(r"\b(lab.*failed|failed.*lab|lab rejection|rejected by lab)\b", normalized):
+        add_fact("applicant.lab_application_status", "LAB failed means test", "failed_means_test", "if_yes_failed_means_test")
+    elif re.search(r"\b(lab.*processing|processing.*lab|lab.*pending|applied to lab)\b", normalized):
+        add_fact("applicant.lab_application_status", "LAB applied or processing", "passed_or_processing", "if_yes_passed_or_processing")
+
+    if re.search(r"\b(singaporean child|singapore citizen child|sg child)\b", normalized):
+        add_fact("applicant.singaporean_child_under_21", "Has Singaporean child", "yes", "if_yes")
+    elif re.search(r"\b(no children|no singaporean child|child is not singaporean)\b", normalized):
+        add_fact("applicant.singaporean_child_under_21", "No Singaporean child", "no", "if_no")
+
+    if re.search(r"\b(divorce|matrimonial|custody|maintenance|family)\b", normalized):
+        add_fact("matter.legal_topic", "Matrimonial", "matrimonial", "if_matrimonial", confidence=0.85)
+    elif re.search(r"\b(criminal|charged|charge|arrest|police)\b", normalized):
+        add_fact("matter.legal_topic", "Criminal", "criminal", "if_criminal", confidence=0.85)
+    elif re.search(r"\b(employment|salary|landlord|tenant|contract|civil|debt)\b", normalized):
+        add_fact("matter.legal_topic", "Civil or others", "civil_or_others", "if_civil_or_others", confidence=0.85)
+
+    return facts
+
+
+def branch_value_for_fact(question_node: dict[str, Any], fact: PBSGTriageFact) -> str | None:
+    branch_keys = [key for key in question_node if key.startswith("if_")]
+    if fact.branch_value in branch_keys:
+        return fact.branch_value
+    if fact.normalized_value in {"sgc_pr", "yes", "criminal", "matrimonial", "civil_or_others"}:
+        preferred = {
+            "sgc_pr": "if_yes",
+            "yes": "if_yes",
+            "criminal": "if_criminal",
+            "matrimonial": "if_matrimonial",
+            "civil_or_others": "if_civil_or_others",
+        }.get(fact.normalized_value)
+        if preferred in branch_keys:
+            return preferred
+    if fact.normalized_value in {"foreigner", "no"}:
+        if "if_no_foreigner" in branch_keys and fact.fact_key == "applicant.residency_status":
+            return "if_no_foreigner"
+        if "if_no" in branch_keys:
+            return "if_no"
+    return branch_key_for_answer(question_node, fact.value)
+
+
+def user_fact_for_question(
+    entries: dict[str, dict[str, Any]],
+    facts: list[PBSGTriageFact],
+    entry_id: str | None,
+    question_id: str | None,
+) -> PBSGTriageFact | None:
+    question = question_text_from_entry(entries, entry_id, question_id)
+    fact_key = canonical_fact_key_for_node(entry_id, question_id, question)
+    if not fact_key:
+        return None
+    for fact in reversed(facts):
+        if fact.fact_key != fact_key or fact.status != "active":
+            continue
+        if fact.source_type not in {"user_message", "deterministic_transition", "structured_extraction", "routing_answer"}:
+            continue
+        return fact
+    return None
+
+
+def routing_answer_fact_from_user_turn(
+    entries: dict[str, dict[str, Any]],
+    assistant_content: str | None,
+    user_text: str,
+    source_turn_index: int | None,
+) -> PBSGTriageFact | None:
+    selected_entry_id = extract_selected_entry_id(assistant_content)
+    targets = extract_question_targets(assistant_content)
+    pending_target = targets[-1] if targets else None
+    pending_entry_id = pending_target.entry_id if pending_target and pending_target.entry_id else selected_entry_id
+    question_id = pending_target.question_id if pending_target else None
+    if not pending_entry_id or not question_id:
+        return None
+    entry = entries.get(pending_entry_id)
+    branching_logic = entry.get("branching_logic") if entry else None
+    question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+    if not isinstance(question_node, dict):
+        return None
+    branch_key = branch_key_for_answer(question_node, user_text)
+    if not branch_key:
+        return None
+    question = question_node.get("question")
+    fact_key = canonical_fact_key_for_node(pending_entry_id, question_id, question if isinstance(question, str) else None)
+    if not fact_key:
+        return None
+    value = label_from_branch_key(branch_key)
+    return PBSGTriageFact(
+        fact_key=fact_key,
+        value=value,
+        normalized_value=normalize_branch_label(value),
+        source=f"{pending_entry_id}.{question_id}",
+        scope="global" if not fact_key.startswith("workflow.question.") else "workflow",
+        confidence=1.0,
+        provenance=user_text,
+        source_type="routing_answer",
+        branch_value=branch_key,
+        source_text=user_text,
+        source_turn_index=source_turn_index,
+        workflow_scope="global" if not fact_key.startswith("workflow.question.") else pending_entry_id,
+    )
+
+
+def merge_fact_ledger(facts: list[PBSGTriageFact]) -> list[PBSGTriageFact]:
+    merged: list[PBSGTriageFact] = []
+    latest_by_key: dict[str, PBSGTriageFact] = {}
+    for fact in facts:
+        existing = latest_by_key.get(fact.fact_key)
+        if existing and fact.fact_key in {
+            "applicant.residency_status",
+            "applicant.representation_status",
+            "applicant.prior_legal_advice",
+            "matter.urgency_or_safety",
+            "applicant.lab_application_status",
+            "applicant.singaporean_child_under_21",
+            "matter.legal_topic",
+        }:
+            existing.status = "superseded"
+        latest_by_key[fact.fact_key] = fact
+        merged.append(fact)
+    return merged
+
+
+def extract_user_fact_ledger(
+    entries: dict[str, dict[str, Any]],
+    messages: list[ChatCompletionMessageParam],
+    latest_user_query: str,
+) -> list[PBSGTriageFact]:
+    facts: list[PBSGTriageFact] = []
+    previous_assistant: str | None = None
+    for index, message in enumerate(messages):
+        role = message.get("role")
+        content = message_content_to_text(message.get("content"))
+        if role == "assistant":
+            previous_assistant = content
+            continue
+        if role != "user" or not content:
+            continue
+        facts.extend(deterministic_facts_from_user_text(content, index))
+        routing_fact = routing_answer_fact_from_user_turn(entries, previous_assistant, content, index)
+        if routing_fact:
+            facts.append(routing_fact)
+    if latest_user_query:
+        facts.extend(deterministic_facts_from_user_text(latest_user_query, len(messages)))
+        routing_fact = routing_answer_fact_from_user_turn(entries, latest_assistant_content(messages), latest_user_query, len(messages))
+        if routing_fact:
+            facts.append(routing_fact)
+    return merge_fact_ledger(facts)
 
 
 def active_fact_for_question(
@@ -461,8 +720,8 @@ def unanswered_required_fields_for_state(
     facts: list[PBSGTriageFact],
 ) -> list[str]:
     question = question_text_from_entry(entries, pending_entry_id, current_question_id)
-    fact_key = canonical_fact_key_for_question(question)
-    if not fact_key or active_fact_for_question(facts, question):
+    fact_key = canonical_fact_key_for_node(pending_entry_id, current_question_id, question)
+    if not fact_key or user_fact_for_question(entries, facts, pending_entry_id, current_question_id):
         return []
     return [fact_key]
 
@@ -690,6 +949,10 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
 
     keyword_rules = [
         (r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", "if_no_foreigner"),
+        (r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence|no violence)\b", "if_no"),
+        (r"\b(urgent|deadline|court date|family violence|violence|unsafe|danger)\b", "if_yes"),
+        (r"\b(no children|no child|no singaporean child|no singapore citizen child|child is not singaporean)\b", "if_no"),
+        (r"\b(singaporean child|singapore citizen child|sg child|child under 21)\b", "if_yes"),
         (r"\b(representation|represent|lawyer to act|lawyer)\b", "if_representation"),
         (r"\b(guidance|initial advice|advice|consultation)\b", "if_guidance"),
         (r"\b(nonprofit|non profit|charity|social enterprise)\b", "if_yes_and_nonprofit"),
@@ -943,7 +1206,7 @@ def classify_turn_interrupt(
     has_additive = bool(ADDITIVE_PATTERN.search(latest_user_query))
     has_correction = bool(CORRECTION_PATTERN.search(latest_user_query)) or bool(state.contradiction_signals)
     has_clarification = bool(CLARIFICATION_QUESTION_PATTERN.search(latest_user_query))
-    has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query))
+    has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query)) and branch_key != "if_no"
 
     if has_correction:
         return PBSGTurnClassification(
@@ -970,17 +1233,9 @@ def classify_turn_interrupt(
             pending_branch_key=branch_key,
             new_topics=candidates,
         )
-    if candidates and (has_additive or branch_key):
+    if candidates and has_additive:
         return PBSGTurnClassification(
             turn_type="answer_plus_new_topic" if branch_key else "new_topic_only",
-            should_call_llm=True,
-            reason="possible new topic in locked flow",
-            pending_branch_key=branch_key,
-            new_topics=candidates,
-        )
-    if candidates:
-        return PBSGTurnClassification(
-            turn_type="new_topic_only",
             should_call_llm=True,
             reason="possible new topic in locked flow",
             pending_branch_key=branch_key,
@@ -992,6 +1247,14 @@ def classify_turn_interrupt(
             should_call_llm=False,
             pending_branch_key=branch_key,
             pending_answer_confidence=1.0,
+        )
+    if candidates:
+        return PBSGTurnClassification(
+            turn_type="new_topic_only",
+            should_call_llm=True,
+            reason="possible new topic in locked flow",
+            pending_branch_key=branch_key,
+            new_topics=candidates,
         )
     return PBSGTurnClassification(turn_type="ambiguous", should_call_llm=True, reason="answer did not map locally")
 
@@ -1020,7 +1283,7 @@ def build_triage_state(
             completed_workflows.append(workflow_id)
     active_workflow = pending_entry_id or selected_entry_id
     answered_lines = extract_answered_lines(assistant_content)
-    fact_ledger = extract_fact_ledger(entries, selected_entry_id, answered_lines)
+    fact_ledger = extract_user_fact_ledger(entries, messages, latest_user_query)
     branch_keys = allowed_branch_keys(entries, pending_entry_id, current_question_id)
     contradiction_signals = detect_contradiction_signals(answered_lines, latest_user_query)
     workflow_locked = bool(selected_entry_id and selected_entry_id in entries)
@@ -1818,6 +2081,18 @@ class PBSGRoutingEngine:
         resolution = resolve_initial_topic(self.entries, latest_user_query)
         if not resolution:
             return None
+        seed_state = PBSGTriageState(
+            mode="FAST_ROUTING",
+            workflow_id=resolution.entry_id,
+            workflow_locked=True,
+            active_workflow=resolution.entry_id,
+            current_question_id="Q1",
+            pending_entry_id=resolution.entry_id,
+            concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
+            triggered_overlays=resolution.overlays,
+            fact_ledger=extract_user_fact_ledger(self.entries, [], latest_user_query),
+            routing_completion_status="in_progress",
+        )
         if resolution.entry_id == "GEN3-T02" and CAPITAL_OFFENCE_PATTERN.search(latest_user_query):
             transition = self.graph.transition_for("GEN3-T02", "Q1", "if_yes")
             if not transition:
@@ -1846,22 +2121,14 @@ class PBSGRoutingEngine:
             target_entry_id=resolution.entry_id,
             target_question_id="Q1",
         )
+        transition = self.advance_transition_through_known_facts(seed_state, transition)
         content = self.render_initial_question(resolution)
+        if transition.question_id != "START" or transition.target_question_id != "Q1" or transition.transition_type != "proceed_question":
+            content = self.render_queued_workflow_start(transition, resolution.entry_id)
         if not content:
             return None
-        state = PBSGTriageState(
-            mode="FAST_ROUTING",
-            workflow_id=resolution.entry_id,
-            workflow_locked=True,
-            active_workflow=resolution.entry_id,
-            current_question_id="Q1",
-            pending_entry_id=resolution.entry_id,
-            concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
-            triggered_overlays=resolution.overlays,
-            unanswered_required_fields=unanswered_required_fields_for_state(self.entries, resolution.entry_id, "Q1", []),
-            routing_completion_status="in_progress",
-        )
-        return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+        self.apply_transition_to_state(seed_state, transition)
+        return PBSGDeterministicResult(content=content, state=seed_state, transition=transition, entries=self.entries)
 
     def execute_locked_turn(
         self,
@@ -1888,11 +2155,83 @@ class PBSGRoutingEngine:
             return None
         transition = self.resume_parent_after_nested_urgent(state, transition)
         transition = self.resolve_handoff_carryover(state, transition)
+        transition = self.advance_transition_through_known_facts(state, transition)
         content = self.render_transition(transition)
         if not content:
             return None
         self.apply_transition_to_state(state, transition)
         return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+
+    def resolve_fact_transition(
+        self,
+        state: PBSGTriageState,
+        entry_id: str | None,
+        question_id: str | None,
+    ) -> PBSGTransition | None:
+        if not entry_id or not question_id:
+            return None
+        fact = user_fact_for_question(self.entries, state.fact_ledger, entry_id, question_id)
+        if not fact or fact.confidence < 0.7:
+            return None
+        entry = self.entries.get(entry_id)
+        branching_logic = entry.get("branching_logic") if entry else None
+        question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict):
+            return None
+        branch_key = branch_value_for_fact(question_node, fact)
+        if not branch_key or branch_key not in question_node:
+            return None
+        transition = self.resolve_transition_from_branch(
+            PBSGTriageState(
+                mode="FAST_ROUTING",
+                workflow_id=entry_id,
+                workflow_locked=True,
+                active_workflow=entry_id,
+                pending_entry_id=entry_id,
+                current_question_id=question_id,
+                fact_ledger=state.fact_ledger,
+            ),
+            branch_key,
+        )
+        if not transition:
+            return None
+        return PBSGTransition(
+            entry_id=transition.entry_id,
+            question_id=transition.question_id,
+            branch_key=transition.branch_key,
+            outcome=f"Carried over from {fact.source}: {fact.value}. {transition.outcome}",
+            transition_type=transition.transition_type,
+            target_entry_id=transition.target_entry_id,
+            target_question_id=transition.target_question_id,
+            route_label=transition.route_label,
+            nested_entry_id=transition.nested_entry_id,
+            resume_entry_id=transition.resume_entry_id,
+            resume_question_id=transition.resume_question_id,
+            clarification_text=transition.clarification_text,
+        )
+
+    def advance_transition_through_known_facts(
+        self,
+        state: PBSGTriageState,
+        transition: PBSGTransition,
+    ) -> PBSGTransition:
+        current = transition
+        visited: set[tuple[str | None, str | None]] = set()
+        while current.transition_type in {"proceed_question", "handoff_entry", "cross_reference"}:
+            target_entry_id = current.target_entry_id
+            target_question_id = current.target_question_id or ("Q1" if current.transition_type in {"handoff_entry", "cross_reference"} else None)
+            visit_key = (target_entry_id, target_question_id)
+            if visit_key in visited:
+                break
+            visited.add(visit_key)
+            fact_transition = self.resolve_fact_transition(state, target_entry_id, target_question_id)
+            if not fact_transition:
+                break
+            self.record_transition_fact(state, fact_transition)
+            current = self.resume_parent_after_nested_urgent(state, fact_transition)
+            if current.transition_type in {"terminal_route", "nested_stream", "concurrent_route_question", "clarification"}:
+                break
+        return current
 
     def start_queued_workflow(
         self,
@@ -1921,62 +2260,7 @@ class PBSGRoutingEngine:
             target_entry_id=workflow_id,
             target_question_id="Q1",
         )
-
-        # For a newly queued workflow, do not trust visible facts that the LLM may have invented for that
-        # same workflow. Cross-workflow facts can still carry over when they answer the target question.
-        current_question_id = "Q1"
-        excluded_prefixes = [f"{workflow_id}."]
-        while current_question_id:
-            question = question_text_from_entry(self.entries, workflow_id, current_question_id)
-            carried_fact = active_fact_for_question(state.fact_ledger, question, excluded_prefixes)
-            if not carried_fact:
-                transition = PBSGTransition(
-                    entry_id=workflow_id,
-                    question_id="START" if current_question_id == "Q1" else transition.question_id,
-                    branch_key="continue_queued_workflow" if current_question_id == "Q1" else transition.branch_key,
-                    outcome="Continue queued workflow" if current_question_id == "Q1" else transition.outcome,
-                    transition_type="proceed_question",
-                    target_entry_id=workflow_id,
-                    target_question_id=current_question_id,
-                )
-                break
-            entry = self.entries.get(workflow_id)
-            branching_logic = entry.get("branching_logic") if entry else None
-            question_node = branching_logic.get(current_question_id) if isinstance(branching_logic, dict) else None
-            if not isinstance(question_node, dict):
-                return None
-            branch_key = branch_key_for_answer(question_node, carried_fact.value)
-            if not branch_key:
-                transition = PBSGTransition(
-                    entry_id=workflow_id,
-                    question_id="START",
-                    branch_key="continue_queued_workflow",
-                    outcome="Continue queued workflow",
-                    transition_type="proceed_question",
-                    target_entry_id=workflow_id,
-                    target_question_id=current_question_id,
-                )
-                break
-            carried_transition = self.resolve_transition_from_branch(
-                PBSGTriageState(
-                    mode="FAST_ROUTING",
-                    workflow_id=workflow_id,
-                    workflow_locked=True,
-                    active_workflow=workflow_id,
-                    pending_entry_id=workflow_id,
-                    current_question_id=current_question_id,
-                    fact_ledger=state.fact_ledger,
-                ),
-                branch_key,
-            )
-            if not carried_transition:
-                return None
-            transition = carried_transition
-            self.record_transition_fact(state, transition)
-            if transition.transition_type == "proceed_question" and transition.target_question_id:
-                current_question_id = transition.target_question_id
-                continue
-            break
+        transition = self.advance_transition_through_known_facts(state, transition)
 
         content = self.render_queued_workflow_start(transition, workflow_id)
         if not content:
@@ -1997,6 +2281,11 @@ class PBSGRoutingEngine:
                 "Triage progress:",
                 "",
                 f"- Activated queued workflow: {workflow_id}",
+                *(
+                    [f"- Carried over: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]"]
+                    if transition.question_id != "START"
+                    else []
+                ),
                 f"- Next question: {transition.target_question_id} from {transition.target_entry_id}",
                 "",
                 "**Ask the applicant (read verbatim):**",
@@ -2016,8 +2305,7 @@ class PBSGRoutingEngine:
         if transition.transition_type not in {"handoff_entry", "cross_reference"} or not transition.target_entry_id:
             return transition
         target_question_id = "Q1"
-        target_question = question_text_from_entry(self.entries, transition.target_entry_id, target_question_id)
-        carried_fact = active_fact_for_question(state.fact_ledger, target_question)
+        carried_fact = user_fact_for_question(self.entries, state.fact_ledger, transition.target_entry_id, target_question_id)
         if not carried_fact:
             return transition
         target_entry = self.entries.get(transition.target_entry_id)
@@ -2069,6 +2357,10 @@ class PBSGRoutingEngine:
             scope="workflow" if fact_key.startswith("workflow.question.") else "global",
             confidence=1.0,
             provenance=f"{transition.entry_id} {transition.question_id} = {value}",
+            source_type="deterministic_transition",
+            branch_value=transition.branch_key,
+            source_text=f"{transition.entry_id} {transition.question_id} = {value}",
+            workflow_scope="workflow" if fact_key.startswith("workflow.question.") else "global",
         )
         state.fact_ledger = [
             existing

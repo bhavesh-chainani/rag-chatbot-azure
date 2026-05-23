@@ -1358,6 +1358,110 @@ async def test_continue_queued_topic_starts_at_q1_without_validated_facts(chat_a
     assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
 
 
+@pytest.mark.asyncio
+async def test_known_singapore_citizen_skips_downstream_residency_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known residency should be reused deterministically")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    initial = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant is a Singapore Citizen and wants help with divorce."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    result = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": "Applicant is a Singapore Citizen and wants help with divorce."},
+            {"role": "assistant", "content": initial["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Carried over from" in content
+    assert "Singapore Citizen or PR" in content
+    assert "Next question: Q3 from GEN3-T03" in content
+    assert "Are you a Singapore Citizen or PR?" not in content
+
+
+@pytest.mark.asyncio
+async def test_work_permit_fact_reused_across_matrimonial_to_civil_handoff(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known work permit/residency should be reused across workflows")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    initial_query = "Applicant is on a work permit and wants help with divorce."
+    first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": initial_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    second = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    third = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+            {"role": "assistant", "content": second["message"]["content"]},
+            {"role": "user", "content": "No Singaporean child."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = third["message"]["content"]
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over from" in content
+    assert "foreigner" in content
+    assert "Next question: Q4 from GEN3-T04" in content
+    assert "Are you a Singapore Citizen or PR?" not in content
+
+
+@pytest.mark.asyncio
+async def test_unknown_residency_still_asks_residency_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("unknown residency path should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    initial_query = "Applicant wants help with divorce."
+    first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": initial_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    result = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Next question: Q2 from GEN3-T03" in content
+    assert "Are you a Singapore Citizen or PR?" in content
+
+
 def test_prerequisite_guard_repairs_hallucinated_queued_topic_answers(chat_approach):
     hallucinated_content = """**Selected Entry:** GEN3-T03
 

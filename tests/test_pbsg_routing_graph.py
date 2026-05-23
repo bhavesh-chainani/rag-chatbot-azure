@@ -602,6 +602,15 @@ def test_pbsg_routing_engine_reuses_fact_on_handoff_to_avoid_reasking_q1():
             "role": "assistant",
             "content": """**Selected Entry:** GEN3-T03
 
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Is the applicant a Singapore Citizen or PR?"**""",
+        },
+        {"role": "user", "content": "She is here on a work permit."},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
 What I gathered from your description:
 
 - Q2: No, foreigner [GEN3-T03.json]
@@ -622,7 +631,7 @@ Triage progress:
     assert result is not None
     content = result.content
     assert "**Selected Entry:** GEN3-T04" in content
-    assert "Carried over from GEN3-T03.Q2: No, foreigner" in content
+    assert "Carried over from user_turn_1: foreigner" in content
     assert "Next question: Q4 from GEN3-T04" in content
     assert 'Q1: "Are you a Singapore Citizen or PR?"' not in content
     assert result.state.pending_entry_id == "GEN3-T04"
@@ -663,6 +672,23 @@ Topics identified:
     assert state.completed_workflows == ["GEN3-T02"]
     assert state.queued_workflows == ["GEN3-T03"]
     assert state.routing_completion_status == "awaiting_topic_resolution"
+
+
+def test_user_fact_ledger_supersedes_corrected_residency_fact():
+    entries = load_entries()
+    messages = [
+        {"role": "user", "content": "Applicant is on a work permit and wants help with divorce."},
+        {"role": "user", "content": "Actually she is a PR."},
+    ]
+
+    state = build_triage_state(messages, entries, "")
+    residency_facts = [fact for fact in state.fact_ledger if fact.fact_key == "applicant.residency_status"]
+
+    assert len(residency_facts) == 2
+    assert residency_facts[0].normalized_value == "foreigner"
+    assert residency_facts[0].status == "superseded"
+    assert residency_facts[1].normalized_value == "sgc_pr"
+    assert residency_facts[1].status == "active"
 
 
 @pytest.mark.parametrize(

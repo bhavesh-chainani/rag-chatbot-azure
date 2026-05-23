@@ -32,7 +32,6 @@ from pbsg_triage_state import (
     PBSGRoutingEngine,
     PBSGTransition,
     PBSGTurnClassification,
-    active_fact_for_question,
     build_triage_state,
     classify_turn_interrupt,
     collapse_duplicate_route_cards,
@@ -40,7 +39,7 @@ from pbsg_triage_state import (
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
-    question_text_from_entry,
+    user_fact_for_question,
     resolve_expected_transition,
     resolve_initial_topic,
     safe_escalation_response,
@@ -774,8 +773,7 @@ class ChatReadRetrieveReadApproach(Approach):
             question_id = f"Q{question_number}"
             if question_id not in branching_logic:
                 continue
-            question = question_text_from_entry(self.pbsg_golden_set_entries, entry_id, question_id)
-            if not active_fact_for_question(triage_state.fact_ledger, question):
+            if not user_fact_for_question(self.pbsg_golden_set_entries, triage_state.fact_ledger, entry_id, question_id):
                 return question_id
         return None
 

@@ -137,7 +137,14 @@ PBSG_QUICK_REPLY_LABELS = {
         "if_yes_lab_unable_to_assist": "Yes, LAB unable to assist",
         "if_yes_lab_able_or_not_sure": "Yes, LAB can assist or applicant is not sure",
     },
-    ("GEN3-T06", "Q3"): {
+    ("GEN3-T06", "Q1"): {
+        "if_immediate_safety_or_crisis": "Immediate safety or crisis",
+        "if_basic_needs_or_child_welfare": "Basic needs or child welfare",
+        "if_legal_or_procedural_deadline": "Legal or procedural deadline",
+        "if_no_urgent_or_only_legal_seriousness": "No urgent issue beyond legal seriousness",
+        "if_unclear_or_too_complex": "Unclear or too complex",
+    },
+    ("GEN3-T06", "Q4"): {
         "if_yes": "Yes, deadline or court date within 14 days",
         "if_no": "No deadline or court date within 14 days",
     },

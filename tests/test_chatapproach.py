@@ -1719,13 +1719,7 @@ async def test_pilot_criminal_urgent_reuses_initial_context_and_avoids_loop(chat
     assert "Is the offence a capital offence" not in first["message"]["content"]
 
     urgent = await ask("yes, 7 days")
-    assert "GEN3-T06 Q1" in urgent["message"]["content"]
-    assert "After this urgent path: resume GEN3-T02 Q3" in urgent["message"]["content"]
-
-    await ask("no")
-    resumed = await ask("no")
-    content = resumed["message"]["content"]
-
+    content = urgent["message"]["content"]
     assert "Concurrent routing note" in content
     assert "Next question: Q5 from GEN3-T02" in content
     assert "Have you applied to, or been told about, the Public Defender" in content

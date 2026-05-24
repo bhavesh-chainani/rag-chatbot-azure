@@ -113,11 +113,22 @@ class PBSGQueuedTopic:
 
 
 @dataclass
+class PBSGTopicCandidate:
+    entry_id: str
+    confidence: float
+    evidence: str
+    matched_facts: list[str] = field(default_factory=list)
+    candidate_type: str = "primary_topic"
+
+
+@dataclass
 class PBSGTopicResolution:
     entry_id: str
     confidence: float
     reason: str
     overlays: list[str] = field(default_factory=list)
+    queued_topics: list[PBSGQueuedTopic] = field(default_factory=list)
+    candidates: list[PBSGTopicCandidate] = field(default_factory=list)
 
 
 @dataclass
@@ -1508,8 +1519,9 @@ def detect_contradiction_signals(answered_lines: list[str], latest_user_query: s
 
 
 def monitor_flags(text: str) -> dict[str, bool]:
+    has_deadline_within_14_days = deadline_branch_key_from_text(text) == "if_yes"
     return {
-        "urgent": bool(URGENT_PATTERN.search(text)),
+        "urgent": bool(URGENT_PATTERN.search(text)) or has_deadline_within_14_days,
         "vulnerable": bool(VULNERABLE_PATTERN.search(text)),
         "representation": bool(REPRESENTED_PATTERN.search(text)),
     }
@@ -1539,7 +1551,8 @@ def triggered_overlays_from_flags(flags: dict[str, bool]) -> list[str]:
 def initial_topic_overlays(text: str, primary_entry_id: str, entries: dict[str, dict[str, Any]]) -> list[str]:
     overlays: list[str] = []
     flags = monitor_flags(text)
-    if flags.get("urgent") and primary_entry_id != "GEN3-T06" and "GEN3-T06" in entries:
+    has_deadline_within_14_days = deadline_branch_key_from_text(text) == "if_yes"
+    if (flags.get("urgent") or has_deadline_within_14_days) and primary_entry_id != "GEN3-T06" and "GEN3-T06" in entries:
         overlays.append("GEN3-T06")
     if flags.get("vulnerable") and primary_entry_id != "GEN3-T13" and "GEN3-T13" in entries:
         overlays.append("GEN3-T13")
@@ -1570,7 +1583,92 @@ def metadata_overlap_score(query: str, entry: dict[str, Any]) -> float:
     return min(len(query_tokens & metadata_tokens) / max(len(query_tokens), 1), 0.35)
 
 
-def resolve_initial_topic(
+PRIMARY_TOPIC_PRIORITY = {
+    "GEN3-T02": 20,
+    "GEN3-T03": 30,
+    "GEN3-T04": 40,
+    "GEN3-T06": 50,
+    "GEN3-T13": 60,
+    "GEN3-T01": 90,
+}
+
+
+def topic_candidate_type(entry_id: str, text: str) -> str:
+    if entry_id == "GEN3-T06":
+        return "monitor" if any(
+            INITIAL_TOPIC_PATTERNS[candidate].search(text)
+            for candidate in ("GEN3-T02", "GEN3-T03", "GEN3-T04")
+            if candidate in INITIAL_TOPIC_PATTERNS
+        ) else "primary_topic"
+    if entry_id == "GEN3-T13" and not GEN3_T13_PRIMARY_PATTERN.search(text):
+        return "monitor"
+    return "primary_topic"
+
+
+def initial_topic_candidates(
+    entries: dict[str, dict[str, Any]],
+    latest_user_query: str,
+) -> list[PBSGTopicCandidate]:
+    normalized = re.sub(r"\s+", " ", latest_user_query).strip()
+    candidates: list[PBSGTopicCandidate] = []
+    for entry_id, pattern in INITIAL_TOPIC_PATTERNS.items():
+        if entry_id not in entries:
+            continue
+        match = pattern.search(normalized)
+        score = metadata_overlap_score(normalized, entries[entry_id])
+        evidence = "metadata match"
+        matched_facts: list[str] = []
+        if match:
+            score += 0.65
+            evidence = match.group(0)
+            matched_facts.append(match.group(0))
+        candidate_type = topic_candidate_type(entry_id, normalized)
+        if entry_id == "GEN3-T13" and match and candidate_type == "monitor":
+            score -= 0.45
+        if entry_id == "GEN3-T06" and match and candidate_type == "monitor":
+            score -= 0.35
+        if score > 0:
+            candidates.append(
+                PBSGTopicCandidate(
+                    entry_id=entry_id,
+                    confidence=min(score, 1.0),
+                    evidence=evidence,
+                    matched_facts=matched_facts,
+                    candidate_type=candidate_type,
+                )
+            )
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.candidate_type != "primary_topic",
+            PRIMARY_TOPIC_PRIORITY.get(candidate.entry_id, 80),
+            -candidate.confidence,
+        ),
+    )
+
+
+def queued_topics_from_candidates(
+    candidates: list[PBSGTopicCandidate],
+    primary_entry_id: str,
+    entries: dict[str, dict[str, Any]],
+) -> list[PBSGQueuedTopic]:
+    queued: list[PBSGQueuedTopic] = []
+    for candidate in candidates:
+        if candidate.entry_id == primary_entry_id or candidate.entry_id not in entries:
+            continue
+        if candidate.candidate_type != "primary_topic" or candidate.confidence < 0.6:
+            continue
+        queued.append(
+            PBSGQueuedTopic(
+                entry_id=candidate.entry_id,
+                evidence=candidate.evidence,
+                confidence=candidate.confidence,
+            )
+        )
+    return queued
+
+
+def resolve_initial_topics(
     entries: dict[str, dict[str, Any]],
     latest_user_query: str,
 ) -> PBSGTopicResolution | None:
@@ -1586,59 +1684,52 @@ def resolve_initial_topic(
             overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
         )
     if CAPITAL_OFFENCE_PATTERN.search(normalized) and "GEN3-T02" in entries:
+        candidates = initial_topic_candidates(entries, latest_user_query)
+        queued_topics = queued_topics_from_candidates(candidates, "GEN3-T02", entries)
         return PBSGTopicResolution(
             entry_id="GEN3-T02",
             confidence=1.0,
             reason="capital offence signal",
             overlays=initial_topic_overlays(normalized, "GEN3-T02", entries),
+            queued_topics=queued_topics,
+            candidates=candidates,
         )
 
-    scores: dict[str, float] = {}
-    evidence: dict[str, str] = {}
-    for entry_id, pattern in INITIAL_TOPIC_PATTERNS.items():
-        if entry_id not in entries:
-            continue
-        match = pattern.search(normalized)
-        score = metadata_overlap_score(normalized, entries[entry_id])
-        if match:
-            score += 0.65
-            evidence[entry_id] = match.group(0)
-        if entry_id == "GEN3-T13" and match and not GEN3_T13_PRIMARY_PATTERN.search(normalized):
-            score -= 0.45
-        if entry_id == "GEN3-T06" and match and any(
-            candidate in scores or INITIAL_TOPIC_PATTERNS[candidate].search(normalized)
-            for candidate in ("GEN3-T02", "GEN3-T03", "GEN3-T04")
-            if candidate in INITIAL_TOPIC_PATTERNS
-        ):
-            score -= 0.35
-        if score > 0:
-            scores[entry_id] = score
-
-    if not scores:
+    candidates = initial_topic_candidates(entries, latest_user_query)
+    primary_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.candidate_type == "primary_topic" and candidate.confidence >= 0.6
+    ]
+    if not primary_candidates:
         return PBSGTopicResolution(
             entry_id=fallback_entry_id,
             confidence=0.55,
             reason="defaulted to first-contact triage because no Golden Set topic matched confidently",
             overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
+            candidates=candidates,
         )
 
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    best_entry_id, best_score = ranked[0]
-    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
-    if best_score < 0.6 or (second_score >= 0.6 and best_score - second_score < 0.2):
-        return PBSGTopicResolution(
-            entry_id=fallback_entry_id,
-            confidence=0.55,
-            reason="defaulted to first-contact triage because topic signals were weak or ambiguous",
-            overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
-        )
-
+    best_candidate = primary_candidates[0]
+    queued_topics = queued_topics_from_candidates(primary_candidates, best_candidate.entry_id, entries)
+    reason = best_candidate.evidence
+    if queued_topics:
+        reason = f"multi-topic match: {best_candidate.evidence}"
     return PBSGTopicResolution(
-        entry_id=best_entry_id,
-        confidence=min(best_score, 1.0),
-        reason=evidence.get(best_entry_id, "metadata match"),
-        overlays=initial_topic_overlays(normalized, best_entry_id, entries),
+        entry_id=best_candidate.entry_id,
+        confidence=best_candidate.confidence,
+        reason=reason,
+        overlays=initial_topic_overlays(normalized, best_candidate.entry_id, entries),
+        queued_topics=queued_topics,
+        candidates=candidates,
     )
+
+
+def resolve_initial_topic(
+    entries: dict[str, dict[str, Any]],
+    latest_user_query: str,
+) -> PBSGTopicResolution | None:
+    return resolve_initial_topics(entries, latest_user_query)
 
 
 def detect_candidate_topics(
@@ -2558,11 +2649,19 @@ class PBSGRoutingEngine:
         resolution = resolve_initial_topic(self.entries, latest_user_query)
         if not resolution:
             return None
+        return self.execute_initial_resolution(latest_user_query, resolution)
+
+    def execute_initial_resolution(
+        self,
+        latest_user_query: str,
+        resolution: PBSGTopicResolution,
+    ) -> PBSGDeterministicResult | None:
         seed_state = PBSGTriageState(
             mode="FAST_ROUTING",
             workflow_id=resolution.entry_id,
             workflow_locked=True,
             active_workflow=resolution.entry_id,
+            queued_workflows=[topic.entry_id for topic in resolution.queued_topics],
             current_question_id="Q1",
             pending_entry_id=resolution.entry_id,
             concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
@@ -2575,6 +2674,8 @@ class PBSGRoutingEngine:
             if not transition:
                 return None
             content = self.render_transition(transition)
+            if not content:
+                return None
             state = PBSGTriageState(
                 mode="FAST_ROUTING",
                 workflow_id="GEN3-T02",
@@ -2585,6 +2686,7 @@ class PBSGRoutingEngine:
                 latest_answer_classification="YES",
                 concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
                 triggered_overlays=resolution.overlays,
+                queued_workflows=[topic.entry_id for topic in resolution.queued_topics],
             )
             self.apply_transition_to_state(state, transition)
             return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
@@ -2974,6 +3076,8 @@ class PBSGRoutingEngine:
         question = self.question_text(resolution.entry_id, "Q1")
         if not question:
             return None
+        active_entry = self.entries.get(resolution.entry_id, {})
+        active_topic = active_entry.get("topic") if isinstance(active_entry, dict) else None
         lines = [
             f"**Selected Entry:** {resolution.entry_id}",
             "",
@@ -2982,6 +3086,23 @@ class PBSGRoutingEngine:
             f"- Topic resolved: {resolution.reason} [{resolution.entry_id}.json]",
             f"- Next question: Q1 from {resolution.entry_id}",
         ]
+        if resolution.queued_topics:
+            lines.extend(
+                [
+                    "",
+                    "Topics identified:",
+                    f"1. {resolution.entry_id}"
+                    + (f" ({active_topic})" if isinstance(active_topic, str) and active_topic else "")
+                    + " — active workflow",
+                ]
+            )
+            for index, topic in enumerate(resolution.queued_topics, start=2):
+                entry = self.entries.get(topic.entry_id, {})
+                entry_topic = entry.get("topic") if isinstance(entry, dict) else None
+                topic_label = f"{topic.entry_id}"
+                if isinstance(entry_topic, str) and entry_topic:
+                    topic_label += f" ({entry_topic})"
+                lines.append(f"{index}. {topic_label} — queued workflow (noted from: {topic.evidence})")
         if resolution.overlays:
             lines.extend(
                 [

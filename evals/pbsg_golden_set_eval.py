@@ -10,6 +10,23 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
 DEFAULT_OUTPUT = ROOT / "evals" / "results" / "pbsg_golden_set_eval.json"
+MULTI_TOPIC_CASES = [
+    {
+        "query": (
+            "Applicant says she has a criminal charge, wants to divorce her husband, "
+            "is a Singapore Citizen, and will be charged on 28 May 2026."
+        ),
+        "expected_primary": "GEN3-T02",
+        "expected_queued": ["GEN3-T03"],
+        "expected_monitors": ["GEN3-T06"],
+    },
+    {
+        "query": "Applicant is elderly, has a court date next week, and wants help with a debt issue.",
+        "expected_primary": "GEN3-T04",
+        "expected_queued": [],
+        "expected_monitors": ["GEN3-T06", "GEN3-T13"],
+    },
+]
 
 
 def load_golden_dataset(path: Path) -> list[dict[str, Any]]:
@@ -171,6 +188,64 @@ def evaluate_phase2_case(
     return result
 
 
+def evaluate_multi_topic_case(
+    target_url: str,
+    case: dict[str, Any],
+    overrides: dict[str, Any],
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    started = time.time()
+    result: dict[str, Any] = {
+        "query": case["query"],
+        "expected_primary": case["expected_primary"],
+        "expected_queued": case["expected_queued"],
+        "expected_monitors": case["expected_monitors"],
+        "primary_ok": False,
+        "queued_recall": 0.0,
+        "monitor_recall": 0.0,
+        "unnecessary_general_fallback": False,
+        "error": None,
+        "latency_ms": None,
+    }
+    try:
+        response = post_chat(
+            target_url=target_url,
+            messages=[{"role": "user", "content": case["query"]}],
+            overrides=overrides,
+            timeout_seconds=timeout_seconds,
+        )
+        content = ((response.get("message") or {}).get("content") or "").strip()
+        context = response.get("context") or {}
+        triage_state = context.get("pbsg_triage_state") or {}
+        result["latency_ms"] = int((time.time() - started) * 1000)
+
+        selected_match = SELECTED_ENTRY_RE.search(content)
+        selected = selected_match.group(1).upper() if selected_match else triage_state.get("active_workflow")
+        queued = triage_state.get("queued_workflows") or []
+        monitors = triage_state.get("triggered_overlays") or []
+        result["selected_entry"] = selected
+        result["queued_workflows"] = queued
+        result["monitor_workflows"] = monitors
+        result["primary_ok"] = selected == case["expected_primary"]
+        result["unnecessary_general_fallback"] = selected == "GEN3-T01" and case["expected_primary"] != "GEN3-T01"
+
+        expected_queued = set(case["expected_queued"])
+        expected_monitors = set(case["expected_monitors"])
+        result["queued_recall"] = (
+            1.0 if not expected_queued else len(expected_queued & set(queued)) / len(expected_queued)
+        )
+        result["monitor_recall"] = (
+            1.0 if not expected_monitors else len(expected_monitors & set(monitors)) / len(expected_monitors)
+        )
+    except urllib.error.HTTPError as exc:
+        result["error"] = f"HTTPError {exc.code}: {exc.reason}"
+        result["latency_ms"] = int((time.time() - started) * 1000)
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["latency_ms"] = int((time.time() - started) * 1000)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate PBSG golden set behavior through /chat endpoint.")
     parser.add_argument("--targeturl", type=str, required=True, help="Backend base URL, e.g. http://127.0.0.1:50505")
@@ -230,6 +305,16 @@ def main() -> None:
                 )
             )
 
+    multi_topic_cases = [
+        evaluate_multi_topic_case(
+            target_url=args.targeturl,
+            case=case,
+            overrides=overrides,
+            timeout_seconds=args.timeout_seconds,
+        )
+        for case in MULTI_TOPIC_CASES
+    ]
+
     phase1_total = len(phase1_cases)
     phase1_no_error = [c for c in phase1_cases if not c["error"]]
     phase1_selected_entry_rate = (
@@ -248,6 +333,27 @@ def main() -> None:
     phase2_route_valid_rate = (
         sum(1 for c in phase2_applicable if c["route_validity_ok"]) / len(phase2_applicable)
         if phase2_applicable
+        else 0.0
+    )
+    multi_topic_no_error = [c for c in multi_topic_cases if not c["error"]]
+    multi_topic_primary_rate = (
+        sum(1 for c in multi_topic_no_error if c["primary_ok"]) / len(multi_topic_no_error)
+        if multi_topic_no_error
+        else 0.0
+    )
+    multi_topic_queued_recall = (
+        sum(c["queued_recall"] for c in multi_topic_no_error) / len(multi_topic_no_error)
+        if multi_topic_no_error
+        else 0.0
+    )
+    multi_topic_monitor_recall = (
+        sum(c["monitor_recall"] for c in multi_topic_no_error) / len(multi_topic_no_error)
+        if multi_topic_no_error
+        else 0.0
+    )
+    unnecessary_general_fallback_rate = (
+        sum(1 for c in multi_topic_no_error if c["unnecessary_general_fallback"]) / len(multi_topic_no_error)
+        if multi_topic_no_error
         else 0.0
     )
 
@@ -275,9 +381,19 @@ def main() -> None:
                 "route_validity_cases": len(phase2_applicable),
                 "route_validity_rate": round(phase2_route_valid_rate, 4),
             },
+            "multi_topic": {
+                "total_cases": len(multi_topic_cases),
+                "success_cases": len(multi_topic_no_error),
+                "error_cases": len(multi_topic_cases) - len(multi_topic_no_error),
+                "primary_topic_accuracy": round(multi_topic_primary_rate, 4),
+                "queued_topic_recall": round(multi_topic_queued_recall, 4),
+                "monitor_recall": round(multi_topic_monitor_recall, 4),
+                "unnecessary_gen3_t01_fallback_rate": round(unnecessary_general_fallback_rate, 4),
+            },
         },
         "phase1_cases": phase1_cases,
         "phase2_cases": phase2_cases,
+        "multi_topic_cases": multi_topic_cases,
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

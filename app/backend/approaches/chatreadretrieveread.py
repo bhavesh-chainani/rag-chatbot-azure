@@ -30,6 +30,7 @@ from pbsg_triage_state import (
     PBSGInterruption,
     PBSGQueuedTopic,
     PBSGRoutingEngine,
+    PBSGTopicResolution,
     PBSGTransition,
     PBSGTurnClassification,
     build_triage_state,
@@ -527,7 +528,12 @@ class ChatReadRetrieveReadApproach(Approach):
         resolution = resolve_initial_topic(self.pbsg_golden_set_entries, original_user_query)
         if not resolution:
             return
-        self.ensure_golden_set_source_entries(data_points, [resolution.entry_id, *resolution.overlays])
+        entry_ids = [
+            resolution.entry_id,
+            *(topic.entry_id for topic in resolution.queued_topics),
+            *resolution.overlays,
+        ]
+        self.ensure_golden_set_source_entries(data_points, entry_ids)
 
     def build_deterministic_chat_response(
         self,
@@ -689,6 +695,136 @@ class ChatReadRetrieveReadApproach(Approach):
         if not deterministic_result:
             return None
         return self.build_deterministic_chat_response(deterministic_result, session_state)
+
+    async def try_structured_llm_initial_topic_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        overrides: dict[str, Any],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not self.openai_client or len(messages) != 1 or not overrides.get("pbsg_initial_topic_classifier"):
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        local_resolution = resolve_initial_topic(self.pbsg_golden_set_entries, latest_content)
+        if not local_resolution:
+            return None
+        # The deterministic resolver owns clear cases. The LLM classifier is only a fallback
+        # for uncertain first-contact/general selections with some candidate evidence.
+        if local_resolution.entry_id != "GEN3-T01" or not local_resolution.candidates:
+            return None
+
+        candidate_ids = [candidate.entry_id for candidate in local_resolution.candidates]
+        candidate_entries = [
+            {
+                "id": entry_id,
+                "topic": self.pbsg_golden_set_entries.get(entry_id, {}).get("topic"),
+                "user_query": self.pbsg_golden_set_entries.get(entry_id, {}).get("user_query"),
+                "variations": self.pbsg_golden_set_entries.get(entry_id, {}).get("variations", [])[:5],
+            }
+            for entry_id in candidate_ids
+            if entry_id in self.pbsg_golden_set_entries
+        ]
+        if not candidate_entries:
+            return None
+
+        classifier_messages: list[ChatCompletionMessageParam] = [
+            {
+                "role": "system",
+                "content": (
+                    "Classify the initial PBSG triage topics. Return compact JSON only with keys "
+                    "primary_entry_id, queued_entry_ids, monitor_entry_ids, confidence, evidence. "
+                    "Use only provided entry ids. Choose queued_entry_ids for separate legal issues, "
+                    "monitor_entry_ids for urgency or vulnerability overlays. Do not choose route letters, "
+                    "questions, handoffs, or final recommendations."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "latest_user_message": latest_content,
+                        "local_candidates": [asdict(candidate) for candidate in local_resolution.candidates],
+                        "candidate_entries": candidate_entries,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        topic_model = overrides.get("pbsg_initial_topic_model", self.chatgpt_model)
+        topic_deployment = overrides.get("pbsg_initial_topic_deployment", self.chatgpt_deployment)
+        completion = await cast(
+            Awaitable[ChatCompletion],
+            self.create_chat_completion(
+                topic_deployment,
+                topic_model,
+                classifier_messages,
+                overrides,
+                self.get_response_token_limit(topic_model, 200),
+                should_stream=False,
+                temperature=0.0,
+            ),
+        )
+        try:
+            payload = json.loads(completion.choices[0].message.content or "{}")
+        except json.JSONDecodeError:
+            return None
+
+        primary_entry_id = payload.get("primary_entry_id")
+        confidence = payload.get("confidence")
+        if (
+            not isinstance(primary_entry_id, str)
+            or primary_entry_id not in candidate_ids
+            or not isinstance(confidence, (int, float))
+            or confidence < 0.7
+        ):
+            return None
+
+        queued_topics: list[PBSGQueuedTopic] = []
+        raw_queued = payload.get("queued_entry_ids")
+        if isinstance(raw_queued, list):
+            for entry_id in raw_queued:
+                if isinstance(entry_id, str) and entry_id in candidate_ids and entry_id != primary_entry_id:
+                    queued_topics.append(
+                        PBSGQueuedTopic(entry_id=entry_id, evidence="structured topic classifier", confidence=float(confidence))
+                    )
+        raw_monitors = payload.get("monitor_entry_ids")
+        overlays = list(local_resolution.overlays)
+        if isinstance(raw_monitors, list):
+            for entry_id in raw_monitors:
+                if (
+                    isinstance(entry_id, str)
+                    and entry_id in self.pbsg_golden_set_entries
+                    and entry_id != primary_entry_id
+                    and entry_id not in overlays
+                ):
+                    overlays.append(entry_id)
+
+        evidence = payload.get("evidence") if isinstance(payload.get("evidence"), str) else "structured topic classifier"
+        resolution = PBSGTopicResolution(
+            entry_id=primary_entry_id,
+            confidence=float(confidence),
+            reason=f"structured topic classifier: {evidence}",
+            overlays=overlays,
+            queued_topics=queued_topics,
+            candidates=local_resolution.candidates,
+        )
+        deterministic_result = self.pbsg_routing_engine.execute_initial_resolution(latest_content, resolution)
+        if not deterministic_result:
+            return None
+        response = self.build_deterministic_chat_response(deterministic_result, session_state)
+        response["context"]["thoughts"].append(
+            self.format_thought_step_for_chatcompletion(
+                title="Structured PBSG initial topic classifier",
+                messages=classifier_messages,
+                overrides=overrides,
+                model=topic_model,
+                deployment=topic_deployment,
+                usage=completion.usage,
+            )
+        )
+        return response
 
     def local_side_enquiry_answer(self, latest_content: str) -> str | None:
         normalized = latest_content.lower()
@@ -1232,6 +1368,9 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
+        if structured_initial_response:
+            return structured_initial_response
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
             return initial_response
@@ -1290,6 +1429,12 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
+        if structured_initial_response:
+            yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": structured_initial_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
+            return
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}

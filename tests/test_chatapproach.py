@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import date
 
 import pytest
 from azure.core.credentials import AzureKeyCredential
@@ -7,6 +8,7 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
+import pbsg_triage_state
 from approaches.approach import (
     ActivityDetail,
     DataPoints,
@@ -1073,6 +1075,43 @@ async def test_run_without_streaming_selects_clear_initial_topic(chat_approach, 
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_initial_multi_topic_queues_secondary_topic(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clear multi-topic first turn should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Applicant says she's a criminal. She also wants to divorce her husband. "
+                    "She's a Singapore Citizen and will be charged on 28th May 2026."
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "Topics identified:" in content
+    assert "GEN3-T03" in content
+    assert "GEN3-T06 noted as a monitor, not the active workflow" in content
+    assert "topic signals were weak or ambiguous" not in content
+    assert "Next question: Q1 from GEN3-T02" in content
+    assert triage_state["active_workflow"] == "GEN3-T02"
+    assert triage_state["queued_workflows"] == ["GEN3-T03"]
+    assert "GEN3-T06" in triage_state["triggered_overlays"]
+    assert "urgency" in triage_state["concurrent_monitors"]
+
+
+@pytest.mark.asyncio
 async def test_run_without_streaming_keeps_vulnerability_as_overlay_when_legal_issue_exists(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("vulnerability overlay should still render deterministic first question")
@@ -1106,6 +1145,22 @@ async def test_initial_topic_source_pack_injects_default_t01_over_high_ranked_t1
     assert "GEN3-T01" in entries
     assert "GEN3-T13" in entries
     assert "GEN3-T01.json" in data_points.citations
+
+
+@pytest.mark.asyncio
+async def test_initial_topic_source_pack_injects_queued_and_monitor_entries(chat_approach, monkeypatch):
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+    data_points = DataPoints(text=[], citations=[])
+    query = (
+        "Applicant says she's a criminal. She also wants to divorce her husband. "
+        "She's a Singapore Citizen and will be charged on 28th May 2026."
+    )
+
+    chat_approach.ensure_initial_topic_sources(data_points, [{"role": "user", "content": query}], query)
+    entries = chat_approach.extract_golden_set_entries(data_points.text)
+
+    assert {"GEN3-T02", "GEN3-T03", "GEN3-T06"}.issubset(entries)
+    assert {"GEN3-T02.json", "GEN3-T03.json", "GEN3-T06.json"}.issubset(set(data_points.citations))
 
 
 @pytest.mark.asyncio

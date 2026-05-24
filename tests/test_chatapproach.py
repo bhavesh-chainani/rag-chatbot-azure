@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from datetime import date
 
 import pytest
@@ -37,6 +38,10 @@ from .mocks import (
     MockAsyncSearchResultsIterator,
     mock_retrieval_response,
 )
+
+
+def visible_text(content: str) -> str:
+    return re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
 
 
 async def mock_search(*args, **kwargs):
@@ -1099,12 +1104,13 @@ async def test_run_without_streaming_initial_multi_topic_queues_secondary_topic(
     content = result["message"]["content"]
     triage_state = result["context"]["pbsg_triage_state"]
 
-    assert "**Selected Entry:** GEN3-T02" in content
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(content)
+    assert "GEN3-" not in visible_text(content)
     assert "Topics identified:" in content
-    assert "GEN3-T03" in content
-    assert "GEN3-T06 noted as a monitor, not the active workflow" in content
+    assert "Family and Matrimonial Stream" in visible_text(content)
+    assert "Urgent Support Stream noted as a monitor, not the active workflow" in visible_text(content)
     assert "topic signals were weak or ambiguous" not in content
-    assert "Next question: Q1 from GEN3-T02" in content
+    assert "Next, ask about" in visible_text(content)
     assert triage_state["active_workflow"] == "GEN3-T02"
     assert triage_state["queued_workflows"] == ["GEN3-T03"]
     assert "GEN3-T06" in triage_state["triggered_overlays"]
@@ -1126,8 +1132,9 @@ async def test_run_without_streaming_keeps_vulnerability_as_overlay_when_legal_i
     )
     content = result["message"]["content"]
 
-    assert "**Selected Entry:** GEN3-T04" in content
-    assert "GEN3-T13 noted as a monitor, not the active workflow" in content
+    assert "**Selected Stream:** Civil and Guidance Stream" in visible_text(content)
+    assert "GEN3-" not in visible_text(content)
+    assert "Vulnerability Support Stream noted as a monitor, not the active workflow" in visible_text(content)
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T04"
     assert "GEN3-T13" in result["context"]["pbsg_triage_state"]["triggered_overlays"]
 
@@ -1222,8 +1229,9 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
     result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
 
     assert result["session_state"] == "session-1"
-    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T02")
-    assert "Next question: Q2 from GEN3-T02" in result["message"]["content"]
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(result["message"]["content"])
+    assert "GEN3-" not in visible_text(result["message"]["content"])
+    assert "Next, ask about" in visible_text(result["message"]["content"])
     assert "court date/deadline within 14 days" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
     assert result["context"]["quick_reply"]["entryId"] == "GEN3-T02"
@@ -1283,8 +1291,8 @@ async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_lo
 
     result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
 
-    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T03")
-    assert "Next question: Q4 from GEN3-T03" in result["message"]["content"]
+    assert "**Selected Stream:** Family and Matrimonial Stream" in visible_text(result["message"]["content"])
+    assert "Next, ask about Foreigner path" in visible_text(result["message"]["content"])
     assert "Singaporean child" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
 
@@ -1421,7 +1429,7 @@ async def test_ack_after_terminal_route_does_not_start_queued_topic(chat_approac
     result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
 
     content = result["message"]["content"]
-    assert "GEN3-T02 has been routed" in content
+    assert "Criminal Legal Aid Stream has been routed" in visible_text(content)
     assert "GEN3-T03" in result["context"]["pbsg_triage_state"]["queued_workflows"]
     assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
     assert "Have you applied to the Legal Aid Bureau" not in content
@@ -1484,7 +1492,7 @@ async def test_known_singapore_citizen_skips_downstream_residency_question(chat_
     assert "Carried over from" in content
     assert "Singapore Citizen or PR" in content
     assert "Next question: Q3 from GEN3-T03" in content
-    assert "Are you a Singapore Citizen or PR?" not in content
+    assert "Are you a Singapore Citizen or PR?" not in visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
 
 
 @pytest.mark.asyncio
@@ -1528,7 +1536,7 @@ async def test_work_permit_fact_reused_across_matrimonial_to_civil_handoff(chat_
     assert "Carried over from" in content
     assert "foreigner" in content
     assert "Next question: Q4 from GEN3-T04" in content
-    assert "Are you a Singapore Citizen or PR?" not in content
+    assert "Are you a Singapore Citizen or PR?" not in visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
 
 
 @pytest.mark.asyncio
@@ -1592,7 +1600,7 @@ Topics identified:
     repaired = chat_approach.repair_unvalidated_prerequisite_skip(hallucinated_content, messages, "ok")
 
     assert repaired is not None
-    assert "Repaired skipped prerequisite: Q1 from GEN3-T03" in repaired
+    assert "returning to the required question" in visible_text(repaired)
     assert "Next question: Q1 from GEN3-T03" in repaired
     assert "Have you applied to the Legal Aid Bureau" not in repaired
 
@@ -1642,7 +1650,7 @@ async def test_pilot_no_income_condo_reuses_lab_and_routes_hardship_to_staff(cha
     assert "No, marginal or exceptional" in content
     assert "No income / hardship" in content
     assert "Have you applied to the Legal Aid Bureau" not in content
-    assert "Per Capita Household Income" not in content
+    assert "**Ask the applicant (read verbatim):**" not in visible_text(content)
 
 
 @pytest.mark.asyncio
@@ -2434,7 +2442,7 @@ async def test_run_with_streaming_uses_deterministic_fast_path_for_locked_flow(c
         events.append(event)
 
     assert events[0]["session_state"] == "session-1"
-    assert events[1]["delta"]["content"].startswith("**Selected Entry:** GEN3-T02")
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(events[1]["delta"]["content"])
     assert "Next question: Q2 from GEN3-T02" in events[1]["delta"]["content"]
     assert events[2]["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
 

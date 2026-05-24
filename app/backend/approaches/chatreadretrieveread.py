@@ -39,7 +39,13 @@ from pbsg_triage_state import (
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
+    next_question_lines,
     parse_transition_outcome,
+    parse_pbsg_state_marker,
+    pbsg_state_marker,
+    selected_stream_lines,
+    short_question_label,
+    stream_display_name,
     user_fact_for_question,
     resolve_expected_transition,
     resolve_initial_topic,
@@ -246,6 +252,10 @@ class ChatReadRetrieveReadApproach(Approach):
         if not content:
             return None, None
 
+        marker = parse_pbsg_state_marker(content)
+        if marker.get("pending_question"):
+            return marker.get("pending_entry") or marker.get("selected_entry"), marker["pending_question"].upper()
+
         selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
         selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
 
@@ -295,6 +305,8 @@ class ChatReadRetrieveReadApproach(Approach):
 
         selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
         selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry", selected_entry_id)
         if not selected_entry_id:
             return content
 
@@ -414,32 +426,28 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(question, str):
             return None
 
-        next_label = f"{transition.target_question_id} from {transition.target_entry_id}"
-        question_prefix = transition.target_question_id
-        if transition.transition_type == "nested_stream":
-            next_label = f"{transition.target_entry_id} {transition.target_question_id} (Urgent concurrent path)"
-            question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
-
-        return "\n".join(
+        lines = selected_stream_lines(
+            entries,
+            transition.entry_id,
+            transition.target_entry_id,
+            transition.target_question_id,
+            transition.route_label,
+        )
+        lines.extend(
             [
-                f"**Selected Entry:** {transition.entry_id}",
                 "",
-                "What I gathered from your description:",
+                "Applicant summary:",
                 "",
-                f"- {transition.question_id}: {self.label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
+                f"- The applicant's response: **{self.label_from_branch_key(transition.branch_key)}**.",
+                "- What this means: we should continue with the next required triage question.",
                 "",
                 "Triage progress:",
                 "",
-                f"- Last answered: {transition.question_id} = {self.label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
-                f"- Next question: {next_label}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'> **{question_prefix}: "{self.convert_question_to_second_person(question)}"**',
-                "",
-                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+                f"- Continue in the {stream_display_name(entries, transition.target_entry_id)}.",
             ]
         )
+        lines.extend(next_question_lines(entries, transition.target_entry_id, transition.target_question_id, question))
+        return "\n".join(lines)
 
     def render_deterministic_transition_response(
         self, transition: PBSGTransition | None, entries: dict[str, dict[str, Any]]
@@ -598,6 +606,7 @@ class ChatReadRetrieveReadApproach(Approach):
         entry = self.pbsg_golden_set_entries.get(workflow_id, {})
         topic = entry.get("topic") if isinstance(entry, dict) else None
         label_suffix = f" - {topic}" if isinstance(topic, str) and topic else ""
+        stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id)
         return QuickReply(
             mode="single",
             entryId=workflow_id,
@@ -605,8 +614,8 @@ class ChatReadRetrieveReadApproach(Approach):
             options=[
                 QuickReplyOption(
                     id=f"continue_queued_workflow:{workflow_id}",
-                    label=f"Topic resolved - continue to {workflow_id}",
-                    value=f"Continue queued workflow: {workflow_id}{label_suffix}",
+                    label=f"Topic resolved - continue to {stream_name}",
+                    value=f"Continue queued workflow: {stream_name}{label_suffix}",
                 )
             ],
         )
@@ -618,17 +627,27 @@ class ChatReadRetrieveReadApproach(Approach):
         workflow_id = quick_reply.entryId
         entry = self.pbsg_golden_set_entries.get(workflow_id, {})
         topic = entry.get("topic") if isinstance(entry, dict) else workflow_id
+        stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id)
+        marker = parse_pbsg_state_marker(content)
+        state_marker = pbsg_state_marker(
+            marker.get("selected_entry") or getattr(triage_state, "active_workflow", None) or getattr(triage_state, "workflow_id", None),
+            marker.get("pending_entry"),
+            marker.get("pending_question"),
+            marker.get("route_label"),
+            [workflow_id],
+        )
         note = "\n".join(
             [
                 "",
+                state_marker,
                 "**Queued topic ready:**",
                 "",
-                f"- {workflow_id}: {topic}",
+                f"- {stream_name}: {topic}",
                 "- Click the button when this routed topic has been resolved and you are ready to continue.",
                 "",
                 "Topics identified:",
-                f"1. {triage_state.active_workflow or triage_state.workflow_id or 'Current workflow'} — routed workflow",
-                f"2. {workflow_id} — queued workflow",
+                f"1. {stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow or triage_state.workflow_id)} - routed workflow",
+                f"2. {stream_name} - queued workflow",
             ]
         )
         return f"{content}{note}"
@@ -645,14 +664,27 @@ class ChatReadRetrieveReadApproach(Approach):
         for topic in topics:
             if topic.entry_id not in [existing.entry_id for existing in unique_topics]:
                 unique_topics.append(topic)
-        active_line = f"1. {active_workflow} — active workflow" if active_workflow else "1. Current stream — active workflow"
+        active_line = (
+            f"1. {stream_display_name(self.pbsg_golden_set_entries, active_workflow)} - active workflow"
+            if active_workflow
+            else "1. Current stream - active workflow"
+        )
         queued_lines = [
-            f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+            f"{index}. {stream_display_name(self.pbsg_golden_set_entries, topic.entry_id)} - queued workflow (noted from: {topic.evidence})"
             for index, topic in enumerate(unique_topics, start=2)
         ]
+        marker = parse_pbsg_state_marker(content)
+        state_marker = pbsg_state_marker(
+            marker.get("selected_entry") or active_workflow,
+            marker.get("pending_entry"),
+            marker.get("pending_question"),
+            marker.get("route_label"),
+            [topic.entry_id for topic in unique_topics],
+        )
         note = "\n".join(
             [
                 "",
+                state_marker,
                 "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
                 "",
                 "Topics identified:",
@@ -869,9 +901,14 @@ class ChatReadRetrieveReadApproach(Approach):
             session_state,
         )
 
-    def parse_continue_queued_workflow(self, latest_content: str) -> str | None:
+    def parse_continue_queued_workflow(self, latest_content: str, triage_state: Any = None) -> str | None:
         match = re.search(r"\bContinue queued workflow:\s*(GEN3-[A-Z0-9-]+)\b", latest_content, flags=re.IGNORECASE)
-        return match.group(1).upper() if match else None
+        if match:
+            return match.group(1).upper()
+        if "continue queued workflow" in latest_content.lower():
+            queued_workflows = getattr(triage_state, "queued_workflows", None) or []
+            return queued_workflows[0] if queued_workflows else None
+        return None
 
     def is_route_completion_acknowledgement(self, latest_content: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\s]", " ", latest_content.lower())
@@ -887,20 +924,23 @@ class ChatReadRetrieveReadApproach(Approach):
         next_workflow = triage_state.queued_workflows[0] if triage_state.queued_workflows else None
         next_entry = self.pbsg_golden_set_entries.get(next_workflow or "", {})
         next_topic = next_entry.get("topic") if isinstance(next_entry, dict) else next_workflow
+        active_stream = stream_display_name(self.pbsg_golden_set_entries, active_workflow)
+        next_stream = stream_display_name(self.pbsg_golden_set_entries, next_workflow)
         content = "\n".join(
             [
-                f"**Selected Entry:** {active_workflow}",
+                pbsg_state_marker(active_workflow if active_workflow in self.pbsg_golden_set_entries else None),
+                f"**Selected Stream:** {active_stream}",
                 "",
-                f"**Note:** {active_workflow} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
+                f"**Note:** The {active_stream} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
                 "",
                 "**Queued topic ready:**",
                 "",
-                f"- {next_workflow}: {next_topic}",
+                f"- {next_stream}: {next_topic}",
                 "- Click the button when you are ready to continue.",
                 "",
                 "Topics identified:",
-                f"1. {active_workflow} — routed workflow",
-                f"2. {next_workflow} — queued workflow",
+                f"1. {active_stream} - routed workflow",
+                f"2. {next_stream} - queued workflow",
             ]
         )
         data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
@@ -941,7 +981,7 @@ class ChatReadRetrieveReadApproach(Approach):
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         if triage_state.routing_completion_status != "awaiting_topic_resolution" or not triage_state.queued_workflows:
             return None
-        workflow_to_continue = self.parse_continue_queued_workflow(latest_content)
+        workflow_to_continue = self.parse_continue_queued_workflow(latest_content, triage_state)
         if workflow_to_continue:
             deterministic_result = self.pbsg_routing_engine.start_queued_workflow(messages[:-1], workflow_to_continue)
             if deterministic_result:
@@ -982,14 +1022,18 @@ class ChatReadRetrieveReadApproach(Approach):
         if not content:
             return content
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
-        selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*(GEN3-[A-Z0-9-]+)", content, flags=re.IGNORECASE)
-        selected_entry_id = selected_entry_matches[-1].upper() if selected_entry_matches else None
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry")
+        if not selected_entry_id:
+            selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*(GEN3-[A-Z0-9-]+)", content, flags=re.IGNORECASE)
+            selected_entry_id = selected_entry_matches[-1].upper() if selected_entry_matches else None
         if not selected_entry_id or selected_entry_id not in self.pbsg_golden_set_entries:
             return content
-        targets = re.findall(r"Next question:\s*(Q\d+[A-Z]?)\b|>\s*\**(Q\d+[A-Z]?)\s*:", content, flags=re.IGNORECASE)
-        target_question_id = None
-        for first_match, second_match in targets:
-            target_question_id = (first_match or second_match).upper()
+        target_question_id = marker.get("pending_question")
+        if not target_question_id:
+            targets = re.findall(r"Next question:\s*(Q\d+[A-Z]?)\b|>\s*\**(Q\d+[A-Z]?)\s*:", content, flags=re.IGNORECASE)
+            for first_match, second_match in targets:
+                target_question_id = (first_match or second_match).upper()
         if not target_question_id:
             return content
         missing_question_id = self.first_missing_prerequisite_question(selected_entry_id, target_question_id, triage_state)
@@ -998,24 +1042,19 @@ class ChatReadRetrieveReadApproach(Approach):
         question = self.pbsg_routing_engine.question_text(selected_entry_id, missing_question_id)
         if not question:
             return content
-        return "\n".join(
+        lines = selected_stream_lines(self.pbsg_golden_set_entries, selected_entry_id, selected_entry_id, missing_question_id)
+        lines.extend(
             [
-                f"**Selected Entry:** {selected_entry_id}",
                 "",
                 "**Note:** I cannot rely on unverified answers for this workflow. We need to ask the first unanswered required question.",
                 "",
                 "Triage progress:",
                 "",
-                f"- Repaired skipped prerequisite: {missing_question_id} from {selected_entry_id}",
-                f"- Next question: {missing_question_id} from {selected_entry_id}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'> **{missing_question_id}: "{self.convert_question_to_second_person(question)}"**',
-                "",
-                f"Type the applicant's answer here and I will determine the next question or route. [{selected_entry_id}.json]",
+                f"- We are returning to the required question about {short_question_label(self.pbsg_golden_set_entries, selected_entry_id, missing_question_id)}.",
             ]
         )
+        lines.extend(next_question_lines(self.pbsg_golden_set_entries, selected_entry_id, missing_question_id, question))
+        return "\n".join(lines)
 
     def repair_hardship_rejection(
         self,
@@ -1023,7 +1062,9 @@ class ChatReadRetrieveReadApproach(Approach):
         messages: list[ChatCompletionMessageParam],
         latest_content: str,
     ) -> Optional[str]:
-        if not content or "**Selected Entry:** GEN3-T04" not in content or "Route D" not in content:
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry")
+        if not content or ((selected_entry_id or "") != "GEN3-T04" and "**Selected Entry:** GEN3-T04" not in content) or "Route D" not in content:
             return content
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         has_hardship = any(
@@ -1285,11 +1326,13 @@ class ChatReadRetrieveReadApproach(Approach):
         for topic in turn_classification.new_topics:
             if topic.entry_id not in triage_state.queued_workflows:
                 triage_state.queued_workflows.append(topic.entry_id)
-        content_lines = [
-            f"**Selected Entry:** {entry_id}",
-            "",
-            f"**Note:** {note}",
-        ]
+        content_lines = selected_stream_lines(
+            self.pbsg_golden_set_entries,
+            entry_id,
+            entry_id if question_id else None,
+            question_id,
+        )
+        content_lines.extend(["", f"**Note:** {note}"])
         if turn_classification.reason and turn_classification.turn_type == "clarification":
             content_lines.extend(["", "**Clarification:**", "", turn_classification.reason])
         if turn_classification.new_topics:
@@ -1299,11 +1342,11 @@ class ChatReadRetrieveReadApproach(Approach):
                     "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
                     "",
                     "Topics identified:",
-                    f"1. {triage_state.active_workflow or entry_id} — active workflow",
+                    f"1. {stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow or entry_id)} - active workflow",
                 ]
             )
             content_lines.extend(
-                f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+                f"{index}. {stream_display_name(self.pbsg_golden_set_entries, topic.entry_id)} - queued workflow (noted from: {topic.evidence})"
                 for index, topic in enumerate(turn_classification.new_topics, start=2)
             )
         if question_id and question:
@@ -1312,13 +1355,11 @@ class ChatReadRetrieveReadApproach(Approach):
                     "",
                     "Triage progress:",
                     "",
-                    f"- Current question remains: {question_id} from {entry_id}",
-                    "",
-                    "**Ask the applicant (read verbatim):**",
-                    "",
-                    f'> **{question_id}: "{self.convert_question_to_second_person(question)}"**',
+                    f"<!-- Current question remains: {question_id} from {entry_id} -->",
+                    f"- Current question remains about {short_question_label(self.pbsg_golden_set_entries, entry_id, question_id)}.",
                 ]
             )
+            content_lines.extend(next_question_lines(self.pbsg_golden_set_entries, entry_id, question_id, question))
         data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
         extra_info = ExtraInfo(data_points=data_points)
         content = "\n".join(content_lines)
@@ -1408,16 +1449,25 @@ class ChatReadRetrieveReadApproach(Approach):
         # TODO: Update for agentic? This isn't still true?
         if self.include_token_usage and extra_info.thoughts and chat_completion_response.usage:
             extra_info.thoughts[-1].update_token_usage(chat_completion_response.usage)
+        response_context = {
+            "thoughts": extra_info.thoughts,
+            "data_points": {
+                key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+            },
+            "followup_questions": extra_info.followup_questions,
+            "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+        }
+        if parse_pbsg_state_marker(content):
+            response_context["pbsg_triage_state"] = asdict(
+                build_triage_state(
+                    [*messages, {"role": "assistant", "content": content}],
+                    self.pbsg_golden_set_entries,
+                    "",
+                )
+            )
         chat_app_response = {
             "message": {"content": content, "role": role},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {
-                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
-                },
-                "followup_questions": extra_info.followup_questions,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-            },
+            "context": response_context,
             "session_state": session_state,
         }
         return chat_app_response

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import pbsg_triage_state
 from pbsg_triage_state import (
     GOLDEN_SET_RELATIVE_DIR,
     PBSGRoutingEngine,
@@ -76,6 +77,23 @@ def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_
     assert resolution is not None
     assert resolution.entry_id == expected_entry_id
     assert resolution.confidence >= 0.6
+
+
+def test_initial_topic_resolver_queues_multiple_specialty_topics_and_deadline_monitor(monkeypatch):
+    entries = load_entries()
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+
+    resolution = resolve_initial_topic(
+        entries,
+        "Applicant says she's a criminal. She also wants to divorce her husband. "
+        "She's a Singapore Citizen and will be charged on 28th May 2026.",
+    )
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T02"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T03"]
+    assert "GEN3-T06" in resolution.overlays
+    assert "weak or ambiguous" not in resolution.reason
 
 
 def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():

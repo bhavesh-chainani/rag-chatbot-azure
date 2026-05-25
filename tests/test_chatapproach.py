@@ -1052,6 +1052,29 @@ async def test_run_without_streaming_defaults_vague_initial_turn_to_gen3_t01(cha
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_skips_initial_topic_llm_for_bare_greeting(chat_approach, monkeypatch):
+    async def fail_if_classifier_called(*args, **kwargs):
+        raise AssertionError("bare greeting should not call the initial topic classifier")
+
+    async def fail_if_retrieval_called(*args, **kwargs):
+        raise AssertionError("bare greeting should stay on deterministic first-contact triage")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_classifier_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_retrieval_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "hi"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T01" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("query", "expected_entry_id"),
     [
@@ -1077,6 +1100,194 @@ async def test_run_without_streaming_selects_clear_initial_topic(chat_approach, 
     assert f"**Selected Entry:** {expected_entry_id}" in content
     assert f"Next question: Q1 from {expected_entry_id}" in content
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == expected_entry_id
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_initial_topic_llm_handles_ambiguous_criminal_and_matrimonial(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "primary_entry_id": "GEN3-T02",
+            "queued_entry_ids": ["GEN3-T03"],
+            "monitor_entry_ids": [],
+            "confidence": 0.91,
+            "evidence": "stolen/caught by law indicates criminal issue; separate from husband indicates matrimonial issue",
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "user wants to separate from her husband after he stole something in the past "
+                    "and got caught by law"
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "Topics identified:" in content
+    assert "GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T02" in content
+    assert triage_state["active_workflow"] == "GEN3-T02"
+    assert triage_state["queued_workflows"] == ["GEN3-T03"]
+    assert result["context"]["thoughts"][-1].title == "Structured PBSG initial topic classifier"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_initial_topic_llm_carries_family_violence_into_matrimonial_q1(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json_sequence(
+        [
+            {
+                "primary_entry_id": "GEN3-T03",
+                "queued_entry_ids": [],
+                "monitor_entry_ids": ["GEN3-T06", "GEN3-T13"],
+                "confidence": 0.92,
+                "evidence": "ending relationship indicates matrimonial issue",
+            },
+            {
+                "answered_questions": [
+                    {
+                        "entry_id": "GEN3-T03",
+                        "question_id": "Q1",
+                        "branch_key": "if_yes",
+                        "confidence": 0.94,
+                        "evidence": "husband is beating her up",
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": "caller has mentioned that her husband is beating her up and wants to end their relationship",
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "What I gathered from your description:" in content
+    assert "Q1: Yes" in content
+    assert "**Active stream:** GEN3-T06 urgent concurrent path" in content
+    assert "GEN3-T06 Q1" in content
+    assert 'Is there active or recent family violence' not in content
+    assert triage_state["active_workflow"] == "GEN3-T06"
+    assert triage_state["parent_workflow"] == "GEN3-T03"
+    assert triage_state["resume_question_id"] == "Q2"
+    assert result["context"]["thoughts"][-1].title == "Structured PBSG initial answer extractor"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_ignores_invalid_initial_answer_extraction(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json_sequence(
+        [
+            {
+                "primary_entry_id": "GEN3-T03",
+                "queued_entry_ids": [],
+                "monitor_entry_ids": [],
+                "confidence": 0.92,
+                "evidence": "ending relationship indicates matrimonial issue",
+            },
+            {
+                "answered_questions": [
+                    {
+                        "entry_id": "GEN3-T03",
+                        "question_id": "Q1",
+                        "branch_key": "if_invalid",
+                        "confidence": 0.94,
+                        "evidence": "unsupported branch key",
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "caller wants to end her relationship with her husband"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert 'Is there active or recent family violence' in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_falls_back_when_initial_topic_llm_returns_invalid_id(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid topic classifier output should fall back to deterministic routing")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {"primary_entry_id": "GEN3-UNKNOWN", "queued_entry_ids": [], "monitor_entry_ids": [], "confidence": 0.95}
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a criminal charge in court."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T02" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_falls_back_when_initial_topic_llm_fails(chat_approach, monkeypatch):
+    async def fail_classifier(*args, **kwargs):
+        raise RuntimeError("classifier unavailable")
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("failed topic classifier should fall back to deterministic routing")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_classifier)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a criminal charge in court."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T02" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
 
 
 @pytest.mark.asyncio
@@ -1300,6 +1511,40 @@ async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_lo
 def fake_openai_client_with_json(payload):
     class FakeCompletions:
         async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(payload)},
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    return FakeOpenAIClient()
+
+
+def fake_openai_client_with_json_sequence(payloads):
+    class FakeCompletions:
+        def __init__(self):
+            self.index = 0
+
+        async def create(self, **kwargs):
+            payload = payloads[min(self.index, len(payloads) - 1)]
+            self.index += 1
             return ChatCompletion.model_validate(
                 {
                     "id": "classification",

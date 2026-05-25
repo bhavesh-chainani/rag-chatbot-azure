@@ -1189,26 +1189,28 @@ class ChatReadRetrieveReadApproach(Approach):
             canonical_question = self.pbsg_routing_engine.question_text(entry_id, question_id)
             if not canonical_question:
                 return None
-            content = "\n".join(
+            content_lines = selected_stream_lines(self.pbsg_golden_set_entries, entry_id, entry_id, question_id)
+            content_lines.extend(
                 [
-                    f"**Selected Entry:** {entry_id}",
                     "",
                     "**Note:** I am asking the same Golden Set question in context-specific wording. The route options are unchanged.",
                     "",
                     "Triage progress:",
                     "",
-                    f"- Current question remains: {question_id} from {entry_id}",
+                    f"<!-- Current question remains: {question_id} from {entry_id} -->",
+                    f"- Current question remains about {short_question_label(self.pbsg_golden_set_entries, entry_id, question_id)}.",
                     "",
                     "**Ask the applicant (read verbatim):**",
                     "",
-                    f'> **{question_id}: "{script}"**',
+                    f'> **"{script}"**',
                     "",
-                    f"Type the applicant's answer here and I will determine the next question or route. [{entry_id}.json]",
+                    "Type the applicant's answer here and I will determine the next question or route.",
                 ]
             )
+            content = "\n".join(content_lines)
         elif disposition in {"not_relevant", "escalate_to_staff"}:
             content = safe_escalation_response(
-                f"**Selected Entry:** {triage_state.pending_entry_id}", self.pbsg_golden_set_entries, "context relevance"
+                pbsg_state_marker(triage_state.pending_entry_id), self.pbsg_golden_set_entries, "context relevance"
             )
         else:
             return None

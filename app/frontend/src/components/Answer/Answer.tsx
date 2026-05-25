@@ -121,6 +121,10 @@ function addMissingQuestionIdsToApplicantQuotes(markdown: string): string {
 
     return lines
         .map(line => {
+            if (/^\s*<!--.*-->\s*$/.test(line)) {
+                return line;
+            }
+
             const nextQuestionMatch = line.match(new RegExp(`Next question:\\s*(${VERBATIM_QUESTION_ID}|Clarification)\\b`, "i"));
             if (nextQuestionMatch) {
                 currentQuestionId = normalizeQuestionId(nextQuestionMatch[1]);

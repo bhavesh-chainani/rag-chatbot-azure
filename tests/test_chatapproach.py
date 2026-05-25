@@ -1261,11 +1261,12 @@ async def test_run_without_streaming_initial_topic_llm_carries_family_violence_i
     triage_state = result["context"]["pbsg_triage_state"]
 
     assert "**Selected Entry:** GEN3-T03" in content
-    assert "What I gathered from your description:" in content
-    assert "Q1: Yes" in content
+    assert "Applicant summary:" in visible_text(content)
+    assert "The applicant's response: **Yes**" in visible_text(content)
     assert "**Active stream:** GEN3-T06 urgent concurrent path" in content
     assert "GEN3-T06 Q1" in content
-    assert 'Is there active or recent family violence' not in content
+    asked_section = visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
+    assert "Is there active or recent family violence" not in asked_section
     assert triage_state["active_workflow"] == "GEN3-T06"
     assert triage_state["parent_workflow"] == "GEN3-T03"
     assert triage_state["resume_question_id"] == "Q2"
@@ -1471,7 +1472,8 @@ async def test_context_support_can_rephrase_without_changing_question_or_branche
 
     assert "**Selected Entry:** GEN3-T06" in content
     assert "same Golden Set question" in content
-    assert 'Q2: "Are you safe right now, or is your husband currently threatening or hurting you?"' in content
+    assert '"Are you safe right now, or is your husband currently threatening or hurting you?"' in visible_text(content)
+    assert "Q2:" not in visible_text(content)
     assert result["context"]["pbsg_question_relevance"]["disposition"] == "needs_rephrasing"
 
 

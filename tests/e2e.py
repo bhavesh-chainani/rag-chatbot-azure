@@ -442,6 +442,59 @@ def test_chat_nonstreaming(page: Page, live_server_url: str):
     expect(page.get_by_role("button", name="Clear chat")).to_be_enabled()
 
 
+def test_new_chat_sends_fresh_transcript(page: Page, live_server_url: str):
+    requests: list[dict] = []
+
+    def stream_response(answer: str, session_state: str) -> str:
+        context = {
+            "data_points": {"text": [], "images": [], "citations": []},
+            "thoughts": [],
+            "followup_questions": None,
+            "quick_reply": None,
+        }
+        return "\n".join(
+            [
+                json.dumps({"delta": {"role": "assistant"}, "context": context, "session_state": session_state}),
+                json.dumps({"delta": {"content": answer, "role": "assistant"}}),
+                json.dumps({"delta": {"role": "assistant"}, "context": context, "session_state": session_state}),
+            ]
+        )
+
+    def handle(route: Route):
+        post_data = route.request.post_data_json
+        requests.append(post_data)
+        route.fulfill(
+            body=stream_response(f"Answer {len(requests)}", f"session-{len(requests)}"),
+            status=200,
+            headers={"Transfer-encoding": "Chunked"},
+        )
+
+    page.route("*/**/chat/stream", handle)
+    page.goto(live_server_url)
+
+    question_input = page.get_by_placeholder("Type a new question (e.g. does my plan cover annual eye exams?)")
+    question_input.fill("Applicant A is on a work permit and wants help with divorce.")
+    page.get_by_label("Submit question").click()
+    expect(page.get_by_text("Answer 1")).to_be_visible()
+
+    page.get_by_role("button", name="New chat").click()
+    expect(page.get_by_text("Applicant A is on a work permit and wants help with divorce.")).not_to_be_visible()
+
+    question_input.fill("Applicant B has a landlord-tenant dispute and requires help.")
+    page.get_by_label("Submit question").click()
+    expect(page.get_by_text("Answer 2")).to_be_visible()
+
+    assert len(requests) == 2
+    assert requests[0]["session_state"] is None
+    assert [message["content"] for message in requests[0]["messages"]] == [
+        "Applicant A is on a work permit and wants help with divorce."
+    ]
+    assert requests[1]["session_state"] is None
+    assert [message["content"] for message in requests[1]["messages"]] == [
+        "Applicant B has a landlord-tenant dispute and requires help."
+    ]
+
+
 def test_chat_followup_streaming(page: Page, live_server_url: str):
     # Set up a mock route to the /chat_stream endpoint
     def handle(route: Route):

@@ -1996,6 +1996,61 @@ async def test_work_permit_fact_reused_across_matrimonial_to_civil_handoff(chat_
 
 
 @pytest.mark.asyncio
+async def test_fresh_chat_does_not_reuse_prior_applicant_facts_with_same_session_state(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("fresh and same-chat routing should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    prior_query = "Applicant is on a work permit and wants help with divorce."
+    prior_first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": prior_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    prior_second = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": prior_query},
+            {"role": "assistant", "content": prior_first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    prior_third = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": prior_query},
+            {"role": "assistant", "content": prior_first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+            {"role": "assistant", "content": prior_second["message"]["content"]},
+            {"role": "user", "content": "No Singaporean child."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Carried over from" in prior_third["message"]["content"]
+    assert "Next question: Q4 from GEN3-T04" in prior_third["message"]["content"]
+
+    fresh = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a landlord-tenant dispute and requires help."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = fresh["message"]["content"]
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over" not in content
+    assert "No, foreigner" not in content
+    assert "Next question: Q1 from GEN3-T04" in content
+    assert "Are you a Singapore Citizen or PR?" in content
+    assert "Per Capita Household Income" not in content
+
+
+@pytest.mark.asyncio
 async def test_unknown_residency_still_asks_residency_question(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("unknown residency path should stay deterministic")

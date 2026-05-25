@@ -103,6 +103,7 @@ const Chat = () => {
     const lastQuestionRef = useRef<string>("");
     const chatMessageStreamEnd = useRef<HTMLDivElement | null>(null);
     const clearingForNewChatRef = useRef<boolean>(false);
+    const chatEpochRef = useRef<number>(0);
 
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -202,7 +203,8 @@ const Chat = () => {
         answers: Answers,
         responseBody: ReadableStream<any>,
         signal: AbortSignal,
-        questionSentAt: number
+        questionSentAt: number,
+        requestEpoch: number
     ) => {
         let answer: string = "";
         let askResponse: ChatAppResponse = {
@@ -215,6 +217,10 @@ const Chat = () => {
         const updateState = (newContent: string) => {
             return new Promise(resolve => {
                 setTimeout(() => {
+                    if (signal.aborted || chatEpochRef.current !== requestEpoch) {
+                        resolve(null);
+                        return;
+                    }
                     answer += newContent;
                     const latestResponse: ChatAppResponse = {
                         ...askResponse,
@@ -235,7 +241,9 @@ const Chat = () => {
                     event["message"] = event["delta"];
                     askResponse = event as ChatAppResponse;
                 } else if (event["delta"] && event["delta"]["content"]) {
-                    setIsLoading(false);
+                    if (chatEpochRef.current === requestEpoch) {
+                        setIsLoading(false);
+                    }
                     await updateState(event["delta"]["content"]);
                 } else if (event["context"]) {
                     // Update context with new keys from latest event
@@ -252,7 +260,9 @@ const Chat = () => {
                 throw e; // Re-throw other errors to be caught by makeApiRequest
             }
         } finally {
-            setIsStreaming(false);
+            if (chatEpochRef.current === requestEpoch) {
+                setIsStreaming(false);
+            }
         }
         const fullResponse: ChatAppResponse = {
             ...askResponse,
@@ -312,7 +322,9 @@ const Chat = () => {
 
     const makeApiRequest = async (question: string) => {
         const controller = new AbortController();
+        const requestEpoch = chatEpochRef.current;
         setAbortController(controller);
+        clearingForNewChatRef.current = false;
         lastQuestionRef.current = question;
         const questionSentAt = Date.now();
         setPendingQuestionSentAt(questionSentAt);
@@ -324,9 +336,13 @@ const Chat = () => {
         setActiveAnalysisPanelTab(undefined);
 
         const token = client ? await getToken(client) : undefined;
+        if (chatEpochRef.current !== requestEpoch) {
+            return;
+        }
 
         try {
-            const messages: ResponseMessage[] = answers.flatMap(a => [
+            const requestAnswers = [...answersRef.current];
+            const messages: ResponseMessage[] = requestAnswers.flatMap(a => [
                 { content: a[0], role: "user" },
                 { content: a[1].message.content, role: "assistant" }
             ]);
@@ -361,7 +377,7 @@ const Chat = () => {
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
-                session_state: answers.length ? answers[answers.length - 1][1].session_state : null
+                session_state: requestAnswers.length ? requestAnswers[requestAnswers.length - 1][1].session_state : null
             };
 
             const response = await chatApi(request, shouldStream, token, controller.signal);
@@ -374,14 +390,18 @@ const Chat = () => {
             if (shouldStream) {
                 const parsedResponse: ChatAppResponse = await handleAsyncRequest(
                     question,
-                    answers,
+                    requestAnswers,
                     response.body,
                     controller.signal,
-                    questionSentAt
+                    questionSentAt,
+                    requestEpoch
                 );
+                if (chatEpochRef.current !== requestEpoch) {
+                    return;
+                }
                 // Only add to answers if we got content, otherwise restore question to input
                 if (parsedResponse.message.content) {
-                    const newAnswers: Answers = [...answers, [question, parsedResponse, questionSentAt]];
+                    const newAnswers: Answers = [...requestAnswers, [question, parsedResponse, questionSentAt]];
                     setAnswers(newAnswers);
                     answersRef.current = newAnswers;
                     setPendingQuestionSentAt(null);
@@ -395,7 +415,7 @@ const Chat = () => {
                     }
                 } else {
                     // Stopped before any content arrived - restore question to input
-                    lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
+                    lastQuestionRef.current = requestAnswers.length > 0 ? requestAnswers[requestAnswers.length - 1][0] : "";
                     setRestoredQuestion(question);
                     setPendingQuestionSentAt(null);
                 }
@@ -404,7 +424,10 @@ const Chat = () => {
                 if (parsedResponse.error) {
                     throw Error(parsedResponse.error);
                 }
-                const newAnswers: Answers = [...answers, [question, parsedResponse as ChatAppResponse, questionSentAt]];
+                if (chatEpochRef.current !== requestEpoch) {
+                    return;
+                }
+                const newAnswers: Answers = [...requestAnswers, [question, parsedResponse as ChatAppResponse, questionSentAt]];
                 setAnswers(newAnswers);
                 answersRef.current = newAnswers;
                 setPendingQuestionSentAt(null);
@@ -412,26 +435,32 @@ const Chat = () => {
                     enqueueHistorySave(parsedResponse.session_state, newAnswers, getHistoryToken, historyManager);
                 }
             }
-            setSpeechUrls([...speechUrls, null]);
+            setSpeechUrls(currentSpeechUrls => [...currentSpeechUrls, null]);
         } catch (e) {
             if (e instanceof DOMException && e.name === "AbortError") {
                 // Restore question only if user clicked Stop; not when they started a new chat
-                if (!clearingForNewChatRef.current) {
-                    lastQuestionRef.current = answers.length > 0 ? answers[answers.length - 1][0] : "";
+                if (!clearingForNewChatRef.current && chatEpochRef.current === requestEpoch) {
+                    const currentAnswers = answersRef.current;
+                    lastQuestionRef.current = currentAnswers.length > 0 ? currentAnswers[currentAnswers.length - 1][0] : "";
                     setRestoredQuestion(question);
                     setPendingQuestionSentAt(null);
                 }
             } else {
-                setError(e);
+                if (chatEpochRef.current === requestEpoch) {
+                    setError(e);
+                }
             }
         } finally {
-            setIsLoading(false);
-            setAbortController(null);
+            if (chatEpochRef.current === requestEpoch) {
+                setIsLoading(false);
+                setAbortController(null);
+            }
         }
     };
 
     const clearChat = useCallback(async () => {
         clearingForNewChatRef.current = true;
+        chatEpochRef.current += 1;
         const hasStreaming = streamedAnswers.length > 0;
         const toSave: Answers = hasStreaming ? [...streamedAnswers] : [...answersRef.current];
         const lastResponse = toSave.length > 0 ? toSave[toSave.length - 1][1] : null;
@@ -451,6 +480,7 @@ const Chat = () => {
         error && setError(undefined);
         setActiveCitation(undefined);
         setActiveAnalysisPanelTab(undefined);
+        setSelectedAnswer(0);
         setAnswers([]);
         answersRef.current = [];
         setSpeechUrls([]);
@@ -459,9 +489,6 @@ const Chat = () => {
         setIsLoading(false);
         setIsStreaming(false);
         setRestoredQuestion("");
-        setTimeout(() => {
-            clearingForNewChatRef.current = false;
-        }, 0);
 
         if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && sessionId) {
             void flushHistorySave(sessionId, toSave, getHistoryToken, historyManager).catch(e => {
@@ -792,10 +819,16 @@ const Chat = () => {
                         onClose={() => setIsHistoryPanelOpen(false)}
                         onChatSelected={(sessionId, answers) => {
                             if (answers.length === 0) return;
+                            chatEpochRef.current += 1;
+                            clearingForNewChatRef.current = false;
                             const normalized = normalizeHistoryAnswers(sessionId, answers);
                             setAnswers(normalized);
                             answersRef.current = normalized;
                             setPendingQuestionSentAt(null);
+                            setStreamedAnswers([]);
+                            setSelectedAnswer(0);
+                            setActiveCitation(undefined);
+                            setActiveAnalysisPanelTab(undefined);
                             lastQuestionRef.current = normalized[normalized.length - 1][0];
                         }}
                     />

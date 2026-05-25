@@ -19,8 +19,10 @@ from pbsg_triage_state import (
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
+    deadline_branch_key_from_text,
     resolve_gen3_t13_cue_transition,
     resolve_initial_topic,
+    resolve_initial_topics,
 )
 
 
@@ -380,7 +382,7 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
+    assert "Which urgent concern is actually present" in content
     assert "**Ask the applicant (read verbatim):**" in content
 
 
@@ -440,29 +442,17 @@ def test_pbsg_known_cross_routing_regressions():
     assert t04_q1_foreigner.target_entry_id == "GEN3-T04"
     assert t04_q1_foreigner.target_question_id == "Q4"
 
-    t06_q2_not_sure = parse_transition_outcome(
+    t06_q1_basic = parse_transition_outcome(
         entries,
         "GEN3-T06",
-        "Q2",
-        "if_not_sure",
-        entries["GEN3-T06"]["branching_logic"]["Q2"]["if_not_sure"],
+        "Q1",
+        "if_basic_needs_or_child_welfare",
+        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_basic_needs_or_child_welfare"],
     )
-    assert t06_q2_not_sure.transition_type == "concurrent_route_question"
-    assert t06_q2_not_sure.route_label == "Route B"
-    assert t06_q2_not_sure.target_entry_id == "GEN3-T06"
-    assert t06_q2_not_sure.target_question_id == "Q3"
-
-    t06_q3_not_sure = parse_transition_outcome(
-        entries,
-        "GEN3-T06",
-        "Q3",
-        "if_not_sure",
-        entries["GEN3-T06"]["branching_logic"]["Q3"]["if_not_sure"],
-    )
-    assert t06_q3_not_sure.transition_type == "concurrent_route_question"
-    assert t06_q3_not_sure.route_label == "Route C"
-    assert t06_q3_not_sure.target_entry_id == "GEN3-T06"
-    assert t06_q3_not_sure.target_question_id == "Q4"
+    assert t06_q1_basic.transition_type == "concurrent_route_question"
+    assert t06_q1_basic.route_label == "Route B"
+    assert t06_q1_basic.target_entry_id == "GEN3-T06"
+    assert t06_q1_basic.target_question_id == "Q5"
 
     t06_q4_yes = parse_transition_outcome(
         entries,
@@ -471,9 +461,21 @@ def test_pbsg_known_cross_routing_regressions():
         "if_yes",
         entries["GEN3-T06"]["branching_logic"]["Q4"]["if_yes"],
     )
-    assert t06_q4_yes.transition_type == "handoff_entry"
-    assert t06_q4_yes.target_entry_id == "GEN3-T01"
-    assert t06_q4_yes.target_question_id == "Q1"
+    assert t06_q4_yes.transition_type == "concurrent_route_question"
+    assert t06_q4_yes.route_label == "Route C"
+    assert t06_q4_yes.target_entry_id == "GEN3-T06"
+    assert t06_q4_yes.target_question_id == "Q5"
+
+    t06_q5_yes = parse_transition_outcome(
+        entries,
+        "GEN3-T06",
+        "Q5",
+        "if_yes",
+        entries["GEN3-T06"]["branching_logic"]["Q5"]["if_yes"],
+    )
+    assert t06_q5_yes.transition_type == "handoff_entry"
+    assert t06_q5_yes.target_entry_id == "GEN3-T01"
+    assert t06_q5_yes.target_question_id == "Q1"
 
 
 def test_nested_gen3_t06_resumes_parent_stream_after_urgent_route():
@@ -485,7 +487,7 @@ def test_nested_gen3_t06_resumes_parent_stream_after_urgent_route():
         workflow_locked=True,
         active_workflow="GEN3-T06",
         pending_entry_id="GEN3-T06",
-        current_question_id="Q3",
+        current_question_id="Q4",
     )
 
     transition = engine.resolve_transition_from_branch(state, "if_yes")
@@ -505,9 +507,9 @@ def test_standalone_gen3_t06_route_d_hands_off_to_gen3_t01():
     transition = parse_transition_outcome(
         entries,
         "GEN3-T06",
-        "Q4",
+        "Q5",
         "if_yes",
-        entries["GEN3-T06"]["branching_logic"]["Q4"]["if_yes"],
+        entries["GEN3-T06"]["branching_logic"]["Q5"]["if_yes"],
     )
 
     content = engine.render_transition(transition)
@@ -801,8 +803,6 @@ def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_f
     turns = [
         "caller said he has been charged in court for assault and has no legal representation. he is singaporean, no money to hire a lawyer",
         "yes, 7 days",
-        "no",
-        "no",
     ]
 
     for index, turn in enumerate(turns):
@@ -816,7 +816,7 @@ def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_f
     assert "GEN3-T02 Q5" in content
     assert "Have you been charged in court?" not in content
     assert "Is the applicant a Singapore Citizen or PR?" not in content
-    assert "Next question: Q3 from GEN3-T06" not in content
+    assert "Immediate threat" not in content
 
 
 def test_explicit_court_date_outside_14_days_does_not_trigger_urgent_stream(monkeypatch):
@@ -851,8 +851,37 @@ def test_explicit_court_date_inside_14_days_triggers_urgent_stream(monkeypatch):
     result = engine.execute_locked_turn(messages, "court date is 1 June")
 
     assert result is not None
-    assert "GEN3-T06 urgent concurrent path" in result.content
-    assert "Q2 = Yes" in result.content
+    assert "Concurrent routing note" in result.content
+    assert "Route C" in result.content
+    assert "Next question: Q4 from GEN3-T02" in result.content
+    assert "Which urgent concern is actually present" not in result.content
+
+
+def test_generic_criminal_terms_do_not_trigger_urgent_overlay():
+    entries = load_entries()
+    resolution = resolve_initial_topics(
+        entries,
+        "caller was charged by police and wants to know if he needs a lawyer for sentencing",
+    )
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T02"
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_safety_and_basic_needs_facts_still_trigger_urgent_overlay():
+    entries = load_entries()
+    resolution = resolve_initial_topics(
+        entries,
+        "caller has a family matter and is not safe tonight with no shelter",
+    )
+
+    assert resolution is not None
+    assert "GEN3-T06" in resolution.overlays
+
+
+def test_next_week_without_deadline_context_is_not_deadline_urgency():
+    assert deadline_branch_key_from_text("I am meeting my lawyer next week") is None
 
 
 def test_numeric_court_date_outside_14_days_maps_no(monkeypatch):
@@ -1060,15 +1089,15 @@ def test_gen3_t06_structured_route_card_renders_urgent_script():
         entries,
         "GEN3-T06",
         "Q1",
-        "if_yes",
-        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_yes"],
+        "if_immediate_safety_or_crisis",
+        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_immediate_safety_or_crisis"],
     )
 
     content = engine.render_transition(transition)
 
     assert content is not None
-    assert "**Routing Recommendation:** Route A (Emergency Services — IMMEDIATE)" in content
-    assert "Please call 999 for police or 995 for ambulance immediately" in content
+    assert "**Routing Recommendation:** Route A (Emergency / Crisis Support — IMMEDIATE)" in content
+    assert "Please call 999 for police or 995 for ambulance now" in content
     assert "Police emergency: 999" in content
 
 

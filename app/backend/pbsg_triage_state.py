@@ -175,9 +175,11 @@ QUESTION_FACT_MAP = {
     ("GEN3-T04", "Q2"): "applicant.help_type_requested",
     ("GEN3-T04", "Q3"): "applicant.lab_application_status",
     ("GEN3-T04", "Q4"): "applicant.means_status",
-    ("GEN3-T06", "Q1"): "matter.immediate_safety",
-    ("GEN3-T06", "Q2"): "matter.urgent_deprivation",
-    ("GEN3-T06", "Q3"): "matter.deadline_within_14_days",
+    ("GEN3-T06", "Q1"): "matter.urgent_risk_type",
+    ("GEN3-T06", "Q2"): "matter.immediate_safety",
+    ("GEN3-T06", "Q3"): "matter.urgent_deprivation",
+    ("GEN3-T06", "Q4"): "matter.deadline_within_14_days",
+    ("GEN3-T06", "Q5"): "matter.legal_matter_remains",
     ("GEN3-T13", "Q1"): "applicant.vulnerability_status",
 }
 
@@ -189,15 +191,18 @@ ASK_MARKERS = [
 
 URGENT_PATTERN = re.compile(
     r"\b("
-    r"court|deadline|within 14 days|tomorrow|next week|arrest|custody|detention|bail|deport|"
-    r"homeless|evict|violence|safe|safety|self[- ]?harm|suicid|no food|no money"
+    r"immediate threat|in danger|unsafe|not safe|family violence|domestic violence|"
+    r"threaten(?:ed|ing)?|self[- ]?harm|suicid|homeless|no shelter|evict(?:ed|ion)?|"
+    r"no food|no money|police custody|detention|detained|deport(?:ed|ation)?|"
+    r"pass expir(?:e|ing)|removal tonight"
     r")\b",
     flags=re.IGNORECASE,
 )
 VULNERABLE_PATTERN = re.compile(
     r"\b("
-    r"elderly|minor|under 18|disabled|disability|abuse|domestic violence|language barrier|"
-    r"interpreter|mental distress|social worker|fsc|financial hardship"
+    r"elderly and confused|confused|dementia|minor|under 18|disabled|disability|"
+    r"language barrier|limited english|interpreter|mental distress|social worker|fsc|"
+    r"caregiver|cannot use (?:email|internet|phone|apps?)|no email|no internet"
     r")\b",
     flags=re.IGNORECASE,
 )
@@ -227,13 +232,20 @@ CLARIFICATION_QUESTION_PATTERN = re.compile(
     r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
 )
 SAFETY_INTERRUPT_PATTERN = re.compile(
-    r"\b(danger|violence|self[- ]?harm|homeless|court tomorrow|deadline|immediate threat)\b", flags=re.IGNORECASE
+    r"\b(in danger|unsafe|not safe|violence|self[- ]?harm|homeless|no shelter|immediate threat)\b",
+    flags=re.IGNORECASE,
 )
 TOPIC_SIGNAL_RULES = [
     ("GEN3-T02", re.compile(r"\b(criminal|charged|charge|police|arrest|offence|offense)\b", flags=re.IGNORECASE)),
     ("GEN3-T03", re.compile(r"\b(divorce|custody|maintenance|matrimonial|family violence|ppo)\b", flags=re.IGNORECASE)),
     ("GEN3-T04", re.compile(r"\b(employment|landlord|tenant|contract|estate|probate|civil|debt)\b", flags=re.IGNORECASE)),
-    ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
+    (
+        "GEN3-T06",
+        re.compile(
+            r"\b(urgent|in danger|unsafe|violence|homeless|no shelter|deadline|court tomorrow|hearing tomorrow|filing deadline)\b",
+            flags=re.IGNORECASE,
+        ),
+    ),
     ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
 ]
 MONTH_LOOKUP = {
@@ -276,7 +288,7 @@ INITIAL_TOPIC_PATTERNS = {
         flags=re.IGNORECASE,
     ),
     "GEN3-T06": re.compile(
-        r"\b(urgent|immediate|danger|homeless|no shelter|deadline|court tomorrow|court date|next week)\b",
+        r"\b(urgent|immediate threat|in danger|unsafe|homeless|no shelter|deadline|court tomorrow|hearing tomorrow|filing deadline|pass expiring)\b",
         flags=re.IGNORECASE,
     ),
     "GEN3-T13": re.compile(
@@ -701,7 +713,14 @@ def deadline_branch_key_from_text(text: str, today: date | None = None) -> str |
     normalized = normalize_branch_label(text)
     if re.search(r"\b(no deadline|no court date|not urgent|no urgency)\b", normalized):
         return "if_no"
-    if re.search(r"\b(today|tonight|tomorrow|next week)\b", normalized):
+    has_deadline_context = bool(
+        re.search(
+            r"\b(court|hearing|trial|mention|sentenc|deadline|fil(?:e|ing)|appeal|injunction|"
+            r"immigration|pass expir|report(?:ing)?|surrender|deport|removal)\b",
+            normalized,
+        )
+    )
+    if has_deadline_context and re.search(r"\b(today|tonight|tomorrow|next week)\b", normalized):
         return "if_yes"
     relative_match = re.search(r"\b(?:in|within)?\s*(\d{1,3})\s+days?\b", normalized)
     if relative_match:
@@ -709,7 +728,7 @@ def deadline_branch_key_from_text(text: str, today: date | None = None) -> str |
     explicit_date = explicit_deadline_date(text.lower(), today) or explicit_deadline_date(normalized, today)
     if explicit_date:
         return branch_for_deadline_date(explicit_date, today)
-    if re.search(r"\b(court date|deadline)\b", normalized):
+    if re.search(r"\b(court date|deadline|hearing|trial|mention|sentenc|filing|appeal deadline)\b", normalized):
         return "if_not_sure"
     return None
 
@@ -764,6 +783,57 @@ def deterministic_facts_from_user_text(text: str, source_turn_index: int | None 
     elif deadline_branch_key_from_text(text) == "if_yes" or re.search(r"\b(urgent|family violence|violence|unsafe|danger)\b", normalized):
         add_fact("matter.urgency_or_safety", "Urgency or safety issue", "yes", "if_yes", confidence=0.9)
     deadline_branch_key = deadline_branch_key_from_text(text)
+    if re.search(r"\b(no urgency|not urgent|no safety issue|not an emergency|no immediate risk)\b", normalized):
+        add_fact(
+            "matter.urgent_risk_type",
+            "No urgent issue or only legal seriousness",
+            "no_urgent_or_only_legal_seriousness",
+            "if_no_urgent_or_only_legal_seriousness",
+            confidence=0.9,
+        )
+    elif re.search(
+        r"\b(immediate threat|in danger|unsafe|not safe|family violence|domestic violence|"
+        r"self[- ]?harm|suicid|threaten(?:ed|ing)?|attack(?:ed|ing)?)\b",
+        normalized,
+    ):
+        add_fact(
+            "matter.urgent_risk_type",
+            "Immediate safety or crisis",
+            "immediate_safety_or_crisis",
+            "if_immediate_safety_or_crisis",
+            confidence=0.95,
+        )
+    elif re.search(
+        r"\b(homeless|no shelter|no safe place|nowhere safe|evict(?:ed|ion)?|no food|no money|basic needs|child welfare)\b",
+        normalized,
+    ):
+        add_fact(
+            "matter.urgent_risk_type",
+            "Basic needs or child welfare",
+            "basic_needs_or_child_welfare",
+            "if_basic_needs_or_child_welfare",
+            confidence=0.95,
+        )
+    elif deadline_branch_key in {"if_yes", "if_not_sure"} or re.search(
+        r"\b(court date|legal deadline|filing deadline|hearing|trial|mention|sentenc|injunction|"
+        r"immigration deadline|pass expir|reporting date)\b",
+        normalized,
+    ):
+        add_fact(
+            "matter.urgent_risk_type",
+            "Legal or procedural deadline",
+            "legal_or_procedural_deadline",
+            "if_legal_or_procedural_deadline",
+            confidence=0.9,
+        )
+    elif re.search(r"\b(too complex|complex|unclear|not sure)\b", normalized):
+        add_fact(
+            "matter.urgent_risk_type",
+            "Unclear or too complex",
+            "unclear_or_too_complex",
+            "if_unclear_or_too_complex",
+            confidence=0.75,
+        )
     if deadline_branch_key in {"if_yes", "if_no", "if_not_sure"}:
         deadline_value = {
             "if_yes": "Deadline within 14 days",
@@ -1435,6 +1505,11 @@ def label_from_branch_key(branch_key: str) -> str:
         "helper_present": "Helper present",
         "no_or_unclear": "No or unclear",
         "under_18": "Under 18",
+        "immediate_safety_or_crisis": "Immediate safety or crisis",
+        "basic_needs_or_child_welfare": "Basic needs or child welfare",
+        "legal_or_procedural_deadline": "Legal or procedural deadline",
+        "no_urgent_or_only_legal_seriousness": "No urgent issue or only legal seriousness",
+        "unclear_or_too_complex": "Unclear or too complex",
     }
     suffix = branch_key.removeprefix("if_")
     if suffix in labels:
@@ -1615,6 +1690,23 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
         (r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", "if_no_foreigner"),
         (r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence|no violence)\b", "if_no"),
         (r"\b(urgent|within 14 days|within fourteen days|\d+\s+days?|family violence|violence|unsafe|danger)\b", "if_yes"),
+        (
+            r"\b(immediate threat|in danger|unsafe|not safe|family violence|domestic violence|self[- ]?harm|suicid|threaten(?:ed|ing)?|attack(?:ed|ing)?)\b",
+            "if_immediate_safety_or_crisis",
+        ),
+        (
+            r"\b(homeless|no shelter|no safe place|nowhere safe|evict(?:ed|ion)?|no food|no money|basic needs|child welfare)\b",
+            "if_basic_needs_or_child_welfare",
+        ),
+        (
+            r"\b(court date|legal deadline|filing deadline|hearing|trial|mention|sentenc|injunction|immigration deadline|pass expir|reporting date|within 14 days|within fourteen days|\d+\s+days?)\b",
+            "if_legal_or_procedural_deadline",
+        ),
+        (
+            r"\b(no urgent issue|only legal seriousness|serious but not urgent|no immediate risk|not an emergency)\b",
+            "if_no_urgent_or_only_legal_seriousness",
+        ),
+        (r"\b(too complex|complex|unclear|not sure)\b", "if_unclear_or_too_complex"),
         (r"\b(no children|no child|no singaporean child|no singapore citizen child|child is not singaporean)\b", "if_no"),
         (r"\b(singaporean child|singapore citizen child|sg child|child under 21)\b", "if_yes"),
         (r"\b(rep|representation|represent|lawyer to act|lawyer)\b", "if_representation"),
@@ -2592,9 +2684,13 @@ def gen3_t13_cues(text: str) -> set[str]:
     cues: set[str] = set()
     if re.search(r"\b(minor|under 18|child is calling|17|16|15)\b", lowered):
         cues.add("minor")
-    if re.search(r"\b(violence|abuse|unsafe|not safe|danger|self[- ]?harm)\b", lowered):
+    if re.search(
+        r"\b(family violence|domestic violence|elder abuse|caregiver abuse|being abused|abused by|"
+        r"unsafe|not safe|in danger|self[- ]?harm|threaten(?:ed|ing)?)\b",
+        lowered,
+    ):
         cues.add("active_safety")
-    if re.search(r"\b(no shelter|safe place|homeless|no food|no money|basic needs)\b", lowered):
+    if re.search(r"\b(no shelter|no safe place|nowhere safe|homeless|no food|no money|basic needs)\b", lowered):
         cues.add("basic_needs")
     if re.search(r"\b(social worker|fsc|case officer|counsellor|counselor)\b", lowered):
         cues.add("fsc_referred")
@@ -2627,13 +2723,13 @@ def resolve_gen3_t13_cue_transition(latest_user_query: str, question_id: str | N
     if "minor" in cues:
         route_label = "Route B"
         outcome = "Route B (Minor — Special Handling)"
-    elif {"active_safety", "fsc_referred"} & cues or len(cues - {"unclear"}) >= 2:
+    elif len(cues - {"unclear"}) >= 2:
         route_label = "Route A"
         outcome = "Route A (High-Vulnerability — Escalate + Community Law Centre)"
     elif len(cues - {"unclear"}) == 1:
         route_label = "Route C"
         outcome = "Route C (Low-Vulnerability — Standard Triage with Adaptations)"
-    elif "unclear" in cues:
+    elif "unclear" in cues and cues - {"unclear"}:
         route_label = "Route A"
         outcome = "Route A (Escalate to PBSG Staff for professional assessment)"
     else:
@@ -2917,12 +3013,17 @@ class PBSGRoutingEngine:
         messages: list[ChatCompletionMessageParam],
         latest_user_query: str,
         branch_key_override: str | None = None,
+        extracted_facts: list[PBSGTriageFact] | None = None,
     ) -> PBSGDeterministicResult | None:
         if not self.entries:
             return None
         state = build_triage_state(messages, self.entries, latest_user_query)
         if state.mode != "FAST_ROUTING":
             return None
+        if extracted_facts:
+            state.fact_ledger = synthesize_means_status_facts(
+                self.entries, merge_fact_ledger([*state.fact_ledger, *extracted_facts])
+            )
         if state.pending_entry_id == "GEN3-T13":
             transition = resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
             if transition:
@@ -3004,7 +3105,13 @@ class PBSGRoutingEngine:
         current = transition
         visited: set[tuple[str | None, str | None]] = set()
         concurrent_origin: PBSGTransition | None = None
-        while current.transition_type in {"proceed_question", "concurrent_route_question", "handoff_entry", "cross_reference"}:
+        while current.transition_type in {
+            "proceed_question",
+            "concurrent_route_question",
+            "handoff_entry",
+            "cross_reference",
+            "nested_stream",
+        }:
             if current.transition_type == "concurrent_route_question" and current.route_label and not concurrent_origin:
                 concurrent_origin = current
             target_entry_id = current.target_entry_id
@@ -3154,7 +3261,7 @@ class PBSGRoutingEngine:
 
     def record_transition_fact(self, state: PBSGTriageState, transition: PBSGTransition) -> None:
         question = question_text_from_entry(self.entries, transition.entry_id, transition.question_id)
-        fact_key = canonical_fact_key_for_question(question)
+        fact_key = canonical_fact_key_for_node(transition.entry_id, transition.question_id, question)
         if not fact_key:
             return
         value = label_from_branch_key(transition.branch_key)
@@ -3248,9 +3355,11 @@ class PBSGRoutingEngine:
         transition: PBSGTransition,
     ) -> PBSGTransition:
         parent_resume = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}
-        if state.pending_entry_id != "GEN3-T06" or state.workflow_id not in parent_resume:
+        if state.workflow_id not in parent_resume:
             return transition
-        if transition.transition_type not in {"terminal_route", "handoff_entry"} or not transition.route_label:
+        if state.pending_entry_id != "GEN3-T06" and transition.entry_id != "GEN3-T06":
+            return transition
+        if transition.transition_type not in {"terminal_route", "handoff_entry", "concurrent_route_question"} or not transition.route_label:
             return transition
         return PBSGTransition(
             entry_id=transition.entry_id,

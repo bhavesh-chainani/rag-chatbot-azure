@@ -1033,6 +1033,53 @@ def user_fact_for_question(
     return None
 
 
+INITIAL_UNCERTAIN_FACT_CUE_PATTERNS = {
+    "applicant.residency_status": re.compile(
+        r"\b(citizen|citizenship|singaporean|sgc|permanent resident|\bpr\b|nationality|residen|foreigner)\b",
+        flags=re.IGNORECASE,
+    ),
+    "applicant.help_type_requested": re.compile(
+        r"\b(representation|guidance|advice|lawyer|act for|initial advice|help type)\b",
+        flags=re.IGNORECASE,
+    ),
+    "applicant.lab_application_status": re.compile(
+        r"\b(legal aid bureau|\blab\b|legal aid|appl(?:y|ied|ication)|processing|rejected|failed)\b",
+        flags=re.IGNORECASE,
+    ),
+    "applicant.pdo_application_status": re.compile(
+        r"\b(pdo|public defender|public defender's office|appl(?:y|ied|ication)|processing|rejected|failed)\b",
+        flags=re.IGNORECASE,
+    ),
+    "applicant.means_status": re.compile(
+        r"\b(pchi|income|salary|savings?|housing|hdb|condo|means|financial|household|dependants?|dependents?)\b",
+        flags=re.IGNORECASE,
+    ),
+    "applicant.singaporean_child_under_21": re.compile(
+        r"\b(child|children|son|daughter|under 21|singaporean child|citizen child)\b",
+        flags=re.IGNORECASE,
+    ),
+}
+
+
+INITIAL_UNCERTAIN_ANSWER_PATTERN = re.compile(
+    r"\b(not sure|unsure|do(?:es)?n['’]?t know|do(?:es)? not know|unknown|unclear|cannot confirm|can't confirm)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def initial_extracted_fact_supported(fact: PBSGTriageFact, latest_user_query: str) -> bool:
+    if fact.source_type != "structured_extraction" or not fact.source.startswith("structured_initial_extraction:"):
+        return True
+    if not fact.branch_value or not fact.branch_value.startswith("if_not_sure"):
+        return True
+    if not INITIAL_UNCERTAIN_ANSWER_PATTERN.search(latest_user_query):
+        return False
+    cue_pattern = INITIAL_UNCERTAIN_FACT_CUE_PATTERNS.get(fact.fact_key)
+    if not cue_pattern:
+        return True
+    return bool(cue_pattern.search(latest_user_query))
+
+
 def routing_answer_fact_from_user_turn(
     entries: dict[str, dict[str, Any]],
     assistant_content: str | None,
@@ -2998,7 +3045,12 @@ class PBSGRoutingEngine:
     ) -> PBSGDeterministicResult | None:
         initial_facts = extract_user_fact_ledger(self.entries, [], latest_user_query)
         if extracted_facts:
-            initial_facts = synthesize_means_status_facts(self.entries, merge_fact_ledger([*initial_facts, *extracted_facts]))
+            supported_extracted_facts = [
+                fact for fact in extracted_facts if initial_extracted_fact_supported(fact, latest_user_query)
+            ]
+            initial_facts = synthesize_means_status_facts(
+                self.entries, merge_fact_ledger([*initial_facts, *supported_extracted_facts])
+            )
         seed_state = PBSGTriageState(
             mode="FAST_ROUTING",
             workflow_id=resolution.entry_id,

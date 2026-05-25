@@ -10,12 +10,14 @@ import pbsg_triage_state
 from pbsg_triage_state import (
     GOLDEN_SET_RELATIVE_DIR,
     PBSGRoutingEngine,
+    PBSGTriageFact,
     PBSGTriageState,
     PBSGWorkflowGraph,
     branch_key_for_answer,
     build_triage_state,
     candidate_golden_set_dirs,
     collapse_duplicate_route_cards,
+    initial_extracted_fact_supported,
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
@@ -794,6 +796,55 @@ def test_criminal_initial_context_extracts_reusable_routing_facts():
     assert active_facts["matter.charged_in_court"].branch_value == "if_yes"
     assert active_facts["applicant.residency_status"].branch_value == "if_yes"
     assert active_facts["applicant.representation_status"].branch_value == "if_no"
+
+
+def test_initial_structured_not_sure_fact_requires_explicit_user_uncertainty():
+    fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    assert not initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and is not sure about their PR or citizenship status."
+    )
+
+
+def test_initial_routing_ignores_unsupported_not_sure_extraction():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    resolution = resolve_initial_topic(
+        entries, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert resolution is not None
+    bogus_fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    result = engine.execute_initial_resolution(
+        "Applicant has a landlord-tenant dispute and requires help. How do I triage?",
+        resolution,
+        extracted_facts=[bogus_fact],
+    )
+
+    assert result is not None
+    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.current_question_id == "Q1"
+    assert "Applicant response: Not sure" not in result.content
+    assert "Are you a Singapore Citizen or PR?" in result.content
 
 
 def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_facts():

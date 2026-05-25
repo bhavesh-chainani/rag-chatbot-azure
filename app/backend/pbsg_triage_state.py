@@ -741,6 +741,20 @@ def is_deadline_question(question_node: dict[str, Any]) -> bool:
     return "deadline" in normalized or "court date" in normalized
 
 
+RESIDENCY_FOREIGNER_PATTERN = (
+    r"\b("
+    r"foreigner|work permit|employment pass|s pass|dependent pass|"
+    r"not (?:a )?singapore citizen(?: or pr)?|"
+    r"not (?:a )?sg citizen|"
+    r"not (?:a )?sgc|"
+    r"not (?:a )?permanent resident|"
+    r"not (?:a )?pr|"
+    r"not singaporean|"
+    r"neither singapore citizen nor pr"
+    r")\b"
+)
+
+
 def deterministic_facts_from_user_text(text: str, source_turn_index: int | None = None) -> list[PBSGTriageFact]:
     normalized = normalize_branch_label(text)
     facts: list[PBSGTriageFact] = []
@@ -765,10 +779,10 @@ def deterministic_facts_from_user_text(text: str, source_turn_index: int | None 
             )
         )
 
-    if re.search(r"\bsingaporean\b(?!\s+child)|\b(singapore citizen|sg citizen|sgc|permanent resident|\bpr\b)\b", normalized):
-        add_fact("applicant.residency_status", "Singapore Citizen or PR", "sgc_pr", "if_yes")
-    elif re.search(r"\b(foreigner|work permit|employment pass|s pass|dependent pass|not singapore citizen|not a citizen|not pr|not a pr)\b", normalized):
+    if re.search(RESIDENCY_FOREIGNER_PATTERN, normalized):
         add_fact("applicant.residency_status", "foreigner", "foreigner", "if_no_foreigner")
+    elif re.search(r"\bsingaporean\b(?!\s+child)|\b(singapore citizen|sg citizen|sgc|permanent resident|\bpr\b)\b", normalized):
+        add_fact("applicant.residency_status", "Singapore Citizen or PR", "sgc_pr", "if_yes")
 
     if re.search(
         r"\b(no lawyer|no legal representation|not represented|unrepresented|does not have a lawyer|don t have a lawyer|do not have a lawyer)\b",
@@ -1046,6 +1060,12 @@ def routing_answer_fact_from_user_turn(
         return None
     value = label_from_branch_key(branch_key)
     normalized_value = normalize_branch_label(value)
+    if fact_key == "applicant.residency_status" and branch_key == "if_no_foreigner":
+        value = "foreigner"
+        normalized_value = "foreigner"
+    elif fact_key == "applicant.residency_status" and branch_key == "if_yes":
+        value = "Singapore Citizen or PR"
+        normalized_value = "sgc_pr"
     if fact_key == "applicant.lab_application_status" and branch_key == "if_yes_failed_means_test":
         value = "LAB failed means test"
         normalized_value = "lab_failed_means_test"
@@ -1711,7 +1731,7 @@ def branch_key_for_answer(question_node: dict[str, Any], latest_user_query: str)
             return deadline_branch_key
 
     keyword_rules = [
-        (r"\b(foreigner|not singapore citizen|not a citizen|not pr|not a pr)\b", "if_no_foreigner"),
+        (RESIDENCY_FOREIGNER_PATTERN, "if_no_foreigner"),
         (r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence|no violence)\b", "if_no"),
         (r"\b(urgent|within 14 days|within fourteen days|\d+\s+days?|family violence|violence|unsafe|danger)\b", "if_yes"),
         (

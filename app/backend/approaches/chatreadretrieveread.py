@@ -399,6 +399,8 @@ Rules:
 - Do not mention internal workflow ids, GEN3 codes, JSON filenames, hidden state, or Q numbers.
 - Do not infer residency, nationality, urgency, safety, income, representation, or eligibility. Mention those only when the evidence explicitly contains them.
 - If a fact is not in the evidence, treat it as unknown. Do not fill gaps from the current workflow, the next question, or common assumptions.
+- For high-risk facts, prefer the `summary_value` exactly.
+- For residency facts, `normalized_value: "foreigner"` means the applicant is not a Singapore Citizen or PR.
 - Keep it readable in under 15 seconds.
 - Use 2-4 short bullets, each starting with "- ".
 - If a fact is unknown, say it has not been provided yet instead of guessing.
@@ -930,12 +932,22 @@ class ChatReadRetrieveReadApproach(Approach):
             if fact.fact_key in high_risk_fact_keys and fact.source_type == "user_message":
                 source_text = (fact.source_text or "").lower()
                 if fact.fact_key == "applicant.residency_status" and not re.search(
-                    r"\b(singaporean|singapore citizen|sg citizen|sgc|permanent resident|\bpr\b|foreigner|work permit|employment pass|s pass|dependent pass|not singapore citizen|not a citizen|not pr|not a pr)\b",
+                    r"\b(singaporean|singapore citizen|sg citizen|sgc|permanent resident|\bpr\b|foreigner|"
+                    r"work permit|employment pass|s pass|dependent pass|not (?:a )?singapore citizen(?: or pr)?|"
+                    r"not (?:a )?citizen|not (?:a )?pr)\b",
                     source_text,
                 ):
                     continue
             facts.append(fact)
         return facts
+
+    def case_summary_value_for_fact(self, fact: PBSGTriageFact) -> str:
+        if fact.fact_key == "applicant.residency_status":
+            if fact.normalized_value == "foreigner" or fact.branch_value == "if_no_foreigner":
+                return "Not a Singapore Citizen or PR (foreigner)"
+            if fact.normalized_value == "sgc_pr" or fact.branch_value == "if_yes":
+                return "Singapore Citizen or PR"
+        return fact.value
 
     def case_summary_fact_payload(self, triage_state: Any) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -949,6 +961,9 @@ class ChatReadRetrieveReadApproach(Approach):
                 {
                     "fact_key": fact.fact_key,
                     "value": fact.value,
+                    "summary_value": self.case_summary_value_for_fact(fact),
+                    "normalized_value": fact.normalized_value,
+                    "branch_value": fact.branch_value,
                     "source_type": fact.source_type,
                     "source": fact.source,
                     "question": question,

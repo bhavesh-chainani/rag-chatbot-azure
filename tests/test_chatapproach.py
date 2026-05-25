@@ -1921,6 +1921,82 @@ Latest triage update:
 
 
 @pytest.mark.asyncio
+async def test_pbsg_case_summary_preserves_negated_residency_answer(chat_approach, monkeypatch):
+    captured_prompt: dict[str, str] = {}
+
+    async def fake_summary_completion(*args, **kwargs):
+        completion_messages = kwargs.get("messages") or args[2]
+        captured_prompt["content"] = completion_messages[-1]["content"]
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- Applicant has a criminal matter and says they were charged in court.\n"
+                            "- The applicant is not a Singapore Citizen or PR.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {"role": "user", "content": "Applicant has a criminal matter and says they were charged in court."},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q4 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Are you a Singapore Citizen or PR?"**""",
+        },
+        {"role": "user", "content": "No, not a Singapore Citizen or PR"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q6 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Are you a Singapore Citizen or PR?"
+- The applicant's response: **No, foreigner**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Does the applicant meet the means criteria?"**""",
+        },
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "applicant.residency_status" in summary["source_fact_keys"]
+    assert '"summary_value": "Not a Singapore Citizen or PR (foreigner)"' in captured_prompt["content"]
+    assert '"normalized_value": "foreigner"' in captured_prompt["content"]
+    assert '"value": "Singapore Citizen or PR"' not in captured_prompt["content"]
+    assert "not a Singapore Citizen or PR" in summary["text"]
+
+
+def test_deterministic_fact_extraction_treats_negated_residency_as_foreigner():
+    facts = pbsg_triage_state.deterministic_facts_from_user_text("No, not a Singapore Citizen or PR")
+
+    assert len(facts) == 1
+    assert facts[0].fact_key == "applicant.residency_status"
+    assert facts[0].normalized_value == "foreigner"
+    assert facts[0].branch_value == "if_no_foreigner"
+
+
+@pytest.mark.asyncio
 async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_locked_answer(
     chat_approach, monkeypatch
 ):

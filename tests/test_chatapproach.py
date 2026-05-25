@@ -1075,6 +1075,124 @@ async def test_run_without_streaming_skips_initial_topic_llm_for_bare_greeting(c
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_answers_pure_general_enquiry_without_llm_or_triage(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("pure general enquiry should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is LASCO?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert result["session_state"] == "session-1"
+    assert "**General enquiry:**" in content
+    assert "Legal Assistance Scheme for Capital Offences" in content
+    assert "**Selected Entry:**" not in content
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["context"]["thoughts"][0].title == "Deterministic PBSG general enquiry"
+    assert result["context"]["data_points"]["citations"] == ["GEN3-T02.json"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "expected_text"),
+    [
+        ("What services does PBSG provide?", "different PBSG-related pathways"),
+        ("What is a route?", "A route is the recommended next pathway"),
+        ("How does the chatbot choose a route?", "structured Golden Set branching logic"),
+        ("What is the selected stream?", "stream or workstream means the active triage workflow"),
+        ("What does streaming mean here?", "not video or audio streaming"),
+        ("How does triage work?", "asks only the facts needed"),
+        ("Why are you asking these questions?", "identify the correct legal help pathway"),
+        ("When do you escalate to PBSG staff?", "Staff escalation is used"),
+        ("Who qualifies for help?", "Eligibility depends"),
+        ("Is Pro Bono SG free?", "free or low-cost"),
+        ("How do I apply or book an appointment?", "Application steps"),
+        ("What documents should I prepare?", "preparation items"),
+        ("Can the intern give legal advice?", "must not give legal advice"),
+        ("What if there is an urgent deadline?", "Urgent handling is triggered"),
+        ("Where is the PBSG counter?", "State Courts Help Centre"),
+        ("Tell me more about Pro Bono SG.", "Pro Bono SG is the organisation referenced"),
+    ],
+)
+async def test_run_without_streaming_answers_broader_general_enquiry_catalogue(
+    chat_approach, monkeypatch, question, expected_text
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("curated general enquiry should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": question}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert expected_text in content
+    assert "**Selected Entry:**" not in content
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_keeps_mixed_general_enquiry_in_legal_triage(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("mixed general and legal enquiry should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is LASCO and can they help me with a divorce?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert "Legal Assistance Scheme for Capital Offences" in content
+    assert "**Now I will triage the legal issue:**" in content
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T03"
+    assert result["context"]["thoughts"][0].title == "Deterministic PBSG mixed general enquiry"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_legal_help_question_as_mixed_and_enters_triage(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("case-specific legal help question should not fall through to retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can Pro Bono SG help me with my employer not paying my salary?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert "**Now I will triage the legal issue:**" in content
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T04"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("query", "expected_entry_id"),
     [

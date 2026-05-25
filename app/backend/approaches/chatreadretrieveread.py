@@ -102,6 +102,293 @@ PBSG_GLOSSARY_ANSWERS = {
     "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
+PBSG_GENERAL_ENQUIRY_FAQS = {
+    "lasco": {
+        "patterns": [r"\blasco\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["lasco"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "clas": {
+        "patterns": [r"\bclas\b", r"\bcriminal legal aid scheme\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["clas"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "lab": {
+        "patterns": [r"\blab\b", r"\blegal aid bureau\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["lab"],
+        "source_ids": ["GEN3-T03", "GEN3-T04"],
+    },
+    "fjss": {
+        "patterns": [r"\bfjss\b", r"\bfamily justice support scheme\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["fjss"],
+        "source_ids": ["GEN3-T03"],
+    },
+    "pchi": {
+        "patterns": [r"\bpchi\b", r"\bper capita household income\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["pchi"],
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "services": {
+        "patterns": [
+            r"\bwhat services\b",
+            r"\bservices (?:does|do|are)\b",
+            r"\bwhat (?:does|can) (?:pbsg|pro bono sg|probono sg) (?:provide|do|offer)\b",
+            r"\bwhat help (?:does|can) (?:pbsg|pro bono sg|probono sg) (?:provide|offer)\b",
+            r"\btypes? of help\b",
+            r"\bget legal help\b",
+            r"\blegal guidance\b",
+            r"\blegal clinic(?:s)?\b",
+            r"\blegal representation\b",
+        ],
+        "answer": (
+            "The approved triage content points applicants to different PBSG-related pathways depending on the matter: "
+            "legal guidance or legal clinics, criminal legal aid triage, family/matrimonial triage, civil guidance, "
+            "urgent handling, and escalation to PBSG Staff when the facts are too complex or sensitive for standard routing."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_route": {
+        "patterns": [
+            r"\bwhat(?:'s| is)? (?:a )?route\b",
+            r"\bwhat (?:does|do) route [a-z]\b",
+            r"\bwhat happens (?:after|when) .*route\b",
+            r"\bwhy (?:am i|is the applicant|was this) routed\b",
+            r"\bhow (?:do you|does this|does the chatbot) (?:choose|decide|determine) (?:a )?route\b",
+            r"\brouting recommendation\b",
+            r"\broute outcome\b",
+            r"\bfinal route\b",
+        ],
+        "answer": (
+            "A route is the recommended next pathway after the required triage questions are answered. The chatbot should "
+            "not invent route letters or outcomes: route decisions come from the structured Golden Set branching logic and "
+            "the deterministic routing engine. If a route applies, the response should explain what to say to the applicant, "
+            "what they need to know, access steps, documents to prepare, intern next steps, and caveats where those details "
+            "exist in the source route."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_stream": {
+        "patterns": [
+            r"\bwhat(?:'s| is)? (?:a )?(?:stream|workstream|workflow)\b",
+            r"\bwhat (?:stream|workstream|workflow) am i in\b",
+            r"\bselected stream\b",
+            r"\blegal stream\b",
+            r"\btriage stream\b",
+            r"\bcriminal stream\b",
+            r"\bfamily stream\b",
+            r"\bmatrimonial stream\b",
+            r"\bcivil stream\b",
+            r"\burgent stream\b",
+            r"\bvulnerable applicant stream\b",
+            r"\bstreaming\b",
+        ],
+        "answer": (
+            "In this chatbot, a stream or workstream means the active triage workflow, not video or audio streaming. "
+            "Common streams in the approved Golden Set include first contact, criminal legal aid, family/matrimonial, "
+            "civil and guidance, urgent matters, and vulnerable-applicant handling. Once a legal stream is selected, the "
+            "deterministic routing engine follows that stream's questions and branching logic."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_process": {
+        "patterns": [
+            r"\bhow (?:does|do) (?:triage|the triage|this chatbot) work\b",
+            r"\bwhat (?:questions|information|info) (?:do you|does pbsg|will you) need\b",
+            r"\bwhy (?:are you|do you keep) asking\b",
+            r"\bwhy (?:do you|does the chatbot) ask (?:these )?questions\b",
+            r"\bwhat should i tell (?:you|the chatbot|the intern)\b",
+            r"\bwhat facts (?:are|do you) need\b",
+            r"\bstart triage\b",
+        ],
+        "answer": (
+            "The triage flow asks only the facts needed to identify the correct legal help pathway. Depending on the topic, "
+            "it may ask about the legal issue, whether there is urgency or safety risk, whether the applicant is already "
+            "represented, citizenship or residency, prior applications to agencies such as LAB or PDO, means information, "
+            "and whether staff escalation is needed. Route outcomes should come from the deterministic workflow, not an LLM guess."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "staff_escalation": {
+        "patterns": [
+            r"\bpbsg staff\b",
+            r"\bstaff escalation\b",
+            r"\bescalate\b",
+            r"\bhuman review\b",
+            r"\bstaff assessment\b",
+            r"\bcall back\b",
+            r"\bfollow up\b",
+        ],
+        "answer": (
+            "Staff escalation is used when the facts are too complex, urgent, sensitive, unclear, or outside the standard "
+            "branching path for the intern to classify safely. The intern should record the applicant's particulars and the "
+            "exact facts creating concern, then escalate to PBSG Staff according to the applicable route instructions."
+        ),
+        "source_ids": ["GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "who_can_get_help": {
+        "patterns": [
+            r"\bwho can get help\b",
+            r"\bwho is eligible\b",
+            r"\bwho qualifies\b",
+            r"\bdo i qualify\b",
+            r"\bcan i get help\b",
+            r"\bcan (?:pbsg|pro bono sg|probono sg) help\b",
+            r"\bcan (?:you|they) help me\b",
+            r"\bam i eligible\b",
+            r"\beligibility\b",
+        ],
+        "answer": (
+            "Eligibility depends on the applicant's legal issue and the pathway. The triage flow may need facts such as "
+            "the legal topic, citizenship or residency, whether another agency like LAB or PDO should be tried first, "
+            "means information, urgency, and whether staff escalation is needed."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "fees_cost": {
+        "patterns": [
+            r"\bis (?:it|pbsg|pro bono sg|probono sg) free\b",
+            r"\bfree legal\b",
+            r"\bhow much (?:does|will|is)\b",
+            r"\bfees?\b",
+            r"\bcosts?\b",
+            r"\bpay\b",
+            r"\blow-cost\b",
+            r"\bmeans test\b",
+        ],
+        "answer": (
+            "The approved triage content describes some pathways as free or low-cost, but cost and eligibility depend on "
+            "the scheme and the applicant's facts. Some routes involve means tests, merits tests, or first applying to "
+            "another agency such as LAB or PDO. The chatbot should triage the matter before confirming the relevant pathway."
+        ),
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "apply_appointment_documents": {
+        "patterns": [
+            r"\bhow (?:do|can) i apply\b",
+            r"\bapplication\b",
+            r"\bappointment\b",
+            r"\bbook\b",
+            r"\bwalk[- ]?in\b",
+            r"\bin person\b",
+            r"\bdocuments?\b",
+            r"\bwhat (?:should|do) i (?:bring|prepare)\b",
+            r"\bprepare\b",
+            r"\bform\b",
+            r"\blink\b",
+            r"\bwebsite\b",
+        ],
+        "answer": (
+            "Application steps, appointment instructions, links, and documents depend on the route. The route card should "
+            "share only the source-backed access details and preparation items for the applicable pathway. If the applicant "
+            "cannot self-apply or needs in-person help, the Golden Set includes PBSG Counter handling for some legal clinic situations."
+        ),
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "legal_advice_boundary": {
+        "patterns": [
+            r"\bcan (?:you|the intern|pbsg) give legal advice\b",
+            r"\blegal advice\b",
+            r"\badvise me\b",
+            r"\bwhat should i do\b",
+            r"\bwill i win\b",
+            r"\bchances? of (?:winning|success)\b",
+            r"\binterpret\b",
+            r"\bcontract clause\b",
+            r"\bplead guilty\b",
+            r"\bshould i sue\b",
+        ],
+        "answer": (
+            "The triage content says interns and volunteers must not give legal advice, interpret documents, predict case "
+            "outcomes, or tell the applicant what they should do legally. They may help identify the right legal help pathway, "
+            "read scheme information, take down particulars, and escalate to PBSG Staff when needed."
+        ),
+        "source_ids": ["GEN3-T13"],
+    },
+    "urgency": {
+        "patterns": [
+            r"\burgent\b",
+            r"\bemergency\b",
+            r"\bimmediate\b",
+            r"\bdeadline\b",
+            r"\bcourt date\b",
+            r"\bhearing\b",
+            r"\bwithin 14 days\b",
+            r"\bunsafe\b",
+            r"\bno shelter\b",
+            r"\bno food\b",
+            r"\bself[- ]?harm\b",
+        ],
+        "answer": (
+            "Urgent handling is triggered by facts such as immediate safety risk, basic-needs or child-welfare crisis, "
+            "or a concrete legal/procedural deadline within 14 days. If those facts are present, the urgent stream should "
+            "be handled before or alongside the ordinary legal triage path."
+        ),
+        "source_ids": ["GEN3-T06"],
+    },
+    "counter_location": {
+        "patterns": [
+            r"\bstate courts help centre\b",
+            r"\bpbsg counter\b",
+            r"\bcounter\b",
+            r"\bwhere (?:are you|is pbsg|is pro bono sg)\b",
+            r"\blocated\b",
+            r"\blocation\b",
+            r"\baddress\b",
+        ],
+        "answer": (
+            "The approved triage content mentions a PBSG Counter at State Courts Help Centre, "
+            "1 Havelock Square, #B1-18 State Courts, Singapore 059724, for applicants who need in-person help with "
+            "legal clinic applications. For current office, counter, and appointment details, check Pro Bono SG's "
+            "official channels before sharing them as final operational information."
+        ),
+        "source_ids": ["GEN3-T04"],
+    },
+    "pbsg": {
+        "patterns": [
+            r"\bwhat(?:'s| is) (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\btell me more about (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\bwho (?:is|are) (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\bpbsg\b",
+            r"\bpro bono sg\b",
+            r"\bprobono sg\b",
+            r"\bpro bono singapore\b",
+        ],
+        "answer": (
+            "Pro Bono SG is the organisation referenced in this triage content. The chatbot uses PBSG's structured "
+            "Golden Set to help identify the right legal help pathway, such as legal clinics/guidance, criminal legal "
+            "aid pathways, family-related pathways, civil guidance, urgent handling, or staff escalation where needed."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06"],
+    },
+    "location": {
+        "patterns": [
+            r"\bwhere (?:are you|is pbsg|is pro bono sg)\b",
+            r"\blocated\b",
+            r"\blocation\b",
+            r"\baddress\b",
+            r"\bcounter\b",
+        ],
+        "answer": (
+            "The approved triage content mentions a PBSG Counter at State Courts Help Centre, "
+            "1 Havelock Square, #B1-18 State Courts, Singapore 059724, for applicants who need in-person help with "
+            "legal clinic applications. For current office, counter, and appointment details, check Pro Bono SG's "
+            "official channels before sharing them as final operational information."
+        ),
+        "source_ids": ["GEN3-T04"],
+    },
+}
+PBSG_GENERAL_ENQUIRY_INTENT_PATTERN = re.compile(
+    r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
+    flags=re.IGNORECASE,
+)
+PBSG_TRIAGE_REQUEST_PATTERN = re.compile(
+    r"\b(applicant|caller|client|my|me|i|we|he|she|they|someone)\b.{0,80}"
+    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b"
+    r"|"
+    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b.{0,80}"
+    r"\b(help|assist|representation|lawyer|legal|case|matter|issue|problem)\b",
+    flags=re.IGNORECASE,
+)
 
 PBSG_CASE_SUMMARY_PENDING_MESSAGE = "Applicant summary is updating. You can continue with the next triage step now."
 PBSG_CASE_SUMMARY_SYSTEM_PROMPT = """You write concise applicant case summaries for Pro Bono SG hotline interns.
@@ -1565,14 +1852,131 @@ class ChatReadRetrieveReadApproach(Approach):
             response["context"]["thoughts"].append(extraction_thought)
         return response
 
-    def local_side_enquiry_answer(self, latest_content: str) -> str | None:
+    def general_enquiry_match(self, latest_content: str) -> tuple[str, dict[str, Any]] | None:
         normalized = latest_content.lower()
-        if not re.search(r"\b(what is|what's|what does|explain|meaning of)\b", normalized):
+        if not PBSG_GENERAL_ENQUIRY_INTENT_PATTERN.search(normalized):
             return None
-        for term, answer in PBSG_GLOSSARY_ANSWERS.items():
-            if re.search(rf"\b{re.escape(term)}\b", normalized):
-                return answer
+        for faq_key, faq in PBSG_GENERAL_ENQUIRY_FAQS.items():
+            patterns = faq.get("patterns", [])
+            if any(re.search(pattern, normalized) for pattern in patterns if isinstance(pattern, str)):
+                return faq_key, faq
         return None
+
+    def is_legal_triage_request(self, latest_content: str) -> bool:
+        return bool(PBSG_TRIAGE_REQUEST_PATTERN.search(latest_content))
+
+    def general_enquiry_answer(self, latest_content: str) -> tuple[str, list[str], str] | None:
+        match = self.general_enquiry_match(latest_content)
+        if not match:
+            return None
+        faq_key, faq = match
+        answer = faq.get("answer")
+        if not isinstance(answer, str):
+            return None
+        source_ids = [entry_id for entry_id in faq.get("source_ids", []) if entry_id in self.pbsg_golden_set_entries]
+        return answer, source_ids, faq_key
+
+    def build_general_enquiry_response(
+        self,
+        latest_content: str,
+        *,
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, source_ids, faq_key = answer_result
+
+        source_entries = {
+            entry_id: self.pbsg_golden_set_entries[entry_id]
+            for entry_id in source_ids
+            if entry_id in self.pbsg_golden_set_entries
+        }
+        data_points = self.golden_set_data_points(source_entries) if source_entries else DataPoints()
+        content = "\n\n".join(
+            [
+                "**General enquiry:**",
+                answer,
+                (
+                    "If the applicant wants to check which pathway applies to their situation, please briefly describe "
+                    "the legal issue and I will start triage."
+                ),
+            ]
+        )
+        thoughts = [
+            ThoughtStep(
+                "Deterministic PBSG general enquiry",
+                "Answered a pure organisational or scheme question from the curated local FAQ without retrieval or LLM generation.",
+                {"faq_key": faq_key, "source_ids": source_ids},
+            )
+        ]
+        return {
+            "message": {"content": content, "role": "assistant"},
+            "context": {
+                "thoughts": thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": None,
+            },
+            "session_state": session_state,
+        }
+
+    def try_initial_general_enquiry_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if len(messages) != 1:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str) or self.is_legal_triage_request(latest_content):
+            return None
+        return self.build_general_enquiry_response(latest_content, session_state=session_state)
+
+    def mixed_general_enquiry_prefix(self, messages: list[ChatCompletionMessageParam]) -> str | None:
+        if len(messages) != 1:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str) or not self.is_legal_triage_request(latest_content):
+            return None
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, _, _ = answer_result
+        return "\n\n".join(
+            [
+                "**General enquiry:**",
+                answer,
+                "**Now I will triage the legal issue:**",
+            ]
+        )
+
+    def with_general_enquiry_prefix(self, response: dict[str, Any], prefix: str | None) -> dict[str, Any]:
+        if not prefix:
+            return response
+        message = response.get("message")
+        if isinstance(message, dict) and isinstance(message.get("content"), str):
+            message["content"] = f"{prefix}\n\n{message['content']}"
+        context = response.get("context")
+        if isinstance(context, dict):
+            thoughts = context.get("thoughts")
+            if isinstance(thoughts, list):
+                thoughts.insert(
+                    0,
+                    ThoughtStep(
+                        "Deterministic PBSG mixed general enquiry",
+                        "Answered the general part from the curated local FAQ before continuing legal triage.",
+                        None,
+                    ),
+                )
+        return response
+
+    def local_side_enquiry_answer(self, latest_content: str) -> str | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, _, _ = answer_result
+        return answer
 
     def try_local_side_enquiry_response(
         self,
@@ -2122,12 +2526,16 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            return general_enquiry_response
+        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            return structured_initial_response
+            return self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            return initial_response
+            return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
@@ -2195,14 +2603,23 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            return
+        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
+            structured_initial_response = self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": structured_initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             return
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
+            initial_response = self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}

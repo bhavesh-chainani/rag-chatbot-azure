@@ -17,6 +17,7 @@ from pbsg_triage_state import (
     build_triage_state,
     candidate_golden_set_dirs,
     collapse_duplicate_route_cards,
+    convert_question_to_second_person,
     initial_extracted_fact_supported,
     label_from_branch_key,
     load_golden_set_entries,
@@ -1169,3 +1170,32 @@ def test_gen3_t13_structured_route_card_renders_overlay_script():
     assert "**Routing Recommendation:** Route B (Minor — Special Handling)" in content
     assert "I need PBSG Staff to handle this carefully" in content
     assert "Do not continue triage independently" in content
+
+
+@pytest.mark.parametrize(
+    ("entry_id", "question_id"),
+    [
+        ("GEN3-T02", "Q6"),
+        ("GEN3-T03", "Q5"),
+        ("GEN3-T04", "Q4"),
+    ],
+)
+def test_means_questions_use_lowercase_mid_sentence_clauses(entry_id: str, question_id: str):
+    entries = load_entries()
+    question_node = entries[entry_id]["branching_logic"][question_id]
+    converted = convert_question_to_second_person(question_node["question"])
+
+    assert ", Do " not in converted
+    assert ", do you " in converted
+    assert " and do you " in converted
+    assert "if you are younger than" in converted
+    assert "if you are 60 years old or older" in converted
+
+
+def test_convert_question_to_second_person_preserves_sentence_start_capitalization():
+    assert convert_question_to_second_person("Is the applicant a Singapore Citizen or PR?") == (
+        "Are you a Singapore Citizen or PR?"
+    )
+    assert convert_question_to_second_person("Has the applicant applied to the Legal Aid Bureau (LAB)?") == (
+        "Have you applied to the Legal Aid Bureau (LAB)?"
+    )

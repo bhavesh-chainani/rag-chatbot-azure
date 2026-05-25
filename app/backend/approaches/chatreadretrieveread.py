@@ -40,6 +40,7 @@ from pbsg_triage_state import (
     canonical_fact_key_for_node,
     classify_turn_interrupt,
     collapse_duplicate_route_cards,
+    convert_question_to_second_person,
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
@@ -598,24 +599,6 @@ class ChatReadRetrieveReadApproach(Approach):
         entry_id, question_id = question_matches[-1]
         return entry_id or selected_entry_id, question_id
 
-    def convert_question_to_second_person(self, question: str) -> str:
-        question = re.sub(r"^\([^)]*\)\s*", "", question).strip()
-        replacements = [
-            (r"\bIs the applicant's\b", "Is your"),
-            (r"\bDoes the applicant's\b", "Does your"),
-            (r"\bHas the applicant's\b", "Has your"),
-            (r"\bIs the applicant\b", "Are you"),
-            (r"\bHas the applicant\b", "Have you"),
-            (r"\bDoes the applicant\b", "Do you"),
-            (r"\bthe applicant's\b", "your"),
-            (r"\bthe applicant\b", "you"),
-            (r"\bapplicant's\b", "your"),
-            (r"\bapplicant\b", "you"),
-        ]
-        for pattern, replacement in replacements:
-            question = re.sub(pattern, replacement, question, flags=re.IGNORECASE)
-        return question
-
     def normalize_asked_question_text(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
         if not content:
             return content
@@ -667,7 +650,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(canonical_question, str) or not canonical_question:
             return content
 
-        normalized_question = self.convert_question_to_second_person(canonical_question)
+        normalized_question = convert_question_to_second_person(canonical_question)
         replacement = (
             f"{match.group('prefix')}{match.group('quote')}{normalized_question}"
             f"{match.group('closing_quote')}{match.group('suffix')}"
@@ -1836,10 +1819,15 @@ class ChatReadRetrieveReadApproach(Approach):
                     overlays.append(entry_id)
 
         evidence = payload.get("evidence") if isinstance(payload.get("evidence"), str) else "structured topic classifier"
+        evidence = evidence.strip()
+        if evidence.lower() == "structured topic classifier":
+            classifier_reason = evidence
+        else:
+            classifier_reason = f"structured topic classifier: {evidence}"
         resolution = PBSGTopicResolution(
             entry_id=primary_entry_id,
             confidence=float(confidence),
-            reason=f"structured topic classifier: {evidence}",
+            reason=classifier_reason,
             overlays=overlays,
             queued_topics=queued_topics,
             candidates=local_resolution.candidates,

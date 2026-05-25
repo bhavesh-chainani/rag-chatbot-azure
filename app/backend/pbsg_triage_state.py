@@ -1584,6 +1584,39 @@ def label_from_branch_key(branch_key: str) -> str:
     return suffix.replace("_", " ").capitalize()
 
 
+def _case_preserving_replacement(match: re.Match[str], replacement: str) -> str:
+    matched = match.group(0)
+    if not matched:
+        return replacement
+    if matched.islower():
+        return replacement.lower()
+    if matched.isupper():
+        return replacement.upper()
+    if matched[0].isupper():
+        return replacement[0].upper() + replacement[1:] if len(replacement) > 1 else replacement.upper()
+    return replacement
+
+
+def _apply_case_preserving_replacement(text: str, pattern: str, replacement: str) -> str:
+    return re.sub(
+        pattern,
+        lambda match: _case_preserving_replacement(match, replacement),
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _normalize_compound_question_readability(question: str) -> str:
+    question = re.sub(r"\bif younger than\b", "if you are younger than", question, flags=re.IGNORECASE)
+    question = re.sub(
+        r"\(or ≤ \$40,000 if 60 years old or older\)",
+        "(or ≤ $40,000 if you are 60 years old or older)",
+        question,
+        flags=re.IGNORECASE,
+    )
+    return question
+
+
 def convert_question_to_second_person(question: str) -> str:
     question = re.sub(r"^\([^)]*\)\s*", "", question).strip()
     replacements = [
@@ -1599,8 +1632,8 @@ def convert_question_to_second_person(question: str) -> str:
         (r"\bapplicant\b", "you"),
     ]
     for pattern, replacement in replacements:
-        question = re.sub(pattern, replacement, question, flags=re.IGNORECASE)
-    return question
+        question = _apply_case_preserving_replacement(question, pattern, replacement)
+    return _normalize_compound_question_readability(question)
 
 
 def short_question_label(entries: dict[str, dict[str, Any]], entry_id: str | None, question_id: str | None) -> str:

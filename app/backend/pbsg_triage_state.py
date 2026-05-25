@@ -2751,7 +2751,11 @@ class PBSGRoutingEngine:
         self,
         latest_user_query: str,
         resolution: PBSGTopicResolution,
+        extracted_facts: list[PBSGTriageFact] | None = None,
     ) -> PBSGDeterministicResult | None:
+        initial_facts = extract_user_fact_ledger(self.entries, [], latest_user_query)
+        if extracted_facts:
+            initial_facts = synthesize_means_status_facts(self.entries, merge_fact_ledger([*initial_facts, *extracted_facts]))
         seed_state = PBSGTriageState(
             mode="FAST_ROUTING",
             workflow_id=resolution.entry_id,
@@ -2762,7 +2766,7 @@ class PBSGRoutingEngine:
             pending_entry_id=resolution.entry_id,
             concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
             triggered_overlays=resolution.overlays,
-            fact_ledger=extract_user_fact_ledger(self.entries, [], latest_user_query),
+            fact_ledger=initial_facts,
             routing_completion_status="in_progress",
         )
         if resolution.entry_id == "GEN3-T02" and CAPITAL_OFFENCE_PATTERN.search(latest_user_query):

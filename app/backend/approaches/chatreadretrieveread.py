@@ -30,16 +30,20 @@ from pbsg_triage_state import (
     PBSGInterruption,
     PBSGQueuedTopic,
     PBSGRoutingEngine,
+    PBSGTriageFact,
     PBSGTopicResolution,
     PBSGTransition,
     PBSGTurnClassification,
     build_triage_state,
+    canonical_fact_key_for_node,
     classify_turn_interrupt,
     collapse_duplicate_route_cards,
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
+    normalize_branch_label,
     parse_transition_outcome,
+    question_text_from_entry,
     user_fact_for_question,
     resolve_expected_transition,
     resolve_initial_topic,
@@ -703,48 +707,141 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         return self.build_deterministic_chat_response(deterministic_result, session_state)
 
-    async def try_structured_llm_initial_topic_response(
+    def is_bare_initial_topic_message(self, content: str) -> bool:
+        normalized = re.sub(r"\s+", " ", content).strip().lower()
+        if not normalized:
+            return True
+        normalized_words = re.findall(r"[a-z0-9]+", normalized)
+        if len(normalized_words) <= 3 and normalized in {
+            "hi",
+            "hello",
+            "hey",
+            "thanks",
+            "thank you",
+            "ok",
+            "okay",
+            "start triage",
+            "i need help",
+            "need help",
+            "help",
+            "general enquiry",
+            "general inquiry",
+        }:
+            return True
+        return False
+
+    def initial_topic_classifier_entries(self) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for entry_id in sorted(
+            self.pbsg_golden_set_entries,
+            key=lambda candidate_id: (candidate_id != "GEN3-T01", candidate_id),
+        ):
+            entry = self.pbsg_golden_set_entries[entry_id]
+            entries.append(
+                {
+                    "id": entry_id,
+                    "topic": entry.get("topic"),
+                    "category": entry.get("category"),
+                    "user_query": entry.get("user_query"),
+                    "variations": entry.get("variations", []),
+                    "part_a_general_info": entry.get("part_a_general_info"),
+                }
+            )
+        return entries
+
+    def initial_fact_extraction_entries(self, resolution: PBSGTopicResolution) -> list[dict[str, Any]]:
+        entry_ids = [resolution.entry_id]
+        entry_ids.extend(topic.entry_id for topic in resolution.queued_topics)
+        entry_ids.extend(entry_id for entry_id in resolution.overlays if entry_id not in entry_ids)
+        extraction_entries: list[dict[str, Any]] = []
+        for entry_id in entry_ids:
+            entry = self.pbsg_golden_set_entries.get(entry_id)
+            branching_logic = entry.get("branching_logic") if isinstance(entry, dict) else None
+            if not isinstance(branching_logic, dict):
+                continue
+            questions: list[dict[str, Any]] = []
+            for question_id, question_node in branching_logic.items():
+                if not isinstance(question_id, str) or not isinstance(question_node, dict):
+                    continue
+                question = question_node.get("question")
+                if not isinstance(question, str):
+                    continue
+                questions.append(
+                    {
+                        "question_id": question_id,
+                        "question": question,
+                        "allowed_branch_keys": [key for key in question_node if key.startswith("if_")],
+                    }
+                )
+            extraction_entries.append({"id": entry_id, "topic": entry.get("topic"), "questions": questions})
+        return extraction_entries
+
+    def fact_from_structured_initial_answer(
         self,
-        messages: list[ChatCompletionMessageParam],
+        answer: dict[str, Any],
+        latest_content: str,
+    ) -> PBSGTriageFact | None:
+        entry_id = answer.get("entry_id")
+        question_id = answer.get("question_id")
+        branch_key = answer.get("branch_key")
+        confidence = answer.get("confidence")
+        evidence = answer.get("evidence")
+        if (
+            not isinstance(entry_id, str)
+            or not isinstance(question_id, str)
+            or not isinstance(branch_key, str)
+            or not isinstance(confidence, (int, float))
+            or confidence < 0.75
+        ):
+            return None
+        entry_id = entry_id.upper()
+        question_id = question_id.upper()
+        entry = self.pbsg_golden_set_entries.get(entry_id)
+        branching_logic = entry.get("branching_logic") if isinstance(entry, dict) else None
+        question_node = branching_logic.get(question_id) if isinstance(branching_logic, dict) else None
+        if not isinstance(question_node, dict) or branch_key not in question_node:
+            return None
+        question = question_text_from_entry(self.pbsg_golden_set_entries, entry_id, question_id)
+        fact_key = canonical_fact_key_for_node(entry_id, question_id, question)
+        if not fact_key:
+            return None
+        value = label_from_branch_key(branch_key)
+        workflow_scope = "workflow" if fact_key.startswith("workflow.question.") else "global"
+        return PBSGTriageFact(
+            fact_key=fact_key,
+            value=value,
+            normalized_value=normalize_branch_label(value),
+            source=f"structured_initial_extraction:{entry_id}.{question_id}",
+            scope=workflow_scope,
+            confidence=float(confidence),
+            provenance=evidence if isinstance(evidence, str) else latest_content,
+            source_type="structured_extraction",
+            branch_value=branch_key,
+            source_text=latest_content,
+            source_turn_index=0,
+            workflow_scope=workflow_scope,
+        )
+
+    async def extract_structured_initial_facts(
+        self,
+        latest_content: str,
+        resolution: PBSGTopicResolution,
         overrides: dict[str, Any],
-        session_state: Any = None,
-    ) -> dict[str, Any] | None:
-        if not self.openai_client or len(messages) != 1 or not overrides.get("pbsg_initial_topic_classifier"):
-            return None
-        latest_content = messages[-1].get("content")
-        if not isinstance(latest_content, str):
-            return None
-        local_resolution = resolve_initial_topic(self.pbsg_golden_set_entries, latest_content)
-        if not local_resolution:
-            return None
-        # The deterministic resolver owns clear cases. The LLM classifier is only a fallback
-        # for uncertain first-contact/general selections with some candidate evidence.
-        if local_resolution.entry_id != "GEN3-T01" or not local_resolution.candidates:
-            return None
-
-        candidate_ids = [candidate.entry_id for candidate in local_resolution.candidates]
-        candidate_entries = [
-            {
-                "id": entry_id,
-                "topic": self.pbsg_golden_set_entries.get(entry_id, {}).get("topic"),
-                "user_query": self.pbsg_golden_set_entries.get(entry_id, {}).get("user_query"),
-                "variations": self.pbsg_golden_set_entries.get(entry_id, {}).get("variations", [])[:5],
-            }
-            for entry_id in candidate_ids
-            if entry_id in self.pbsg_golden_set_entries
-        ]
-        if not candidate_entries:
-            return None
-
-        classifier_messages: list[ChatCompletionMessageParam] = [
+    ) -> tuple[list[PBSGTriageFact], ThoughtStep | None]:
+        extraction_entries = self.initial_fact_extraction_entries(resolution)
+        if not extraction_entries:
+            return [], None
+        messages: list[ChatCompletionMessageParam] = [
             {
                 "role": "system",
                 "content": (
-                    "Classify the initial PBSG triage topics. Return compact JSON only with keys "
-                    "primary_entry_id, queued_entry_ids, monitor_entry_ids, confidence, evidence. "
-                    "Use only provided entry ids. Choose queued_entry_ids for separate legal issues, "
-                    "monitor_entry_ids for urgency or vulnerability overlays. Do not choose route letters, "
-                    "questions, handoffs, or final recommendations."
+                    "You are the PBSG initial answer extraction support agent. Read the intern's first message and "
+                    "identify which triage questions are already answered. Return compact JSON only with key "
+                    "answered_questions, an array of objects with entry_id, question_id, branch_key, confidence, "
+                    "and evidence. Use only provided entry ids, question ids, and branch keys. Extract answers only "
+                    "when the message clearly answers that exact triage question, either explicitly or by clear "
+                    "semantic implication. Do not choose topic ids, route letters, next questions, handoffs, or final "
+                    "recommendations."
                 ),
             },
             {
@@ -752,8 +849,10 @@ class ChatReadRetrieveReadApproach(Approach):
                 "content": json.dumps(
                     {
                         "latest_user_message": latest_content,
-                        "local_candidates": [asdict(candidate) for candidate in local_resolution.candidates],
-                        "candidate_entries": candidate_entries,
+                        "active_entry_id": resolution.entry_id,
+                        "queued_entry_ids": [topic.entry_id for topic in resolution.queued_topics],
+                        "monitor_entry_ids": resolution.overlays,
+                        "entries": extraction_entries,
                     },
                     ensure_ascii=False,
                 ),
@@ -761,18 +860,114 @@ class ChatReadRetrieveReadApproach(Approach):
         ]
         topic_model = overrides.get("pbsg_initial_topic_model", self.chatgpt_model)
         topic_deployment = overrides.get("pbsg_initial_topic_deployment", self.chatgpt_deployment)
-        completion = await cast(
-            Awaitable[ChatCompletion],
-            self.create_chat_completion(
-                topic_deployment,
-                topic_model,
-                classifier_messages,
-                overrides,
-                self.get_response_token_limit(topic_model, 200),
-                should_stream=False,
-                temperature=0.0,
-            ),
+        try:
+            completion = await cast(
+                Awaitable[ChatCompletion],
+                self.create_chat_completion(
+                    topic_deployment,
+                    topic_model,
+                    messages,
+                    overrides,
+                    self.get_response_token_limit(topic_model, 300),
+                    should_stream=False,
+                    temperature=0.0,
+                ),
+            )
+        except Exception:
+            return [], None
+        try:
+            payload = json.loads(completion.choices[0].message.content or "{}")
+        except json.JSONDecodeError:
+            return [], None
+        raw_answers = payload.get("answered_questions")
+        if not isinstance(raw_answers, list):
+            return [], None
+        facts = [
+            fact
+            for raw_answer in raw_answers
+            if isinstance(raw_answer, dict)
+            for fact in [self.fact_from_structured_initial_answer(raw_answer, latest_content)]
+            if fact
+        ]
+        thought = self.format_thought_step_for_chatcompletion(
+            title="Structured PBSG initial answer extractor",
+            messages=messages,
+            overrides=overrides,
+            model=topic_model,
+            deployment=topic_deployment,
+            usage=completion.usage,
         )
+        return facts, thought
+
+    async def try_structured_llm_initial_topic_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        overrides: dict[str, Any],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if (
+            not self.openai_client
+            or len(messages) != 1
+            or overrides.get("pbsg_initial_topic_classifier") is False
+        ):
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        if self.is_bare_initial_topic_message(latest_content):
+            return None
+        local_resolution = resolve_initial_topic(self.pbsg_golden_set_entries, latest_content)
+        candidate_entries = self.initial_topic_classifier_entries()
+        valid_entry_ids = {entry["id"] for entry in candidate_entries if isinstance(entry.get("id"), str)}
+        if not local_resolution or not candidate_entries:
+            return None
+
+        classifier_messages: list[ChatCompletionMessageParam] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the initial PBSG triage topic router. Classify the intern's first message into "
+                    "Golden Set topic ids using semantic understanding, not keyword matching alone. Return compact "
+                    "JSON only with keys primary_entry_id, queued_entry_ids, monitor_entry_ids, confidence, evidence. "
+                    "Use only provided entry ids. Choose queued_entry_ids for separate legal issues that should be "
+                    "handled after the primary workflow. Choose monitor_entry_ids only for urgency, safety, or "
+                    "vulnerability overlays. Prioritize GEN3-T02 criminal before GEN3-T03 matrimonial/family, then "
+                    "GEN3-T04 civil, unless first-contact gating is the only clear fit. Interpret theft, stealing, "
+                    "shoplifting, police trouble, being caught by law, arrest, investigation, or charges as criminal "
+                    "signals. Interpret separation from a spouse, divorce, custody, maintenance, family court, or "
+                    "family violence as matrimonial/family signals. Do not choose route letters, questions, handoffs, "
+                    "eligibility outcomes, or final recommendations."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "latest_user_message": latest_content,
+                        "deterministic_resolution_hint": asdict(local_resolution),
+                        "golden_set_entries": candidate_entries,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        topic_model = overrides.get("pbsg_initial_topic_model", self.chatgpt_model)
+        topic_deployment = overrides.get("pbsg_initial_topic_deployment", self.chatgpt_deployment)
+        try:
+            completion = await cast(
+                Awaitable[ChatCompletion],
+                self.create_chat_completion(
+                    topic_deployment,
+                    topic_model,
+                    classifier_messages,
+                    overrides,
+                    self.get_response_token_limit(topic_model, 200),
+                    should_stream=False,
+                    temperature=0.0,
+                ),
+            )
+        except Exception:
+            return None
         try:
             payload = json.loads(completion.choices[0].message.content or "{}")
         except json.JSONDecodeError:
@@ -782,7 +977,7 @@ class ChatReadRetrieveReadApproach(Approach):
         confidence = payload.get("confidence")
         if (
             not isinstance(primary_entry_id, str)
-            or primary_entry_id not in candidate_ids
+            or primary_entry_id not in valid_entry_ids
             or not isinstance(confidence, (int, float))
             or confidence < 0.7
         ):
@@ -792,7 +987,7 @@ class ChatReadRetrieveReadApproach(Approach):
         raw_queued = payload.get("queued_entry_ids")
         if isinstance(raw_queued, list):
             for entry_id in raw_queued:
-                if isinstance(entry_id, str) and entry_id in candidate_ids and entry_id != primary_entry_id:
+                if isinstance(entry_id, str) and entry_id in valid_entry_ids and entry_id != primary_entry_id:
                     queued_topics.append(
                         PBSGQueuedTopic(entry_id=entry_id, evidence="structured topic classifier", confidence=float(confidence))
                     )
@@ -817,7 +1012,12 @@ class ChatReadRetrieveReadApproach(Approach):
             queued_topics=queued_topics,
             candidates=local_resolution.candidates,
         )
-        deterministic_result = self.pbsg_routing_engine.execute_initial_resolution(latest_content, resolution)
+        extracted_facts, extraction_thought = await self.extract_structured_initial_facts(
+            latest_content, resolution, overrides
+        )
+        deterministic_result = self.pbsg_routing_engine.execute_initial_resolution(
+            latest_content, resolution, extracted_facts=extracted_facts
+        )
         if not deterministic_result:
             return None
         response = self.build_deterministic_chat_response(deterministic_result, session_state)
@@ -831,6 +1031,8 @@ class ChatReadRetrieveReadApproach(Approach):
                 usage=completion.usage,
             )
         )
+        if extraction_thought:
+            response["context"]["thoughts"].append(extraction_thought)
         return response
 
     def local_side_enquiry_answer(self, latest_content: str) -> str | None:

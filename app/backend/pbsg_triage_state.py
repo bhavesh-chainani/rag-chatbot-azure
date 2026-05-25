@@ -2814,12 +2814,17 @@ class PBSGRoutingEngine:
         messages: list[ChatCompletionMessageParam],
         latest_user_query: str,
         branch_key_override: str | None = None,
+        extracted_facts: list[PBSGTriageFact] | None = None,
     ) -> PBSGDeterministicResult | None:
         if not self.entries:
             return None
         state = build_triage_state(messages, self.entries, latest_user_query)
         if state.mode != "FAST_ROUTING":
             return None
+        if extracted_facts:
+            state.fact_ledger = synthesize_means_status_facts(
+                self.entries, merge_fact_ledger([*state.fact_ledger, *extracted_facts])
+            )
         if state.pending_entry_id == "GEN3-T13":
             transition = resolve_gen3_t13_cue_transition(latest_user_query, state.current_question_id)
             if transition:

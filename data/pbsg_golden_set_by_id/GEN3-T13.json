@@ -149,6 +149,7 @@
     ],
     "GEN3-T06": [
       "After urgent safety/basic-needs/deadline triage, also route to GEN3-T13 if the applicant's ability to understand, communicate, decide, travel, or act independently remains impaired.",
+      "Do not use GEN3-T13 to repeat GEN3-T06 safety or basic-needs questions that have already been answered; record the known fact and either resume the legal parent workflow or escalate to PBSG Staff if vulnerability remains unclear.",
       "Do not route to GEN3-T13 solely because an urgent legal deadline exists."
     ]
   },

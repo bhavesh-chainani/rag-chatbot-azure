@@ -1138,7 +1138,76 @@ async def test_run_without_streaming_initial_topic_llm_handles_ambiguous_crimina
     assert "Next question: Q1 from GEN3-T02" in content
     assert triage_state["active_workflow"] == "GEN3-T02"
     assert triage_state["queued_workflows"] == ["GEN3-T03"]
-    assert result["context"]["thoughts"][-1].title == "Structured PBSG initial topic classifier"
+    assert any(thought.title == "Structured PBSG initial topic classifier" for thought in result["context"]["thoughts"])
+
+
+@pytest.mark.asyncio
+async def test_initial_topic_llm_prompt_covers_vape_trial_and_queues_matrimonial(chat_approach, monkeypatch):
+    calls: list[list[dict[str, str]]] = []
+
+    async def fake_completion(*args, **kwargs):
+        messages = args[2] if len(args) > 2 else kwargs["messages"]
+        calls.append(messages)
+        payload = (
+            {
+                "primary_entry_id": "GEN3-T02",
+                "queued_entry_ids": ["GEN3-T03"],
+                "monitor_entry_ids": ["GEN3-T06"],
+                "confidence": 0.93,
+                "evidence": "vape trial is criminal/process; husband beating and leaving relationship is matrimonial",
+            }
+            if len(calls) == 1
+            else {"answered_questions": []}
+        )
+        return ChatCompletion.model_validate(
+            {
+                "id": "classification",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(payload)},
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_completion)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "applicant mentioned that husband is beating her up, she wants to leave him. "
+                    "she also mentioned she got caught taking a vape and will need to go to trial"
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    prompt = calls[0][0]["content"]
+
+    assert "vaping or e-vaporiser offences" in prompt
+    assert "trial" in prompt
+    assert "choose GEN3-T02 as primary and queue GEN3-T03" in prompt
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "Topics identified:" in content
+    assert "GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+    assert result["context"]["pbsg_triage_state"]["queued_workflows"] == ["GEN3-T03"]
 
 
 @pytest.mark.asyncio
@@ -1283,6 +1352,156 @@ async def test_run_without_streaming_falls_back_when_initial_topic_llm_fails(cha
 
     assert "**Selected Entry:** GEN3-T02" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+
+
+def gen3_t03_nested_urgent_q2_messages(user_content):
+    return [
+        {"role": "user", "content": "caller says her husband is beating her up and she wants to end the relationship"},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q1: Yes [GEN3-T03.json]
+
+**Active stream:** GEN3-T06 urgent concurrent path
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q2: "Is there an immediate threat to your life, physical safety, or risk of self-harm right now?"**
+
+Triage progress:
+
+- Last answered: GEN3-T03 Q1 = Yes [GEN3-T03.json]
+- Now checking: GEN3-T06 Q2
+- After this urgent path: resume GEN3-T03 Q2""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_support_skips_irrelevant_nested_urgent_questions_and_resumes_parent(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("context support should keep the turn deterministic")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q3",
+                    "branch_key": "if_no",
+                    "confidence": 0.88,
+                    "evidence": "No basic-needs or child-welfare crisis was mentioned in the original or latest answer.",
+                },
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q4",
+                    "branch_key": "if_no",
+                    "confidence": 0.88,
+                    "evidence": "No legal or procedural deadline within 14 days was mentioned.",
+                },
+            ],
+            "question_relevance": {
+                "entry_id": "GEN3-T06",
+                "question_id": "Q3",
+                "disposition": "not_relevant",
+                "confidence": 0.88,
+                "evidence": "The urgent context is family violence; no basic-needs facts are present.",
+            },
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("No"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T06" in content
+    assert "Route D" in content
+    assert "Next question: Q2 from GEN3-T03" in content
+    assert "basic needs or child welfare" not in content
+    assert triage_state["active_workflow"] == "GEN3-T03"
+    assert triage_state["pending_entry_id"] == "GEN3-T03"
+    assert triage_state["current_question_id"] == "Q2"
+    assert result["context"]["thoughts"][-1].title == "Structured PBSG context support"
+
+
+@pytest.mark.asyncio
+async def test_context_support_can_rephrase_without_changing_question_or_branches(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("contextual rephrase should not call retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [],
+            "question_relevance": {
+                "entry_id": "GEN3-T06",
+                "question_id": "Q2",
+                "disposition": "needs_rephrasing",
+                "confidence": 0.9,
+                "evidence": "The canonical safety question is needed but should be framed for family violence.",
+                "contextual_question_script": "Are you safe right now, or is your husband currently threatening or hurting you?",
+            },
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("I do not understand the question."),
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T06" in content
+    assert "same Golden Set question" in content
+    assert 'Q2: "Are you safe right now, or is your husband currently threatening or hurting you?"' in content
+    assert result["context"]["pbsg_question_relevance"]["disposition"] == "needs_rephrasing"
+
+
+@pytest.mark.asyncio
+async def test_context_support_invalid_output_falls_back_to_deterministic_urgent_question(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid context support should fall back before retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q3",
+                    "branch_key": "if_not_a_real_branch",
+                    "confidence": 0.99,
+                    "evidence": "invalid",
+                }
+            ],
+            "question_relevance": {"disposition": "needed", "confidence": 0.8},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("No"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Next question: Q3 from GEN3-T06" in result["message"]["content"]
+    assert "basic needs or child welfare" in result["message"]["content"]
 
 
 @pytest.mark.asyncio

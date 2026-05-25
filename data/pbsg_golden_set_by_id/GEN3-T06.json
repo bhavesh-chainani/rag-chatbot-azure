@@ -208,6 +208,7 @@
     ],
     "GEN3-T03": [
       "Escalate to GEN3-T06 Route A where there is current family violence, threats, stalking, coercive control, unsafe housing, self-harm, or immediate risk to a child.",
+      "When GEN3-T06 is nested under GEN3-T03 because family violence was already identified, keep the urgent questions tied to immediate safety, safe shelter/basic needs, child safety, or concrete family-court/PPO deadlines; do not broaden into generic urgency questions without supporting facts.",
       "Escalate to GEN3-T06 Route C where there is a PPO/injunction/custody/maintenance/divorce deadline within 14 days without safety facts.",
       "Do not treat every family court mention as an emergency."
     ],

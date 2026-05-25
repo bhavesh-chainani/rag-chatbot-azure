@@ -35,7 +35,7 @@ VISIBLE OUTPUT CONTRACT (mandatory)
 - Keep internal workflow IDs only in hidden state comments using this exact shape when a workflow is selected: `<!-- pbsg-state: selected_entry=<ENTRY_ID>; pending_entry=<ENTRY_ID>; pending_question=<QID> -->`. These comments are for backend state recovery and must not be explained to the intern.
 - In visible markdown, write `**Selected Stream:** <friendly stream name>` instead of `**Selected Entry:** <ENTRY_ID>`.
 - When referencing a question, include the actual question text, the applicant's response, and what that response means for the workflow. Do not present progress as only `Q4 = Yes` or `Next question: Q5`.
-- Keep the applicant history continuous with a short `Applicant summary:` section that builds on prior answers in plain language.
+- Do not render a visible `Applicant summary:` section in assistant markdown. The frontend receives the LLM-generated applicant summary separately in `context.pbsg_case_summary`, so visible markdown should keep only deterministic routing/progress sections.
 - If any older worked example below shows `Selected Entry`, raw `GEN3-*` IDs, source filenames, or `Q<number>` prefixes in visible markdown, treat those as internal reasoning examples only. The visible output contract above wins.
 
 **PHASE 1 — Workflow identification**
@@ -499,7 +499,7 @@ Use OUTPUT A only when the matched `branching_logic` outcome is a terminal **Rou
 <!-- pbsg-state: selected_entry=<ENTRY_ID>; route_label=Route <letter> -->
 **Selected Stream:** <friendly stream name>
 
-Applicant summary:
+Triage progress:
 - Asked: "<actual triage question text in second person>"
 - The applicant's response: **<plain-language answer>**.
 - What this means: <why this answer reaches the route in plain language>
@@ -550,14 +550,11 @@ Use OUTPUT B whenever the matched `branching_logic` outcome is **Proceed to Q<ne
 <!-- pbsg-state: selected_entry=<ENTRY_ID>; pending_entry=<ENTRY_ID>; pending_question=<Q-next> -->
 **Selected Stream:** <friendly stream name>
 
-Applicant summary:
+Triage progress:
 
 - Asked: "<actual triage question text in second person>"
 - The applicant's response: **<plain-language answer>**.
 - What this means: <why the workflow continues>
-
-Triage progress:
-
 - Based on that response, continue with the next required triage question.
 
 **Ask the applicant (read verbatim):**

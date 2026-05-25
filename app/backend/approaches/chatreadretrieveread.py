@@ -1,5 +1,7 @@
+import hashlib
 import json
 import re
+import time
 from collections.abc import AsyncGenerator, Awaitable
 from dataclasses import asdict
 from typing import Any, Optional, cast
@@ -100,6 +102,21 @@ PBSG_GLOSSARY_ANSWERS = {
     "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
+
+PBSG_CASE_SUMMARY_PENDING_MESSAGE = "Applicant summary is updating. You can continue with the next triage step now."
+PBSG_CASE_SUMMARY_SYSTEM_PROMPT = """You write concise applicant case summaries for Pro Bono SG hotline interns.
+
+Rules:
+- Summarize only applicant facts listed in the provided JSON evidence.
+- Do not decide eligibility, routing, route letters, or the next question.
+- Do not mention internal workflow ids, GEN3 codes, JSON filenames, hidden state, or Q numbers.
+- Do not infer residency, nationality, urgency, safety, income, representation, or eligibility. Mention those only when the evidence explicitly contains them.
+- If a fact is not in the evidence, treat it as unknown. Do not fill gaps from the current workflow, the next question, or common assumptions.
+- Keep it readable in under 15 seconds.
+- Use 2-4 short bullets, each starting with "- ".
+- If a fact is unknown, say it has not been provided yet instead of guessing.
+"""
+INTERNAL_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b|\bSelected Entry\b|\bQ\d+[A-Z]?\b", flags=re.IGNORECASE)
 
 PBSG_QUICK_REPLY_LABELS = {
     ("GEN3-T01", "Q2"): {
@@ -447,7 +464,7 @@ class ChatReadRetrieveReadApproach(Approach):
         lines.extend(
             [
                 "",
-                "Applicant summary:",
+                "Latest triage update:",
                 "",
                 f"- The applicant's response: **{self.label_from_branch_key(transition.branch_key)}**.",
                 "- What this means: we should continue with the next required triage question.",
@@ -455,6 +472,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 "Triage progress:",
                 "",
                 f"- Continue in the {stream_display_name(entries, transition.target_entry_id)}.",
+                "- Next step: ask the required follow-up question below.",
             ]
         )
         lines.extend(next_question_lines(entries, transition.target_entry_id, transition.target_question_id, question))
@@ -554,6 +572,165 @@ class ChatReadRetrieveReadApproach(Approach):
         ]
         self.ensure_golden_set_source_entries(data_points, entry_ids)
 
+    def pbsg_case_summary_hash(self, triage_state: Any) -> str:
+        payload = {
+            "active_workflow": getattr(triage_state, "active_workflow", None),
+            "pending_entry_id": getattr(triage_state, "pending_entry_id", None),
+            "current_question_id": getattr(triage_state, "current_question_id", None),
+            "completed_workflows": getattr(triage_state, "completed_workflows", []),
+            "queued_workflows": getattr(triage_state, "queued_workflows", []),
+            "fact_ledger": [
+                {
+                    "fact_key": getattr(fact, "fact_key", None),
+                    "value": getattr(fact, "value", None),
+                    "normalized_value": getattr(fact, "normalized_value", None),
+                    "source": getattr(fact, "source", None),
+                    "status": getattr(fact, "status", None),
+                }
+                for fact in getattr(triage_state, "fact_ledger", [])
+            ],
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+    def pending_pbsg_case_summary(self, triage_state: Any) -> dict[str, Any]:
+        return {
+            "text": "",
+            "status": "pending",
+            "source_turn_hash": self.pbsg_case_summary_hash(triage_state),
+            "updated_at": None,
+        }
+
+    def response_context_with_case_summary(self, context: dict[str, Any], triage_state: Any) -> dict[str, Any]:
+        context["pbsg_case_summary"] = self.pending_pbsg_case_summary(triage_state)
+        return context
+
+    def sanitize_pbsg_case_summary(self, summary: str) -> str:
+        lines = [line.strip() for line in summary.splitlines() if line.strip()]
+        cleaned_lines: list[str] = []
+        for line in lines:
+            line = re.sub(r"^\d+[.)]\s*", "- ", line)
+            if not line.startswith("- "):
+                line = f"- {line.lstrip('- ').strip()}"
+            line = INTERNAL_ID_PATTERN.sub("", line)
+            line = re.sub(r"\s+", " ", line).strip()
+            if line and line != "-":
+                cleaned_lines.append(line)
+        return "\n".join(cleaned_lines[:4])
+
+    def reliable_case_summary_facts(self, triage_state: Any) -> list[PBSGTriageFact]:
+        reliable_source_types = {"routing_answer", "deterministic_transition", "user_message", "structured_extraction"}
+        high_risk_fact_keys = {
+            "applicant.residency_status",
+            "matter.urgency_or_safety",
+            "applicant.representation_status",
+            "applicant.means_status",
+            "applicant.lab_application_status",
+            "applicant.pdo_application_status",
+        }
+        pending_source = (
+            f"{triage_state.pending_entry_id}.{triage_state.current_question_id}"
+            if getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None)
+            else None
+        )
+        facts: list[PBSGTriageFact] = []
+        for fact in getattr(triage_state, "fact_ledger", [])[-10:]:
+            if getattr(fact, "status", None) != "active":
+                continue
+            if getattr(fact, "source_type", None) not in reliable_source_types:
+                continue
+            if pending_source and getattr(fact, "source", None) == pending_source:
+                continue
+            if fact.fact_key in high_risk_fact_keys and fact.source_type == "user_message":
+                source_text = (fact.source_text or "").lower()
+                if fact.fact_key == "applicant.residency_status" and not re.search(
+                    r"\b(singaporean|singapore citizen|sg citizen|sgc|permanent resident|\bpr\b|foreigner|work permit|employment pass|s pass|dependent pass|not singapore citizen|not a citizen|not pr|not a pr)\b",
+                    source_text,
+                ):
+                    continue
+            facts.append(fact)
+        return facts
+
+    def case_summary_fact_payload(self, triage_state: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        for fact in self.reliable_case_summary_facts(triage_state):
+            entry_id = None
+            question_id = None
+            if "." in fact.source and fact.source.split(".", 1)[0] in self.pbsg_golden_set_entries:
+                entry_id, question_id = fact.source.split(".", 1)
+            question = question_text_from_entry(self.pbsg_golden_set_entries, entry_id, question_id)
+            payload.append(
+                {
+                    "fact_key": fact.fact_key,
+                    "value": fact.value,
+                    "source_type": fact.source_type,
+                    "source": fact.source,
+                    "question": question,
+                    "provenance": fact.source_text or fact.provenance,
+                }
+            )
+        return payload
+
+    def compact_case_summary_facts(self, triage_state: Any) -> str:
+        facts = self.case_summary_fact_payload(triage_state)
+        if not facts:
+            return "[]"
+        return json.dumps(facts, ensure_ascii=False, indent=2)
+
+    async def generate_pbsg_case_summary(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        context = context or {}
+        triage_state = build_triage_state(messages, self.pbsg_golden_set_entries, "")
+        source_turn_hash = self.pbsg_case_summary_hash(triage_state)
+        fact_payload = self.case_summary_fact_payload(triage_state)
+        if not self.openai_client:
+            return {
+                "text": "",
+                "status": "unavailable",
+                "source_turn_hash": source_turn_hash,
+                "updated_at": None,
+                "source_fact_count": len(fact_payload),
+                "source_fact_keys": [fact["fact_key"] for fact in fact_payload],
+            }
+
+        prompt = "\n".join(
+            [
+                "Current stream: " + stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow),
+                "Queued streams: "
+                + ", ".join(stream_display_name(self.pbsg_golden_set_entries, workflow) for workflow in triage_state.queued_workflows),
+                "Completed streams: "
+                + ", ".join(stream_display_name(self.pbsg_golden_set_entries, workflow) for workflow in triage_state.completed_workflows),
+                "",
+                "Evidence JSON (use only these facts):",
+                json.dumps(fact_payload, ensure_ascii=False, indent=2) if fact_payload else "[]",
+            ]
+        )
+        response = await cast(
+            Awaitable[ChatCompletion],
+            self.create_chat_completion(
+                self.chatgpt_deployment,
+                self.chatgpt_model,
+                [
+                    {"role": "system", "content": PBSG_CASE_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                overrides={},
+                response_token_limit=220,
+                temperature=0.1,
+            ),
+        )
+        text = self.sanitize_pbsg_case_summary(response.choices[0].message.content or "")
+        return {
+            "text": text,
+            "status": "ready" if text else "unavailable",
+            "source_turn_hash": source_turn_hash,
+            "updated_at": int(time.time()),
+            "source_fact_count": len(fact_payload),
+            "source_fact_keys": [fact["fact_key"] for fact in fact_payload],
+        }
+
     def build_deterministic_chat_response(
         self,
         deterministic_result: PBSGDeterministicResult,
@@ -595,15 +772,18 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {
-                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {
+                        key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+                    },
+                    "followup_questions": extra_info.followup_questions,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(deterministic_result.state),
                 },
-                "followup_questions": extra_info.followup_questions,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(deterministic_result.state),
-            },
+                deterministic_result.state,
+            ),
             "session_state": session_state,
         }
 
@@ -1227,14 +1407,17 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-                "pbsg_question_relevance": relevance,
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                    "pbsg_question_relevance": relevance,
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1482,13 +1665,16 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1897,13 +2083,16 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1985,13 +2174,13 @@ class ChatReadRetrieveReadApproach(Approach):
             "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
         }
         if parse_pbsg_state_marker(content):
-            response_context["pbsg_triage_state"] = asdict(
-                build_triage_state(
-                    [*messages, {"role": "assistant", "content": content}],
-                    self.pbsg_golden_set_entries,
-                    "",
-                )
+            triage_state = build_triage_state(
+                [*messages, {"role": "assistant", "content": content}],
+                self.pbsg_golden_set_entries,
+                "",
             )
+            response_context["pbsg_triage_state"] = asdict(triage_state)
+            self.response_context_with_case_summary(response_context, triage_state)
         chat_app_response = {
             "message": {"content": content, "role": role},
             "context": response_context,

@@ -85,6 +85,16 @@ export type ResponseContext = {
     thoughts: Thoughts[];
     answer?: string;
     pbsg_triage_state?: Record<string, unknown>;
+    pbsg_case_summary?: PBSGCaseSummary | null;
+};
+
+export type PBSGCaseSummary = {
+    text: string;
+    status: "pending" | "ready" | "unavailable" | "error";
+    source_turn_hash?: string | null;
+    updated_at?: number | null;
+    source_fact_count?: number;
+    source_fact_keys?: string[];
 };
 
 export type QuickReplyOption = {
@@ -123,6 +133,10 @@ export type ChatAppRequest = {
     messages: ResponseMessage[];
     context?: ChatAppRequestContext;
     session_state: any;
+};
+
+export type PBSGCaseSummaryResponse = {
+    pbsg_case_summary: PBSGCaseSummary;
 };
 
 export type Config = {

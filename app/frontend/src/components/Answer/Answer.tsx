@@ -314,6 +314,7 @@ export const Answer = ({
 }: Props) => {
     const followupQuestions = answer.context?.followup_questions;
     const quickReply = answer.context?.quick_reply;
+    const caseSummary = answer.context?.pbsg_case_summary;
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
@@ -380,6 +381,26 @@ export const Answer = ({
             </div>
 
             <div style={{ flexGrow: 1 }}>
+                {caseSummary && (
+                    <section className={styles.caseSummary} aria-label="Applicant summary">
+                        <div className={styles.caseSummaryHeader}>
+                            Applicant summary
+                            {caseSummary.status === "pending" && <span className={styles.caseSummaryStatus}>Updating summary...</span>}
+                        </div>
+                        {caseSummary.text ? (
+                            <ReactMarkdown
+                                children={caseSummary.text}
+                                components={answerMarkdownComponents}
+                                rehypePlugins={[rehypeRaw]}
+                                remarkPlugins={[remarkGfm]}
+                            />
+                        ) : (
+                            <p className={styles.caseSummaryPlaceholder}>
+                                The applicant summary is being prepared. You can continue with the next triage step below.
+                            </p>
+                        )}
+                    </section>
+                )}
                 <div className={styles.answerText}>
                     <ReactMarkdown
                         children={markdownForDisplay}

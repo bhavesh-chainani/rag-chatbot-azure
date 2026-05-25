@@ -1589,12 +1589,36 @@ def describe_answered_transition(entries: dict[str, dict[str, Any]], transition:
     if isinstance(question_node, dict) and isinstance(question_node.get("question"), str):
         question = convert_question_to_second_person(question_node["question"])
     answer = label_from_branch_key(transition.branch_key)
-    lines = ["Applicant summary:"]
+    lines = ["Latest triage update:"]
     if question:
         lines.append(f'- Asked: "{question}"')
     lines.append(f"- The applicant's response: **{answer}**.")
     lines.append(f"- What this means: {describe_transition_meaning(entries, transition)}")
     return lines
+
+
+def next_question_intro(label: str) -> str:
+    lowered = label.lower()
+    question_starters = {
+        "is ",
+        "are ",
+        "was ",
+        "were ",
+        "do ",
+        "does ",
+        "did ",
+        "has ",
+        "have ",
+        "had ",
+        "can ",
+        "could ",
+        "will ",
+        "would ",
+        "should ",
+    }
+    if any(lowered.startswith(starter) for starter in question_starters):
+        return "Next, ask the required follow-up question:"
+    return f"Next, ask about {label}:"
 
 
 def selected_stream_lines(
@@ -1625,7 +1649,7 @@ def next_question_lines(
         "",
         f'<!-- > **{entry_id} {question_id}: "{convert_question_to_second_person(question)}"** -->',
         f'<!-- > **{question_id}: "{convert_question_to_second_person(question)}"** -->',
-        f"Next, ask about {label}:",
+        next_question_intro(label),
         "",
         "**Ask the applicant (read verbatim):**",
         "",
@@ -3192,7 +3216,7 @@ class PBSGRoutingEngine:
             lines.extend(
                 [
                     "",
-                    "Applicant summary:",
+                    "Triage progress:",
                     "",
                     *(
                         [f"- We are now continuing with the {stream_display_name(self.entries, workflow_id)}."]
@@ -3404,7 +3428,7 @@ class PBSGRoutingEngine:
         lines.extend(
             [
                 "",
-                "Applicant summary:",
+                    "Triage progress:",
                 "",
                 f"- I matched the situation to the {stream_display_name(self.entries, resolution.entry_id)}.",
                 f"- Why this stream fits: {resolution.reason}",
@@ -3491,8 +3515,8 @@ class PBSGRoutingEngine:
                 "Triage progress:",
                 "",
                 f"<!-- {transition.question_id} = {label_from_branch_key(transition.branch_key)} -->",
-                f"- The applicant answered **{label_from_branch_key(transition.branch_key)}** to the urgent trigger question.",
-                f"- Now checking: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
+                "- Urgency needs to be checked before returning to the main stream.",
+                f"- Current step: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
                 f"- After this urgent path, resume the {resume_label}.",
                 "",
                 "Type the applicant's answer here and I will determine the next question or route.",
@@ -3537,8 +3561,8 @@ class PBSGRoutingEngine:
                 "",
                 f"<!-- Handoff: {transition.entry_id} → {transition.target_entry_id} -->",
                 f"<!-- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} -->",
-                f"- The applicant answered **{label_from_branch_key(transition.branch_key)}**.",
-                f"- Based on that response, we continue with the {stream_display_name(self.entries, transition.target_entry_id)}.",
+                f"- Continue in the {stream_display_name(self.entries, transition.target_entry_id)}.",
+                f"- Next step: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
             ]
         )
         lines.extend(next_question_lines(self.entries, transition.target_entry_id, transition.target_question_id, question))
@@ -3558,8 +3582,8 @@ class PBSGRoutingEngine:
                 "",
                 f"<!-- Handoff: {transition.entry_id} → {transition.target_entry_id} -->",
                 f"<!-- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} -->",
-                f"- The applicant answered **{label_from_branch_key(transition.branch_key)}**.",
-                f"- Based on that response, continue in the {stream_display_name(self.entries, transition.target_entry_id)}.",
+                f"- Move into the {stream_display_name(self.entries, transition.target_entry_id)}.",
+                "- Next step: begin that stream's first required question.",
             ]
         )
         lines.extend(next_question_lines(self.entries, transition.target_entry_id, "Q1", question))
@@ -3578,8 +3602,7 @@ class PBSGRoutingEngine:
                 "Triage progress:",
                 "",
                 f"<!-- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} -->",
-                f"- The applicant answered **{label_from_branch_key(transition.branch_key)}**.",
-                f"- Based on that response, the workflow has enough information for a recommendation.",
+                "- The workflow has enough information for a recommendation.",
                 "- Next step: final routing recommendation",
                 "",
                 f"**Routing Recommendation:** {structured_route.route_label}"
@@ -3618,7 +3641,7 @@ class PBSGRoutingEngine:
                 "",
                 "Triage progress:",
                 "",
-                f"- The applicant answered **{label_from_branch_key(transition.branch_key)}**, but we need a clearer answer before moving on.",
+                "- The workflow needs one clarification before it can safely continue.",
             ]
         )
         lines.extend(next_question_lines(self.entries, transition.entry_id, transition.question_id, clarification))

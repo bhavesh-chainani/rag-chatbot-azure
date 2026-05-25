@@ -1261,7 +1261,8 @@ async def test_run_without_streaming_initial_topic_llm_carries_family_violence_i
     triage_state = result["context"]["pbsg_triage_state"]
 
     assert "**Selected Entry:** GEN3-T03" in content
-    assert "Applicant summary:" in visible_text(content)
+    assert "Latest triage update:" in visible_text(content)
+    assert "Applicant summary:" not in visible_text(content)
     assert "The applicant's response: **Yes**" in visible_text(content)
     assert "**Active stream:** GEN3-T06 urgent concurrent path" in content
     assert "GEN3-T06 Q1" in content
@@ -1542,7 +1543,7 @@ async def test_run_without_streaming_initial_multi_topic_queues_secondary_topic(
     assert "Family and Matrimonial Stream" in visible_text(content)
     assert "Urgent Support Stream noted as a monitor, not the active workflow" in visible_text(content)
     assert "topic signals were weak or ambiguous" not in content
-    assert "Next, ask about" in visible_text(content)
+    assert "Next, ask the required follow-up question:" in visible_text(content)
     assert triage_state["active_workflow"] == "GEN3-T02"
     assert triage_state["queued_workflows"] == ["GEN3-T03"]
     assert "GEN3-T06" in triage_state["triggered_overlays"]
@@ -1663,11 +1664,142 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
     assert result["session_state"] == "session-1"
     assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(result["message"]["content"])
     assert "GEN3-" not in visible_text(result["message"]["content"])
-    assert "Next, ask about" in visible_text(result["message"]["content"])
+    assert "Next, ask the required follow-up question:" in visible_text(result["message"]["content"])
     assert "court date/deadline within 14 days" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
+    assert result["context"]["pbsg_case_summary"]["status"] == "pending"
+    assert result["context"]["pbsg_case_summary"]["text"] == ""
     assert result["context"]["quick_reply"]["entryId"] == "GEN3-T02"
     assert result["context"]["quick_reply"]["questionId"] == "Q2"
+
+
+@pytest.mark.asyncio
+async def test_pbsg_case_summary_generation_sanitizes_internal_ids(chat_approach, monkeypatch):
+    async def fake_summary_completion(*args, **kwargs):
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- GEN3-T02 Q2: Applicant has a court deadline.\n- Selected Entry should not show.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q2 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Is there a court date/deadline within 14 days?"**""",
+        },
+        {"role": "user", "content": "Court date is next week."},
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "GEN3-" not in summary["text"]
+    assert "Selected Entry" not in summary["text"]
+    assert "Q2" not in summary["text"]
+    assert "Applicant has a court deadline" in summary["text"]
+
+
+@pytest.mark.asyncio
+async def test_pbsg_case_summary_does_not_pair_latest_answer_with_new_next_question(chat_approach, monkeypatch):
+    captured_prompt: dict[str, str] = {}
+
+    async def fake_summary_completion(*args, **kwargs):
+        completion_messages = kwargs.get("messages") or args[2]
+        captured_prompt["content"] = completion_messages[-1]["content"]
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- Applicant has a criminal matter and says they were charged in court.\n"
+                            "- The offence is not a capital offence.\n"
+                            "- No urgency or safety concern has been indicated.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {"role": "user", "content": "Applicant has a criminal matter and says they were charged in court."},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q1 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "No"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q2 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Is the offence a capital offence (punishable with death)?"
+- The applicant's response: **No**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Is there a court date/deadline within 14 days?"**""",
+        },
+        {"role": "user", "content": "No"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q4 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Have you been charged in court?"
+- The applicant's response: **Yes**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Are you a Singapore Citizen or PR?"**""",
+        },
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "applicant.residency_status" not in captured_prompt["content"]
+    assert "foreigner" not in captured_prompt["content"].lower()
+    assert "applicant.residency_status" not in summary["source_fact_keys"]
+    assert "foreigner" not in summary["text"].lower()
+    assert "residency status is noted as no" not in summary["text"].lower()
 
 
 @pytest.mark.asyncio

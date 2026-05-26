@@ -1,23 +1,31 @@
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import pbsg_triage_state
 from pbsg_triage_state import (
     GOLDEN_SET_RELATIVE_DIR,
     PBSGRoutingEngine,
+    PBSGTriageFact,
     PBSGTriageState,
     PBSGWorkflowGraph,
     branch_key_for_answer,
+    build_triage_state,
     candidate_golden_set_dirs,
     collapse_duplicate_route_cards,
+    convert_question_to_second_person,
+    initial_extracted_fact_supported,
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
+    deadline_branch_key_from_text,
     resolve_gen3_t13_cue_transition,
     resolve_initial_topic,
+    resolve_initial_topics,
 )
 
 
@@ -74,6 +82,23 @@ def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_
     assert resolution is not None
     assert resolution.entry_id == expected_entry_id
     assert resolution.confidence >= 0.6
+
+
+def test_initial_topic_resolver_queues_multiple_specialty_topics_and_deadline_monitor(monkeypatch):
+    entries = load_entries()
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+
+    resolution = resolve_initial_topic(
+        entries,
+        "Applicant says she's a criminal. She also wants to divorce her husband. "
+        "She's a Singapore Citizen and will be charged on 28th May 2026.",
+    )
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T02"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T03"]
+    assert "GEN3-T06" in resolution.overlays
+    assert "weak or ambiguous" not in resolution.reason
 
 
 def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():
@@ -360,8 +385,8 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
-    assert "**Ask the applicant (read verbatim):**" not in content
+    assert "Which urgent concern is actually present" in content
+    assert "**Ask the applicant (read verbatim):**" in content
 
 
 def test_pbsg_known_cross_routing_regressions():
@@ -420,29 +445,17 @@ def test_pbsg_known_cross_routing_regressions():
     assert t04_q1_foreigner.target_entry_id == "GEN3-T04"
     assert t04_q1_foreigner.target_question_id == "Q4"
 
-    t06_q2_not_sure = parse_transition_outcome(
+    t06_q1_basic = parse_transition_outcome(
         entries,
         "GEN3-T06",
-        "Q2",
-        "if_not_sure",
-        entries["GEN3-T06"]["branching_logic"]["Q2"]["if_not_sure"],
+        "Q1",
+        "if_basic_needs_or_child_welfare",
+        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_basic_needs_or_child_welfare"],
     )
-    assert t06_q2_not_sure.transition_type == "concurrent_route_question"
-    assert t06_q2_not_sure.route_label == "Route B"
-    assert t06_q2_not_sure.target_entry_id == "GEN3-T06"
-    assert t06_q2_not_sure.target_question_id == "Q3"
-
-    t06_q3_not_sure = parse_transition_outcome(
-        entries,
-        "GEN3-T06",
-        "Q3",
-        "if_not_sure",
-        entries["GEN3-T06"]["branching_logic"]["Q3"]["if_not_sure"],
-    )
-    assert t06_q3_not_sure.transition_type == "concurrent_route_question"
-    assert t06_q3_not_sure.route_label == "Route C"
-    assert t06_q3_not_sure.target_entry_id == "GEN3-T06"
-    assert t06_q3_not_sure.target_question_id == "Q4"
+    assert t06_q1_basic.transition_type == "concurrent_route_question"
+    assert t06_q1_basic.route_label == "Route B"
+    assert t06_q1_basic.target_entry_id == "GEN3-T06"
+    assert t06_q1_basic.target_question_id == "Q5"
 
     t06_q4_yes = parse_transition_outcome(
         entries,
@@ -451,9 +464,21 @@ def test_pbsg_known_cross_routing_regressions():
         "if_yes",
         entries["GEN3-T06"]["branching_logic"]["Q4"]["if_yes"],
     )
-    assert t06_q4_yes.transition_type == "handoff_entry"
-    assert t06_q4_yes.target_entry_id == "GEN3-T01"
-    assert t06_q4_yes.target_question_id == "Q1"
+    assert t06_q4_yes.transition_type == "concurrent_route_question"
+    assert t06_q4_yes.route_label == "Route C"
+    assert t06_q4_yes.target_entry_id == "GEN3-T06"
+    assert t06_q4_yes.target_question_id == "Q5"
+
+    t06_q5_yes = parse_transition_outcome(
+        entries,
+        "GEN3-T06",
+        "Q5",
+        "if_yes",
+        entries["GEN3-T06"]["branching_logic"]["Q5"]["if_yes"],
+    )
+    assert t06_q5_yes.transition_type == "handoff_entry"
+    assert t06_q5_yes.target_entry_id == "GEN3-T01"
+    assert t06_q5_yes.target_question_id == "Q1"
 
 
 def test_nested_gen3_t06_resumes_parent_stream_after_urgent_route():
@@ -465,7 +490,7 @@ def test_nested_gen3_t06_resumes_parent_stream_after_urgent_route():
         workflow_locked=True,
         active_workflow="GEN3-T06",
         pending_entry_id="GEN3-T06",
-        current_question_id="Q3",
+        current_question_id="Q4",
     )
 
     transition = engine.resolve_transition_from_branch(state, "if_yes")
@@ -485,9 +510,9 @@ def test_standalone_gen3_t06_route_d_hands_off_to_gen3_t01():
     transition = parse_transition_outcome(
         entries,
         "GEN3-T06",
-        "Q4",
+        "Q5",
         "if_yes",
-        entries["GEN3-T06"]["branching_logic"]["Q4"]["if_yes"],
+        entries["GEN3-T06"]["branching_logic"]["Q5"]["if_yes"],
     )
 
     content = engine.render_transition(transition)
@@ -591,6 +616,392 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     assert "**Selected Entry:** GEN3-T04" in content
     assert "Handoff: GEN3-T02 → GEN3-T04" in content
     assert "Next question: Q1 from GEN3-T04" in content
+
+
+def test_pbsg_routing_engine_reuses_fact_on_handoff_to_avoid_reasking_q1():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: "Is the applicant a Singapore Citizen or PR?"**""",
+        },
+        {"role": "user", "content": "She is here on a work permit."},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q2: No, foreigner [GEN3-T03.json]
+
+Triage progress:
+
+- Last answered: Q2 = No, foreigner → Proceed to Q4 [GEN3-T03.json]
+- Next question: Q4 from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "(Foreigner path) Does the applicant have at least one Singaporean child (under 21)?"**""",
+        }
+    ]
+
+    result = engine.execute_locked_turn(messages, "No")
+
+    assert result is not None
+    content = result.content
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over from user_turn_1: foreigner" in content
+    assert "Next question: Q4 from GEN3-T04" in content
+    assert 'Q1: "Are you a Singapore Citizen or PR?"' not in content
+    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.current_question_id == "Q4"
+    assert result.state.unanswered_required_fields == ["applicant.means_status"]
+
+
+def test_pbsg_triage_state_preserves_queued_workflows_after_terminal_route():
+    entries = load_entries()
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+Topics identified:
+1. GEN3-T02 — active workflow
+2. GEN3-T03 — queued workflow (noted from: divorce)
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "Yes"},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        },
+    ]
+
+    state = build_triage_state(messages, entries, "ok")
+
+    assert state.completed_workflows == ["GEN3-T02"]
+    assert state.queued_workflows == ["GEN3-T03"]
+    assert state.routing_completion_status == "awaiting_topic_resolution"
+
+
+def test_user_fact_ledger_supersedes_corrected_residency_fact():
+    entries = load_entries()
+    messages = [
+        {"role": "user", "content": "Applicant is on a work permit and wants help with divorce."},
+        {"role": "user", "content": "Actually she is a PR."},
+    ]
+
+    state = build_triage_state(messages, entries, "")
+    residency_facts = [fact for fact in state.fact_ledger if fact.fact_key == "applicant.residency_status"]
+
+    assert len(residency_facts) == 2
+    assert residency_facts[0].normalized_value == "foreigner"
+    assert residency_facts[0].status == "superseded"
+    assert residency_facts[1].normalized_value == "sgc_pr"
+    assert residency_facts[1].status == "active"
+
+
+def test_user_fact_ledger_extracts_no_income_private_housing_as_hardship():
+    entries = load_entries()
+
+    state = build_triage_state(
+        [{"role": "user", "content": "no income, stays condo"}],
+        entries,
+        "",
+    )
+    active_facts = {fact.fact_key: fact for fact in state.fact_ledger if fact.status == "active"}
+
+    assert active_facts["applicant.income_status"].normalized_value == "no_income"
+    assert active_facts["applicant.housing_type"].normalized_value == "private_housing"
+    assert active_facts["applicant.financial_hardship"].normalized_value == "true"
+    assert active_facts["applicant.means_status"].normalized_value == "marginal_or_exceptional"
+    assert active_facts["applicant.means_status"].branch_value == "if_no_marginal_or_exceptional"
+
+
+def test_user_fact_ledger_derives_fjss_pchi_from_income_child_and_hdb():
+    entries = load_entries()
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "Do you have at least one Singaporean child (under 21)?"**""",
+        },
+        {"role": "user", "content": "Yes"},
+    ]
+
+    state = build_triage_state(messages, entries, "currently earning $2k, staying in 3 rm HDB")
+    active_facts = {fact.fact_key: fact for fact in state.fact_ledger if fact.status == "active"}
+
+    assert active_facts["applicant.monthly_income"].normalized_value == "2000"
+    assert active_facts["applicant.housing_type"].normalized_value == "non_private_housing"
+    assert active_facts["applicant.means_status"].normalized_value == "fjss_pro_bono_qualifying"
+    assert active_facts["applicant.means_status"].branch_value == "if_yes"
+
+
+def test_structured_means_metadata_present_for_means_nodes():
+    entries = load_entries()
+
+    assert "means_test_structured" in entries["GEN3-T02"]["branching_logic"]["Q6"]
+    assert "means_test_structured" in entries["GEN3-T03"]["branching_logic"]["Q5"]
+    assert "means_test_structured" in entries["GEN3-T04"]["branching_logic"]["Q4"]
+
+
+def test_private_housing_from_initial_query_does_not_auto_skip_gen3_t03_q5():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages: list[dict[str, str]] = []
+    turns = [
+        "Applicant married in December 2025, stays in condo and seeks help with divorce",
+        "No",
+        "Yes",
+        "Yes, failed means test",
+    ]
+
+    for index, turn in enumerate(turns):
+        result = engine.execute_initial_turn(turn) if index == 0 else engine.execute_locked_turn(messages, turn)
+        assert result is not None
+        messages.extend([{"role": "user", "content": turn}, {"role": "assistant", "content": result.content}])
+
+    assert "Next question: Q5 from GEN3-T03" in messages[-1]["content"]
+    assert "Route F" not in messages[-1]["content"]
+
+
+def test_criminal_initial_context_extracts_reusable_routing_facts():
+    entries = load_entries()
+    state = build_triage_state(
+        [],
+        entries,
+        "caller said he has been charged in court for assault and has no legal representation. "
+        "he is singaporean, no money to hire a lawyer",
+    )
+    active_facts = {fact.fact_key: fact for fact in state.fact_ledger if fact.status == "active"}
+
+    assert active_facts["matter.capital_offence"].branch_value == "if_no"
+    assert active_facts["matter.charged_in_court"].branch_value == "if_yes"
+    assert active_facts["applicant.residency_status"].branch_value == "if_yes"
+    assert active_facts["applicant.representation_status"].branch_value == "if_no"
+
+
+def test_initial_structured_not_sure_fact_requires_explicit_user_uncertainty():
+    fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    assert not initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and is not sure about their PR or citizenship status."
+    )
+
+
+def test_initial_routing_ignores_unsupported_not_sure_extraction():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    resolution = resolve_initial_topic(
+        entries, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert resolution is not None
+    bogus_fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    result = engine.execute_initial_resolution(
+        "Applicant has a landlord-tenant dispute and requires help. How do I triage?",
+        resolution,
+        extracted_facts=[bogus_fact],
+    )
+
+    assert result is not None
+    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.current_question_id == "Q1"
+    assert "Applicant response: Not sure" not in result.content
+    assert "Are you a Singapore Citizen or PR?" in result.content
+
+
+def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_facts():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages: list[dict[str, str]] = []
+    turns = [
+        "caller said he has been charged in court for assault and has no legal representation. he is singaporean, no money to hire a lawyer",
+        "yes, 7 days",
+    ]
+
+    for index, turn in enumerate(turns):
+        result = engine.execute_initial_turn(turn) if index == 0 else engine.execute_locked_turn(messages, turn)
+        assert result is not None
+        messages.extend([{"role": "user", "content": turn}, {"role": "assistant", "content": result.content}])
+
+    content = messages[-1]["content"]
+    assert "Concurrent routing note" in content
+    assert "Next question: Q5 from GEN3-T02" in content
+    assert "GEN3-T02 Q5" in content
+    assert "Have you been charged in court?" not in content
+    assert "Is the applicant a Singapore Citizen or PR?" not in content
+    assert "Immediate threat" not in content
+
+
+def test_explicit_court_date_outside_14_days_does_not_trigger_urgent_stream(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    first = engine.execute_initial_turn("caller has been charged in court for assault")
+    assert first is not None
+    messages = [
+        {"role": "user", "content": "caller has been charged in court for assault"},
+        {"role": "assistant", "content": first.content},
+    ]
+
+    result = engine.execute_locked_turn(messages, "court date is 30 June")
+
+    assert result is not None
+    assert "GEN3-T06 urgent concurrent path" not in result.content
+    assert "Next question: Q4 from GEN3-T02" in result.content
+
+
+def test_explicit_court_date_inside_14_days_triggers_urgent_stream(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    first = engine.execute_initial_turn("caller has been charged in court for assault")
+    assert first is not None
+    messages = [
+        {"role": "user", "content": "caller has been charged in court for assault"},
+        {"role": "assistant", "content": first.content},
+    ]
+
+    result = engine.execute_locked_turn(messages, "court date is 1 June")
+
+    assert result is not None
+    assert "Concurrent routing note" in result.content
+    assert "Route C" in result.content
+    assert "Next question: Q4 from GEN3-T02" in result.content
+    assert "Which urgent concern is actually present" not in result.content
+
+
+def test_generic_criminal_terms_do_not_trigger_urgent_overlay():
+    entries = load_entries()
+    resolution = resolve_initial_topics(
+        entries,
+        "caller was charged by police and wants to know if he needs a lawyer for sentencing",
+    )
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T02"
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_safety_and_basic_needs_facts_still_trigger_urgent_overlay():
+    entries = load_entries()
+    resolution = resolve_initial_topics(
+        entries,
+        "caller has a family matter and is not safe tonight with no shelter",
+    )
+
+    assert resolution is not None
+    assert "GEN3-T06" in resolution.overlays
+
+
+def test_next_week_without_deadline_context_is_not_deadline_urgency():
+    assert deadline_branch_key_from_text("I am meeting my lawyer next week") is None
+
+
+def test_numeric_court_date_outside_14_days_maps_no(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    question_node = entries["GEN3-T02"]["branching_logic"]["Q2"]
+
+    assert branch_key_for_answer(question_node, "court date is 30/6") == "if_no"
+
+
+def test_gen3_t02_structured_means_routes_clas_standard_intake():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    state = build_triage_state([], entries, "35 yo, earning $1200, household size 1, no savings, staying in HDB")
+
+    transition = engine.resolve_fact_transition(state, "GEN3-T02", "Q6")
+
+    assert transition is not None
+    assert transition.branch_key == "if_yes"
+    assert transition.route_label == "Route E"
+
+
+def test_gen3_t04_structured_means_routes_clear_well_over_rejection():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    state = build_triage_state([], entries, "45 yo, earning $12000, household size 1, savings $100000, stays condo")
+
+    transition = engine.resolve_fact_transition(state, "GEN3-T04", "Q4")
+
+    assert transition is not None
+    assert transition.branch_key == "if_no_well_over_no_exceptions"
+    assert transition.route_label == "Route D"
+
+
+def test_gen3_t04_structured_means_routes_no_income_hardship_to_staff():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    state = build_triage_state([], entries, "no income, stays condo")
+
+    transition = engine.resolve_fact_transition(state, "GEN3-T04", "Q4")
+
+    assert transition is not None
+    assert transition.branch_key == "if_no_marginal_or_exceptional"
+    assert transition.route_label == "Route C"
+
+
+def test_gen3_t03_lab_failure_maps_to_gen3_t04_lab_unable_to_assist():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q3: "Has the applicant applied to the Legal Aid Bureau (LAB) for civil legal aid?"**""",
+        },
+        {"role": "user", "content": "Yes, failed means test"},
+    ]
+    state = build_triage_state(messages, entries, "")
+
+    transition = engine.resolve_fact_transition(state, "GEN3-T04", "Q3")
+
+    assert transition is not None
+    assert transition.branch_key == "if_yes_lab_unable_to_assist"
+    assert transition.target_entry_id == "GEN3-T04"
+    assert transition.target_question_id == "Q4"
 
 
 @pytest.mark.parametrize(
@@ -730,15 +1141,15 @@ def test_gen3_t06_structured_route_card_renders_urgent_script():
         entries,
         "GEN3-T06",
         "Q1",
-        "if_yes",
-        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_yes"],
+        "if_immediate_safety_or_crisis",
+        entries["GEN3-T06"]["branching_logic"]["Q1"]["if_immediate_safety_or_crisis"],
     )
 
     content = engine.render_transition(transition)
 
     assert content is not None
-    assert "**Routing Recommendation:** Route A (Emergency Services — IMMEDIATE)" in content
-    assert "Please call 999 for police or 995 for ambulance immediately" in content
+    assert "**Routing Recommendation:** Route A (Emergency / Crisis Support — IMMEDIATE)" in content
+    assert "Please call 999 for police or 995 for ambulance now" in content
     assert "Police emergency: 999" in content
 
 
@@ -759,3 +1170,32 @@ def test_gen3_t13_structured_route_card_renders_overlay_script():
     assert "**Routing Recommendation:** Route B (Minor — Special Handling)" in content
     assert "I need PBSG Staff to handle this carefully" in content
     assert "Do not continue triage independently" in content
+
+
+@pytest.mark.parametrize(
+    ("entry_id", "question_id"),
+    [
+        ("GEN3-T02", "Q6"),
+        ("GEN3-T03", "Q5"),
+        ("GEN3-T04", "Q4"),
+    ],
+)
+def test_means_questions_use_lowercase_mid_sentence_clauses(entry_id: str, question_id: str):
+    entries = load_entries()
+    question_node = entries[entry_id]["branching_logic"][question_id]
+    converted = convert_question_to_second_person(question_node["question"])
+
+    assert ", Do " not in converted
+    assert ", do you " in converted
+    assert " and do you " in converted
+    assert "if you are younger than" in converted
+    assert "if you are 60 years old or older" in converted
+
+
+def test_convert_question_to_second_person_preserves_sentence_start_capitalization():
+    assert convert_question_to_second_person("Is the applicant a Singapore Citizen or PR?") == (
+        "Are you a Singapore Citizen or PR?"
+    )
+    assert convert_question_to_second_person("Has the applicant applied to the Legal Aid Bureau (LAB)?") == (
+        "Have you applied to the Legal Aid Bureau (LAB)?"
+    )

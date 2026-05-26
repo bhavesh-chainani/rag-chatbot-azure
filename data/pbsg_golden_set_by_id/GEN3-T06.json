@@ -1,65 +1,80 @@
 {
   "id": "GEN3-T06",
   "category": "PBSG Hotline — General Enquiries (v3)",
-  "topic": "Urgent Matter — Emergency / FSC / Concurrent Legal Pathway",
-  "user_query": "Applicant appears to be in urgent distress or faces an imminent deadline. How do I respond?",
+  "topic": "Urgent Matter — Proportionate Emergency / Social / Legal Deadline Triage",
+  "user_query": "Applicant may face a time-sensitive legal issue, safety concern, basic-needs crisis, or another urgent matter. Classify the urgency without treating generic legal language as a crisis.",
   "variations": [
     "Applicant says they are in danger right now.",
-    "Applicant has a court date this week.",
-    "Applicant is about to be evicted/homeless.",
+    "Applicant has a hearing, filing deadline, reporting date, or immigration deadline within 14 days.",
+    "Applicant is about to be evicted or has nowhere safe to stay tonight.",
     "Applicant says they have no food or money for their family.",
-    "Applicant mentioned self-harm."
+    "Applicant mentioned self-harm or suicide.",
+    "Applicant is in police custody, detention, or faces imminent removal.",
+    "Applicant mentions court, police, being charged, bail, sentencing, or jail, but gives no facts showing immediate safety, basic-needs, detention, or deadline risk."
   ],
-  "part_a_general_info": "Urgency in the PBSG context is BROADER than legal deadlines. It includes physical safety, basic needs, immigration status, child welfare, and mental health crises. Your response must be concurrent — emergency services + social services + legal pathway in parallel, NOT sequential. Urgency trigger list (any one qualifies): • Physical violence occurring or threatened (incl. family violence, workplace violence) • Self-harm or suicide risk (applicant or someone they are calling about) • Child abduction or imminent removal of a child • Immigration pass expiring within 14 days (or already expired) • Imminent homelessness, no food, no money for basic needs • Court date or legal deadline within 14 days • Applicant in police custody or detention (or their dependant is) • Medical emergency involving the applicant or a dependant Key numbers to have ready: • Police emergency: 999 • Ambulance / fire: 995 • National Mindline (24-hour national mental health hotline): 1771 • National Anti-Violence and Sexual Harassment Helpline (NAVH): 1800-777-0000 • SSO (Social Service Office for financial assistance) and FSC (Family Service Centre for social assistance) directories: https://www.msf.gov.sg/our-services/directories • PBSG Urgent Legal Consultation: same-day slots at the State Courts (see GEN3-I06)",
+  "part_a_general_info": "This entry is a risk-classification gate. Do not equate legal seriousness with emergency risk. Words like court, charged, sentenced, police, lawyer, bail, jail, hearing, or custody are not enough by themselves to ask crisis questions. Escalate only where the facts show one of these categories: (1) immediate safety or crisis: current violence, credible threats, self-harm/suicide risk, medical emergency, unlawful coercion, or someone is unsafe right now; (2) basic needs or child welfare: no safe place tonight, imminent homelessness, no food or money for basic needs, urgent child welfare risk; (3) legal/procedural deadline: court date, filing deadline, appeal deadline, reporting/surrender date, immigration pass/removal deadline, injunction/PPO hearing, or police/custody step within 14 days; (4) unclear or too complex: multiple urgent signals, contradictory facts, or the intern cannot safely classify the matter. For legal/procedural urgency, ask legally useful deadline and representation questions, not alarmist safety questions unless safety facts are present. For safety or self-harm, emergency/social support runs before legal triage. For basic needs, SSO/FSC support runs concurrently with legal triage. Each path must end in a route or resume the parent workflow; do not loop.",
   "triage_questions": [
-    "Q1: Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
-    "Q2: Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
-    "Q3: Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
-    "Q4: Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?"
+    "Q1: Which urgent concern is actually present: immediate safety or crisis; basic needs or child welfare; legal/procedural deadline; no urgent issue beyond legal seriousness; or unclear/too complex?",
+    "Q2: Is there an immediate threat to the applicant's (or someone else's) life, physical safety, or risk of self-harm right now?",
+    "Q3: Is the urgent issue about basic needs or child welfare, such as no safe place tonight, imminent homelessness, no food, no money, or a child at immediate risk?",
+    "Q4: Is there a specific legal or procedural deadline within 14 days that requires action, such as a court/hearing date, filing deadline, reporting/surrender date, immigration deadline, injunction/PPO hearing, or police/custody step?",
+    "Q5: After the urgent support or deadline pathway is identified, is there still a legal matter that needs normal PBSG triage?"
   ],
   "branching_logic": {
     "Q1": {
-      "question": "Is there an immediate threat to the applicant's (or someone else's) life or physical safety right now?",
-      "if_yes": "Route A (Emergency Services — IMMEDIATE)",
-      "if_no": "Proceed to Q2",
-      "if_not_sure": "Route A as a precaution"
+      "question": "Which urgent concern is actually present: immediate safety or crisis; basic needs or child welfare; legal/procedural deadline; no urgent issue beyond legal seriousness; or unclear/too complex?",
+      "if_immediate_safety_or_crisis": "Route A (Emergency / Crisis Support — IMMEDIATE)",
+      "if_basic_needs_or_child_welfare": "Route B (SSO / FSC / Child Welfare Support — PRIMARY) and Proceed to Q5",
+      "if_legal_or_procedural_deadline": "Proceed to Q4",
+      "if_no_urgent_or_only_legal_seriousness": "Route D (Return to GEN3-T01 for main triage)",
+      "if_unclear_or_too_complex": "Route F (Human Review — Urgency or vulnerability too complex)"
     },
     "Q2": {
-      "question": "Is the urgency about basic needs (food, shelter, money, child welfare, mental health support) rather than a specific legal step?",
-      "if_yes": "Route B (SSO / FSC — PRIMARY)",
+      "question": "Is there an immediate threat to the applicant's (or someone else's) life, physical safety, or risk of self-harm right now?",
+      "if_yes": "Route A (Emergency / Crisis Support — IMMEDIATE)",
       "if_no": "Proceed to Q3",
-      "if_not_sure": "Route B as primary AND proceed to Q3 (concurrent)"
+      "if_not_sure": "Route F (Human Review — safety risk unclear)"
     },
     "Q3": {
-      "question": "Is there a specific legal deadline within 14 days (court date, immigration deadline, filing deadline, injunction hearing)?",
-      "if_yes": "Route C (Urgent Legal Consultation — Same-Day State Courts Slot)",
+      "question": "Is the urgent issue about basic needs or child welfare, such as no safe place tonight, imminent homelessness, no food, no money, or a child at immediate risk?",
+      "if_yes": "Route B (SSO / FSC / Child Welfare Support — PRIMARY) and Proceed to Q5",
       "if_no": "Proceed to Q4",
-      "if_not_sure": "Route C AND proceed to Q4 (concurrent)"
+      "if_not_sure": "Route F (Human Review — social support risk unclear)"
     },
     "Q4": {
-      "question": "Does the applicant still have a legal matter that needs triaging after the urgent concern is addressed?",
+      "question": "Is there a specific legal or procedural deadline within 14 days that requires action, such as a court/hearing date, filing deadline, reporting/surrender date, immigration deadline, injunction/PPO hearing, or police/custody step?",
+      "if_yes": "Route C (Urgent Legal Consultation Assessment) and Proceed to Q5",
+      "if_no": "Route D (Return to GEN3-T01 for main triage)",
+      "if_not_sure": "Route F (Human Review — deadline unclear)"
+    },
+    "Q5": {
+      "question": "After the urgent support or deadline pathway is identified, is there still a legal matter that needs normal PBSG triage?",
       "if_yes": "Route D (Return to GEN3-T01 for main triage)",
-      "if_no": "Route E (Document urgency intake and close)",
-      "if_not_sure": "Route D (Return to GEN3-T01 for main triage)"
+      "if_no": "Route E (Document urgent intake and close)",
+      "if_not_sure": "Route F (Human Review — unclear whether legal triage remains)"
     }
   },
   "routing": [
-    "Route A (Emergency Services — IMMEDIATE): Say to the applicant: \"The most important thing right now is your safety. Please call 999 for police or 995 for ambulance.\" After the call, note the incident, escalate to PBSG Staff (Route F of GEN3-T01) and, if the applicant still has a legal matter, arrange a call-back to triage through GEN3-T06 starting from Q2.",
-    "Route B (SSO / FSC — PRIMARY): Direct the applicant to the nearest Social Service Office (SSO) and Family Service Centre (FSC). Say: \"There are officers at Social Service Officers and social workers at Family Service Centres who may be able to help you. Let me help you find your nearest centre.\" Look up the SSO and FSC directory live: https://www.msf.gov.sg/our-services/directories — filter by the applicant's postal code. Provide the name, address, and phone number of the nearest SSO and FSC. If the applicant also has a legal issue, proceed concurrently to Route C or Route D as appropriate.",
-    "Route C (Return to GEN3-T01 and Escalate for Urgent Legal Consultation Assessment): Return to the main triage questions at GEN3-T01 to identify the appropriate scheme. If eligible for PBSG schemes, inform applicant, \"Your matter sounds like it may be urgent. Let me check how best we can assist you. I will try to call you back by the end of today.” Take down: applicant name, contact, deadline date, brief matter, and answers to Q1-5 in GEN3-T01. Escalate to PBSG Staff immediately to check if applicant is eligible for Urgent Legal Consultation (same or next-day legal consultation). Refer intern to GEN3-I06 for full scheme details.",
-    "Route D (Return to GEN3-T01): Once the urgent concern is addressed (or pathway confirmed), return to the main triage questions at GEN3-T01 to identify the appropriate scheme for the underlying legal matter.",
-    "Route E (Document and Close): Record the urgent intake in the system with a clear note of the concern raised and the pathway given. Inform applicant that they may call back if a legal matter emerges later. Resources to share with the applicant: SupportGoWhere — social and financial assistance PBSG YouTube channel — webinars on common legal issues Singapore Legal Advice — directory of lawyers and legal advice over the phone for a small fee Law Society of Singapore — directory of lawyers Legal Services Regulatory Authority e-Services — search for lawyers by practice area Caveat (share with applicant): \"These are third-party websites not affiliated with or endorsed by Pro Bono SG. We share them as general pointers only and cannot vouch for the service, fees, or outcomes. If you have any questions on these services, please reach out to them directly.\""
+    "Route A (Emergency / Crisis Support — IMMEDIATE): Use only for facts showing immediate safety, physical danger, medical emergency, or self-harm/suicide risk. Say to the applicant: \"The most important thing right now is your immediate safety. Please call 999 for police or 995 for ambulance now. If this is about violence or harassment, you may also contact NAVH at 1800-777-0000. If this is about self-harm or suicide, you may contact National Mindline at 1771.\" Do not continue legal triage while immediate safety is at risk. After the emergency step, note the concern and escalate to PBSG Staff.",
+    "Route B (SSO / FSC / Child Welfare Support — PRIMARY): Use for imminent homelessness, no safe place tonight, no food or money for basic needs, or urgent child welfare/social support needs. Say: \"This sounds like an immediate support need. Let me help you identify the nearest Social Service Office or Family Service Centre, and we can still note the legal issue if there is one.\" Look up SSO/FSC using the applicant's postal code. If legal triage remains, continue concurrently to Route D or the parent workflow.",
+    "Route C (Urgent Legal Consultation Assessment): Use for a concrete legal or procedural deadline within 14 days, without assuming the applicant is in physical danger. Say: \"Because there is a near deadline, I will take down the key details and ask PBSG Staff to assess whether urgent legal consultation is available. I cannot promise a same-day appointment, but I will flag the timing clearly.\" Take down the deadline date, type of deadline, current representation status, relevant court/police/immigration documents if any, and the underlying legal topic. Resume GEN3-T01 or the parent workflow after recording the urgent legal pathway.",
+    "Route D (Return to GEN3-T01): Use when there is no immediate safety/basic-needs crisis, or after the urgent pathway has been identified and a legal matter still needs triage. Return to the active parent workflow if GEN3-T06 was nested under GEN3-T02 or GEN3-T03; otherwise return to GEN3-T01.",
+    "Route E (Document Urgent Intake and Close): Use when the urgent support information has been provided and no legal matter remains for PBSG triage. Record the concern, pathway shared, and any referral information. Inform applicant that they may call PBSG again if a legal matter emerges later.",
+    "Route F (Human Review — Urgency or Vulnerability Too Complex): Use when the facts contain multiple urgent signals, contradictory information, unclear safety risk, uncertain deadline impact, possible coercion, or anything the intern cannot confidently classify. Take down the applicant's contact details, the exact facts creating concern, any date/deadline, and any immediate support already shared. Escalate to PBSG Staff the same day. Do not keep asking follow-up questions in a loop."
   ],
   "routing_structured": {
     "Route A": {
-      "name": "Emergency Services — IMMEDIATE",
-      "script": "The most important thing right now is your safety. Please call 999 for police or 995 for ambulance immediately.",
+      "name": "Emergency / Crisis Support — IMMEDIATE",
+      "script": "The most important thing right now is your immediate safety. Please call 999 for police or 995 for ambulance now. If this is about violence or harassment, you may also contact NAVH at 1800-777-0000. If this is about self-harm or suicide, you may contact National Mindline at 1771.",
       "needs_to_know": [
-        "Emergency services should be contacted before continuing legal triage when there is an immediate threat to life or physical safety."
+        "Use only when facts show immediate physical danger, medical emergency, self-harm, suicide risk, or another safety crisis.",
+        "Generic legal words such as court, charged, sentenced, police, lawyer, bail, jail, or hearing do not justify this route by themselves."
       ],
       "access": [
         "Police emergency: 999",
-        "Ambulance / fire: 995"
+        "Ambulance / fire: 995",
+        "National Anti-Violence and Sexual Harassment Helpline: 1800-777-0000",
+        "National Mindline: 1771"
       ],
       "prepare": [
         "Brief description of the immediate safety concern"
@@ -67,17 +82,17 @@
       "intern_steps": [
         "Ask the applicant to contact emergency services immediately.",
         "After the emergency call, note the incident and escalate to PBSG Staff.",
-        "If the applicant still has a legal matter, arrange a call-back to continue urgent triage from GEN3-T06 Q2."
+        "Do not continue legal triage while immediate safety is at risk."
       ],
       "caveats": [
         "Do not continue legal triage while immediate safety is at risk."
       ]
     },
     "Route B": {
-      "name": "SSO / FSC — PRIMARY",
-      "script": "There are officers at Social Service Offices and social workers at Family Service Centres who may be able to help you. Let me help you find your nearest centre.",
+      "name": "SSO / FSC / Child Welfare Support — PRIMARY",
+      "script": "This sounds like an immediate support need. Let me help you identify the nearest Social Service Office or Family Service Centre, and we can still note the legal issue if there is one.",
       "needs_to_know": [
-        "Use this route when the urgent issue is about basic needs such as food, shelter, money, child welfare, or mental health support."
+        "Use for imminent homelessness, no safe place tonight, no food or money for basic needs, or urgent child welfare/social support needs."
       ],
       "access": [
         "SSO and FSC directory: https://www.msf.gov.sg/our-services/directories"
@@ -89,28 +104,30 @@
       "intern_steps": [
         "Look up the SSO and FSC directory live using the applicant's postal code.",
         "Provide the name, address, and phone number of the nearest SSO and FSC.",
-        "If the applicant also has a legal issue, continue concurrently to the appropriate legal route."
+        "If the applicant also has a legal issue, continue concurrently to GEN3-T01 or the active parent workflow."
       ],
       "caveats": [
         "This social support pathway runs concurrently with legal triage where needed."
       ]
     },
     "Route C": {
-      "name": "Return to GEN3-T01 and Escalate for Urgent Legal Consultation Assessment",
-      "script": "Your matter sounds like it may be urgent. Let me check how best we can assist you. I will try to call you back by the end of today.",
+      "name": "Urgent Legal Consultation Assessment",
+      "script": "Because there is a near deadline, I will record the key details and ask PBSG Staff to assess whether urgent legal consultation is available. I cannot promise a same-day appointment, but I will flag the timing clearly.",
       "needs_to_know": [
-        "PBSG Staff must assess whether the applicant is eligible for an urgent same-day or next-day legal consultation."
+        "Use for concrete legal or procedural deadlines within 14 days.",
+        "Do not imply physical danger unless the applicant has given safety facts."
       ],
       "access": [],
       "prepare": [
         "Applicant name and contact details",
         "Deadline date",
-        "Brief matter description",
-        "Answers to GEN3-T01 Q1-Q5 where applicable"
+        "Type of deadline or hearing",
+        "Current representation status",
+        "Brief underlying legal topic"
       ],
       "intern_steps": [
-        "Return to GEN3-T01 to identify the appropriate scheme if this is standalone urgent triage.",
-        "Escalate to PBSG Staff immediately for urgent legal consultation assessment.",
+        "Escalate to PBSG Staff for urgent legal consultation assessment.",
+        "Resume GEN3-T01 or the active parent workflow after recording the urgent legal pathway.",
         "Refer to GEN3-I06 for full urgent legal consultation scheme details."
       ],
       "caveats": [
@@ -134,7 +151,7 @@
       "caveats": []
     },
     "Route E": {
-      "name": "Document and Close",
+      "name": "Document Urgent Intake and Close",
       "script": "I have noted the urgent concern and the pathway shared. You may call PBSG again if a legal matter emerges later.",
       "needs_to_know": [
         "Use this route when there is no legal matter left to triage after the urgent concern is addressed."
@@ -156,7 +173,54 @@
       "caveats": [
         "Third-party resources are general pointers only and are not affiliated with or endorsed by Pro Bono SG."
       ]
+    },
+    "Route F": {
+      "name": "Human Review — Urgency or Vulnerability Too Complex",
+      "script": "I need PBSG Staff to assess this because the urgent or vulnerability factors are not clear enough for me to classify safely. I will record the key facts and ask PBSG Staff to follow up.",
+      "needs_to_know": [
+        "Use when facts contain multiple urgent signals, contradictory information, unclear safety risk, uncertain deadline impact, possible coercion, or anything the intern cannot confidently classify."
+      ],
+      "access": [],
+      "prepare": [
+        "Applicant contact details",
+        "Exact facts creating concern",
+        "Any date or deadline",
+        "Any immediate support already shared"
+      ],
+      "intern_steps": [
+        "Take down concise facts instead of continuing repeated questions.",
+        "Escalate to PBSG Staff the same day.",
+        "Do not attempt to advise on the legal merits."
+      ],
+      "caveats": [
+        "This route prevents looping when urgency, vulnerability, and multiple legal topics overlap."
+      ]
     }
+  },
+  "escalation_examples_by_topic_id": {
+    "GEN3-T01": [
+      "Escalate to GEN3-T06 when first-contact facts show immediate danger, no safe place tonight, no food/basic needs, detention, immigration removal, or a concrete deadline within 14 days.",
+      "Do not escalate merely because the applicant says they need help, has a legal problem, or sounds worried."
+    ],
+    "GEN3-T02": [
+      "Escalate to GEN3-T06 Route C when the criminal matter has a court/hearing/reporting/appeal deadline within 14 days, or the applicant is currently detained or in police custody.",
+      "Do not escalate to safety questions merely because the applicant says charged, police, bail, lawyer, sentenced, jail, or court unless there is an immediate safety, custody, deprivation, or deadline fact."
+    ],
+    "GEN3-T03": [
+      "Escalate to GEN3-T06 Route A where there is current family violence, threats, stalking, coercive control, unsafe housing, self-harm, or immediate risk to a child.",
+      "When GEN3-T06 is nested under GEN3-T03 because family violence was already identified, keep the urgent questions tied to immediate safety, safe shelter/basic needs, child safety, or concrete family-court/PPO deadlines; do not broaden into generic urgency questions without supporting facts.",
+      "Escalate to GEN3-T06 Route C where there is a PPO/injunction/custody/maintenance/divorce deadline within 14 days without safety facts.",
+      "Do not treat every family court mention as an emergency."
+    ],
+    "GEN3-T04": [
+      "Escalate to GEN3-T06 Route B for imminent eviction/homelessness, no basic needs, or urgent social support needs.",
+      "Escalate to GEN3-T06 Route C for filing deadlines, appeal deadlines, injunction hearings, or other civil deadlines within 14 days.",
+      "Do not escalate merely because the issue is stressful, expensive, or legally serious."
+    ],
+    "GEN3-T13": [
+      "Escalate to GEN3-T06 only when vulnerability facts also show immediate safety, basic-needs, child welfare, mental-health crisis, detention, immigration, or deadline risk.",
+      "Do not escalate to urgency solely because the applicant is elderly, speaks limited English, has a disability, or has a social worker unless there is a time-sensitive or safety consequence."
+    ]
   },
   "guardrail": "• Under s 33 of the Legal Profession Act 1966, only qualified, practising lawyers may give legal advice. You must NEVER: (a) interpret a legal document for the applicant; (b) apply the law to the applicant's facts; (c) predict the outcome of a case; (d) tell the applicant what they should do legally. • You MAY: (a) confirm scheme eligibility against objective criteria; (b) read out scheme descriptions verbatim; (c) explain PBSG hotline operations; (d) take down particulars and escalate to PBSG Staff. • If the applicant insists on legal advice, respond: “I’m an intern/volunteer and I’m not able to give legal advice. What I can do is help you find the right legal help avenue or direct you to a qualified lawyer.” • If in doubt at any point — escalate to PBSG Staff. • Protect applicant confidentiality. Do not discuss the applicant outside the hotline context. Do not retain personal data on personal devices and/or beyond the PBSG volunteering period."
 }

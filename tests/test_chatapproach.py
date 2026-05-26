@@ -1,5 +1,7 @@
 import base64
 import json
+import re
+from datetime import date
 
 import pytest
 from azure.core.credentials import AzureKeyCredential
@@ -7,6 +9,7 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
+import pbsg_triage_state
 from approaches.approach import (
     ActivityDetail,
     DataPoints,
@@ -20,6 +23,7 @@ from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGTransition,
+    branch_key_for_answer,
     build_triage_state,
     format_state_prompt,
     normalize_simple_answer,
@@ -34,6 +38,10 @@ from .mocks import (
     MockAsyncSearchResultsIterator,
     mock_retrieval_response,
 )
+
+
+def visible_text(content: str) -> str:
+    return re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
 
 
 async def mock_search(*args, **kwargs):
@@ -230,6 +238,48 @@ def test_build_quick_reply_from_selected_entry_and_question(chat_approach):
         ("if_no", "No", "No"),
         ("if_not_sure", "Not sure", "Not sure"),
     ]
+
+
+def test_build_quick_reply_uses_question_specific_labels(chat_approach):
+    entry = {
+        "id": "GEN3-T01",
+        "branching_logic": {
+            "Q2": {
+                "question": "Is the applicant the person who needs legal help, or are they calling on behalf of someone else?",
+                "if_calling_on_behalf_and_able_to_self_help": "Route B",
+                "if_self_or_calling_on_behalf_and_unable_to_self_help": "Proceed to Q3",
+                "if_not_sure": "Clarify caller capacity.",
+            }
+        },
+    }
+    extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T01.json: {json.dumps(entry)}"]))
+    content = """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> Q2: "Are you the person who needs legal help, or are they calling on behalf of someone else?"
+"""
+
+    quick_reply = chat_approach.build_quick_reply(content, extra_info)
+
+    assert quick_reply is not None
+    assert [(option.id, option.label, option.value) for option in quick_reply.options] == [
+        (
+            "if_calling_on_behalf_and_able_to_self_help",
+            "Calling for someone else; they can contact PBSG directly",
+            "Calling for someone else; they can contact PBSG directly",
+        ),
+        (
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+            "Applicant is calling, or cannot contact PBSG themselves",
+            "Applicant is calling, or cannot contact PBSG themselves",
+        ),
+        ("if_not_sure", "Not sure", "Not sure"),
+    ]
+    assert (
+        branch_key_for_answer(entry["branching_logic"]["Q2"], "Applicant is calling, or cannot contact PBSG themselves")
+        == "if_self_or_calling_on_behalf_and_unable_to_self_help"
+    )
 
 
 def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):
@@ -1002,6 +1052,147 @@ async def test_run_without_streaming_defaults_vague_initial_turn_to_gen3_t01(cha
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_skips_initial_topic_llm_for_bare_greeting(chat_approach, monkeypatch):
+    async def fail_if_classifier_called(*args, **kwargs):
+        raise AssertionError("bare greeting should not call the initial topic classifier")
+
+    async def fail_if_retrieval_called(*args, **kwargs):
+        raise AssertionError("bare greeting should stay on deterministic first-contact triage")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_classifier_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_retrieval_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "hi"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T01" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_answers_pure_general_enquiry_without_llm_or_triage(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("pure general enquiry should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is LASCO?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert result["session_state"] == "session-1"
+    assert "**General enquiry:**" in content
+    assert "Legal Assistance Scheme for Capital Offences" in content
+    assert "**Selected Entry:**" not in content
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["context"]["thoughts"][0].title == "Deterministic PBSG general enquiry"
+    assert result["context"]["data_points"]["citations"] == ["GEN3-T02.json"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question", "expected_text"),
+    [
+        ("What services does PBSG provide?", "different PBSG-related pathways"),
+        ("What is a route?", "A route is the recommended next pathway"),
+        ("How does the chatbot choose a route?", "structured Golden Set branching logic"),
+        ("What is the selected stream?", "stream or workstream means the active triage workflow"),
+        ("What does streaming mean here?", "not video or audio streaming"),
+        ("How does triage work?", "asks only the facts needed"),
+        ("Why are you asking these questions?", "identify the correct legal help pathway"),
+        ("When do you escalate to PBSG staff?", "Staff escalation is used"),
+        ("Who qualifies for help?", "Eligibility depends"),
+        ("Is Pro Bono SG free?", "free or low-cost"),
+        ("How do I apply or book an appointment?", "Application steps"),
+        ("What documents should I prepare?", "preparation items"),
+        ("Can the intern give legal advice?", "must not give legal advice"),
+        ("What if there is an urgent deadline?", "Urgent handling is triggered"),
+        ("Where is the PBSG counter?", "State Courts Help Centre"),
+        ("Tell me more about Pro Bono SG.", "Pro Bono SG is the organisation referenced"),
+    ],
+)
+async def test_run_without_streaming_answers_broader_general_enquiry_catalogue(
+    chat_approach, monkeypatch, question, expected_text
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("curated general enquiry should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": question}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert expected_text in content
+    assert "**Selected Entry:**" not in content
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_keeps_mixed_general_enquiry_in_legal_triage(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("mixed general and legal enquiry should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is LASCO and can they help me with a divorce?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert "Legal Assistance Scheme for Capital Offences" in content
+    assert "**Now I will triage the legal issue:**" in content
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T03"
+    assert result["context"]["thoughts"][0].title == "Deterministic PBSG mixed general enquiry"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_legal_help_question_as_mixed_and_enters_triage(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("case-specific legal help question should not fall through to retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can Pro Bono SG help me with my employer not paying my salary?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**General enquiry:**" in content
+    assert "**Now I will triage the legal issue:**" in content
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T04"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("query", "expected_entry_id"),
     [
@@ -1030,6 +1221,454 @@ async def test_run_without_streaming_selects_clear_initial_topic(chat_approach, 
 
 
 @pytest.mark.asyncio
+async def test_run_without_streaming_initial_topic_llm_handles_ambiguous_criminal_and_matrimonial(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "primary_entry_id": "GEN3-T02",
+            "queued_entry_ids": ["GEN3-T03"],
+            "monitor_entry_ids": [],
+            "confidence": 0.91,
+            "evidence": "stolen/caught by law indicates criminal issue; separate from husband indicates matrimonial issue",
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "user wants to separate from her husband after he stole something in the past "
+                    "and got caught by law"
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "Topics identified:" in content
+    assert "GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T02" in content
+    assert triage_state["active_workflow"] == "GEN3-T02"
+    assert triage_state["queued_workflows"] == ["GEN3-T03"]
+    assert any(thought.title == "Structured PBSG initial topic classifier" for thought in result["context"]["thoughts"])
+
+
+@pytest.mark.asyncio
+async def test_initial_topic_llm_prompt_covers_vape_trial_and_queues_matrimonial(chat_approach, monkeypatch):
+    calls: list[list[dict[str, str]]] = []
+
+    async def fake_completion(*args, **kwargs):
+        messages = args[2] if len(args) > 2 else kwargs["messages"]
+        calls.append(messages)
+        payload = (
+            {
+                "primary_entry_id": "GEN3-T02",
+                "queued_entry_ids": ["GEN3-T03"],
+                "monitor_entry_ids": ["GEN3-T06"],
+                "confidence": 0.93,
+                "evidence": "vape trial is criminal/process; husband beating and leaving relationship is matrimonial",
+            }
+            if len(calls) == 1
+            else {"answered_questions": []}
+        )
+        return ChatCompletion.model_validate(
+            {
+                "id": "classification",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(payload)},
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_completion)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "applicant mentioned that husband is beating her up, she wants to leave him. "
+                    "she also mentioned she got caught taking a vape and will need to go to trial"
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    prompt = calls[0][0]["content"]
+
+    assert "vaping or e-vaporiser offences" in prompt
+    assert "trial" in prompt
+    assert "choose GEN3-T02 as primary and queue GEN3-T03" in prompt
+    assert "**Selected Entry:** GEN3-T02" in content
+    assert "Topics identified:" in content
+    assert "GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+    assert result["context"]["pbsg_triage_state"]["queued_workflows"] == ["GEN3-T03"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_initial_topic_llm_carries_family_violence_into_matrimonial_q1(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json_sequence(
+        [
+            {
+                "primary_entry_id": "GEN3-T03",
+                "queued_entry_ids": [],
+                "monitor_entry_ids": ["GEN3-T06", "GEN3-T13"],
+                "confidence": 0.92,
+                "evidence": "ending relationship indicates matrimonial issue",
+            },
+            {
+                "answered_questions": [
+                    {
+                        "entry_id": "GEN3-T03",
+                        "question_id": "Q1",
+                        "branch_key": "if_yes",
+                        "confidence": 0.94,
+                        "evidence": "husband is beating her up",
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": "caller has mentioned that her husband is beating her up and wants to end their relationship",
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Latest triage update:" in visible_text(content)
+    assert "Applicant summary:" not in visible_text(content)
+    assert "The applicant's response: **Yes**" in visible_text(content)
+    assert "**Active stream:** GEN3-T06 urgent concurrent path" in content
+    assert "GEN3-T06 Q1" in content
+    asked_section = visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
+    assert "Is there active or recent family violence" not in asked_section
+    assert triage_state["active_workflow"] == "GEN3-T06"
+    assert triage_state["parent_workflow"] == "GEN3-T03"
+    assert triage_state["resume_question_id"] == "Q2"
+    assert result["context"]["thoughts"][-1].title == "Structured PBSG initial answer extractor"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_ignores_invalid_initial_answer_extraction(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("validated topic classifier result should not run retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json_sequence(
+        [
+            {
+                "primary_entry_id": "GEN3-T03",
+                "queued_entry_ids": [],
+                "monitor_entry_ids": [],
+                "confidence": 0.92,
+                "evidence": "ending relationship indicates matrimonial issue",
+            },
+            {
+                "answered_questions": [
+                    {
+                        "entry_id": "GEN3-T03",
+                        "question_id": "Q1",
+                        "branch_key": "if_invalid",
+                        "confidence": 0.94,
+                        "evidence": "unsupported branch key",
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "caller wants to end her relationship with her husband"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert 'Is there active or recent family violence' in content
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_falls_back_when_initial_topic_llm_returns_invalid_id(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid topic classifier output should fall back to deterministic routing")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {"primary_entry_id": "GEN3-UNKNOWN", "queued_entry_ids": [], "monitor_entry_ids": [], "confidence": 0.95}
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a criminal charge in court."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T02" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_falls_back_when_initial_topic_llm_fails(chat_approach, monkeypatch):
+    async def fail_classifier(*args, **kwargs):
+        raise RuntimeError("classifier unavailable")
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("failed topic classifier should fall back to deterministic routing")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_classifier)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a criminal charge in court."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Selected Entry:** GEN3-T02" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
+
+
+def gen3_t03_nested_urgent_q2_messages(user_content):
+    return [
+        {"role": "user", "content": "caller says her husband is beating her up and she wants to end the relationship"},
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q1: Yes [GEN3-T03.json]
+
+**Active stream:** GEN3-T06 urgent concurrent path
+
+**Ask the applicant (read verbatim):**
+
+> **GEN3-T06 Q2: "Is there an immediate threat to your life, physical safety, or risk of self-harm right now?"**
+
+Triage progress:
+
+- Last answered: GEN3-T03 Q1 = Yes [GEN3-T03.json]
+- Now checking: GEN3-T06 Q2
+- After this urgent path: resume GEN3-T03 Q2""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_support_skips_irrelevant_nested_urgent_questions_and_resumes_parent(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("context support should keep the turn deterministic")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q3",
+                    "branch_key": "if_no",
+                    "confidence": 0.88,
+                    "evidence": "No basic-needs or child-welfare crisis was mentioned in the original or latest answer.",
+                },
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q4",
+                    "branch_key": "if_no",
+                    "confidence": 0.88,
+                    "evidence": "No legal or procedural deadline within 14 days was mentioned.",
+                },
+            ],
+            "question_relevance": {
+                "entry_id": "GEN3-T06",
+                "question_id": "Q3",
+                "disposition": "not_relevant",
+                "confidence": 0.88,
+                "evidence": "The urgent context is family violence; no basic-needs facts are present.",
+            },
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("No"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Entry:** GEN3-T06" in content
+    assert "Route D" in content
+    assert "Next question: Q2 from GEN3-T03" in content
+    assert "basic needs or child welfare" not in content
+    assert triage_state["active_workflow"] == "GEN3-T03"
+    assert triage_state["pending_entry_id"] == "GEN3-T03"
+    assert triage_state["current_question_id"] == "Q2"
+    assert result["context"]["thoughts"][-1].title == "Structured PBSG context support"
+
+
+@pytest.mark.asyncio
+async def test_context_support_can_rephrase_without_changing_question_or_branches(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("contextual rephrase should not call retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [],
+            "question_relevance": {
+                "entry_id": "GEN3-T06",
+                "question_id": "Q2",
+                "disposition": "needs_rephrasing",
+                "confidence": 0.9,
+                "evidence": "The canonical safety question is needed but should be framed for family violence.",
+                "contextual_question_script": "Are you safe right now, or is your husband currently threatening or hurting you?",
+            },
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("I do not understand the question."),
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+
+    assert "**Selected Entry:** GEN3-T06" in content
+    assert "same Golden Set question" in content
+    assert '"Are you safe right now, or is your husband currently threatening or hurting you?"' in visible_text(content)
+    assert "Q2:" not in visible_text(content)
+    assert result["context"]["pbsg_question_relevance"]["disposition"] == "needs_rephrasing"
+
+
+@pytest.mark.asyncio
+async def test_context_support_invalid_output_falls_back_to_deterministic_urgent_question(
+    chat_approach, monkeypatch
+):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("invalid context support should fall back before retrieval")
+
+    chat_approach.openai_client = fake_openai_client_with_json(
+        {
+            "answered_questions": [
+                {
+                    "entry_id": "GEN3-T06",
+                    "question_id": "Q3",
+                    "branch_key": "if_not_a_real_branch",
+                    "confidence": 0.99,
+                    "evidence": "invalid",
+                }
+            ],
+            "question_relevance": {"disposition": "needed", "confidence": 0.8},
+        }
+    )
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_nested_urgent_q2_messages("No"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Next question: Q3 from GEN3-T06" in result["message"]["content"]
+    assert "basic needs or child welfare" in result["message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_initial_multi_topic_queues_secondary_topic(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clear multi-topic first turn should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+
+    result = await chat_approach.run_without_streaming(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Applicant says she's a criminal. She also wants to divorce her husband. "
+                    "She's a Singapore Citizen and will be charged on 28th May 2026."
+                ),
+            }
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    content = result["message"]["content"]
+    triage_state = result["context"]["pbsg_triage_state"]
+
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(content)
+    assert "GEN3-" not in visible_text(content)
+    assert "Topics identified:" in content
+    assert "Family and Matrimonial Stream" in visible_text(content)
+    assert "Urgent Support Stream noted as a monitor, not the active workflow" in visible_text(content)
+    assert "topic signals were weak or ambiguous" not in content
+    assert "Next, ask the required follow-up question:" in visible_text(content)
+    assert triage_state["active_workflow"] == "GEN3-T02"
+    assert triage_state["queued_workflows"] == ["GEN3-T03"]
+    assert "GEN3-T06" in triage_state["triggered_overlays"]
+    assert "urgency" in triage_state["concurrent_monitors"]
+
+
+@pytest.mark.asyncio
 async def test_run_without_streaming_keeps_vulnerability_as_overlay_when_legal_issue_exists(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("vulnerability overlay should still render deterministic first question")
@@ -1044,8 +1683,9 @@ async def test_run_without_streaming_keeps_vulnerability_as_overlay_when_legal_i
     )
     content = result["message"]["content"]
 
-    assert "**Selected Entry:** GEN3-T04" in content
-    assert "GEN3-T13 noted as a monitor, not the active workflow" in content
+    assert "**Selected Stream:** Civil and Guidance Stream" in visible_text(content)
+    assert "GEN3-" not in visible_text(content)
+    assert "Vulnerability Support Stream noted as a monitor, not the active workflow" in visible_text(content)
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T04"
     assert "GEN3-T13" in result["context"]["pbsg_triage_state"]["triggered_overlays"]
 
@@ -1063,6 +1703,22 @@ async def test_initial_topic_source_pack_injects_default_t01_over_high_ranked_t1
     assert "GEN3-T01" in entries
     assert "GEN3-T13" in entries
     assert "GEN3-T01.json" in data_points.citations
+
+
+@pytest.mark.asyncio
+async def test_initial_topic_source_pack_injects_queued_and_monitor_entries(chat_approach, monkeypatch):
+    monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
+    data_points = DataPoints(text=[], citations=[])
+    query = (
+        "Applicant says she's a criminal. She also wants to divorce her husband. "
+        "She's a Singapore Citizen and will be charged on 28th May 2026."
+    )
+
+    chat_approach.ensure_initial_topic_sources(data_points, [{"role": "user", "content": query}], query)
+    entries = chat_approach.extract_golden_set_entries(data_points.text)
+
+    assert {"GEN3-T02", "GEN3-T03", "GEN3-T06"}.issubset(entries)
+    assert {"GEN3-T02.json", "GEN3-T03.json", "GEN3-T06.json"}.issubset(set(data_points.citations))
 
 
 @pytest.mark.asyncio
@@ -1124,12 +1780,220 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
     result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
 
     assert result["session_state"] == "session-1"
-    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T02")
-    assert "Next question: Q2 from GEN3-T02" in result["message"]["content"]
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(result["message"]["content"])
+    assert "GEN3-" not in visible_text(result["message"]["content"])
+    assert "Next, ask the required follow-up question:" in visible_text(result["message"]["content"])
     assert "court date/deadline within 14 days" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
+    assert result["context"]["pbsg_case_summary"]["status"] == "pending"
+    assert result["context"]["pbsg_case_summary"]["text"] == ""
     assert result["context"]["quick_reply"]["entryId"] == "GEN3-T02"
     assert result["context"]["quick_reply"]["questionId"] == "Q2"
+
+
+@pytest.mark.asyncio
+async def test_pbsg_case_summary_generation_sanitizes_internal_ids(chat_approach, monkeypatch):
+    async def fake_summary_completion(*args, **kwargs):
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- GEN3-T02 Q2: Applicant has a court deadline.\n- Selected Entry should not show.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q2 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Is there a court date/deadline within 14 days?"**""",
+        },
+        {"role": "user", "content": "Court date is next week."},
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "GEN3-" not in summary["text"]
+    assert "Selected Entry" not in summary["text"]
+    assert "Q2" not in summary["text"]
+    assert "Applicant has a court deadline" in summary["text"]
+
+
+@pytest.mark.asyncio
+async def test_pbsg_case_summary_does_not_pair_latest_answer_with_new_next_question(chat_approach, monkeypatch):
+    captured_prompt: dict[str, str] = {}
+
+    async def fake_summary_completion(*args, **kwargs):
+        completion_messages = kwargs.get("messages") or args[2]
+        captured_prompt["content"] = completion_messages[-1]["content"]
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- Applicant has a criminal matter and says they were charged in court.\n"
+                            "- The offence is not a capital offence.\n"
+                            "- No urgency or safety concern has been indicated.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {"role": "user", "content": "Applicant has a criminal matter and says they were charged in court."},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q1 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": "No"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q2 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Is the offence a capital offence (punishable with death)?"
+- The applicant's response: **No**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Is there a court date/deadline within 14 days?"**""",
+        },
+        {"role": "user", "content": "No"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q4 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Have you been charged in court?"
+- The applicant's response: **Yes**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Are you a Singapore Citizen or PR?"**""",
+        },
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "applicant.residency_status" not in captured_prompt["content"]
+    assert "foreigner" not in captured_prompt["content"].lower()
+    assert "applicant.residency_status" not in summary["source_fact_keys"]
+    assert "foreigner" not in summary["text"].lower()
+    assert "residency status is noted as no" not in summary["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_pbsg_case_summary_preserves_negated_residency_answer(chat_approach, monkeypatch):
+    captured_prompt: dict[str, str] = {}
+
+    async def fake_summary_completion(*args, **kwargs):
+        completion_messages = kwargs.get("messages") or args[2]
+        captured_prompt["content"] = completion_messages[-1]["content"]
+        return ChatCompletion.model_validate(
+            {
+                "id": "summary",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4.1-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "- Applicant has a criminal matter and says they were charged in court.\n"
+                            "- The applicant is not a Singapore Citizen or PR.",
+                        },
+                    }
+                ],
+            },
+            strict=False,
+        )
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fake_summary_completion)
+    messages = [
+        {"role": "user", "content": "Applicant has a criminal matter and says they were charged in court."},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q4 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+**Ask the applicant (read verbatim):**
+
+> **"Are you a Singapore Citizen or PR?"**""",
+        },
+        {"role": "user", "content": "No, not a Singapore Citizen or PR"},
+        {
+            "role": "assistant",
+            "content": """<!-- pbsg-state: selected_entry=GEN3-T02; pending_entry=GEN3-T02; pending_question=Q6 -->
+**Selected Stream:** Criminal Legal Aid Stream
+
+Latest triage update:
+- Asked: "Are you a Singapore Citizen or PR?"
+- The applicant's response: **No, foreigner**.
+
+**Ask the applicant (read verbatim):**
+
+> **"Does the applicant meet the means criteria?"**""",
+        },
+    ]
+
+    summary = await chat_approach.generate_pbsg_case_summary(messages)
+
+    assert summary["status"] == "ready"
+    assert "applicant.residency_status" in summary["source_fact_keys"]
+    assert '"summary_value": "Not a Singapore Citizen or PR (foreigner)"' in captured_prompt["content"]
+    assert '"normalized_value": "foreigner"' in captured_prompt["content"]
+    assert '"value": "Singapore Citizen or PR"' not in captured_prompt["content"]
+    assert "not a Singapore Citizen or PR" in summary["text"]
+
+
+def test_deterministic_fact_extraction_treats_negated_residency_as_foreigner():
+    facts = pbsg_triage_state.deterministic_facts_from_user_text("No, not a Singapore Citizen or PR")
+
+    assert len(facts) == 1
+    assert facts[0].fact_key == "applicant.residency_status"
+    assert facts[0].normalized_value == "foreigner"
+    assert facts[0].branch_value == "if_no_foreigner"
 
 
 @pytest.mark.asyncio
@@ -1185,8 +2049,8 @@ async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_lo
 
     result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
 
-    assert result["message"]["content"].startswith("**Selected Entry:** GEN3-T03")
-    assert "Next question: Q4 from GEN3-T03" in result["message"]["content"]
+    assert "**Selected Stream:** Family and Matrimonial Stream" in visible_text(result["message"]["content"])
+    assert "Next, ask about Foreigner path" in visible_text(result["message"]["content"])
     assert "Singaporean child" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
 
@@ -1194,6 +2058,40 @@ async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_lo
 def fake_openai_client_with_json(payload):
     class FakeCompletions:
         async def create(self, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "classification",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "gpt-4.1-mini",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": json.dumps(payload)},
+                        }
+                    ],
+                },
+                strict=False,
+            )
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAIClient:
+        chat = FakeChat()
+
+    return FakeOpenAIClient()
+
+
+def fake_openai_client_with_json_sequence(payloads):
+    class FakeCompletions:
+        def __init__(self):
+            self.index = 0
+
+        async def create(self, **kwargs):
+            payload = payloads[min(self.index, len(payloads) - 1)]
+            self.index += 1
             return ChatCompletion.model_validate(
                 {
                     "id": "classification",
@@ -1232,6 +2130,489 @@ def gen3_t04_q4_messages(user_content):
         },
         {"role": "user", "content": user_content},
     ]
+
+
+def gen3_t02_q1_with_queued_divorce_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+Triage progress:
+
+- Topic resolved: criminal [GEN3-T02.json]
+- Next question: Q1 from GEN3-T02
+
+Topics identified:
+1. GEN3-T02 — active workflow
+2. GEN3-T03 — queued workflow (noted from: divorce)
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Is the offence a capital offence (punishable with death)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_local_side_enquiry_answers_glossary_and_preserves_routing(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known glossary side enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t04_q4_messages("What is PCHI?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "PCHI means per capita household income" in content
+    assert "Current question remains: Q4 from GEN3-T04" in content
+    assert result["context"]["pbsg_triage_state"]["active_side_enquiry"]["question"] == "What is PCHI?"
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T04"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q4"
+
+
+@pytest.mark.asyncio
+async def test_terminal_route_with_queued_topic_returns_continue_button(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("terminal route with queued topic should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "**Routing Recommendation:** Route A" in content
+    assert "**Queued topic ready:**" in content
+    assert "GEN3-T03" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+    assert result["context"]["pbsg_triage_state"]["routing_completion_status"] == "awaiting_topic_resolution"
+    assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
+    assert result["context"]["quick_reply"]["options"][0]["id"] == "continue_queued_workflow:GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_ack_after_terminal_route_does_not_start_queued_topic(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("route-complete acknowledgement should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "ok"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "Criminal Legal Aid Stream has been routed" in visible_text(content)
+    assert "GEN3-T03" in result["context"]["pbsg_triage_state"]["queued_workflows"]
+    assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
+    assert "Have you applied to the Legal Aid Bureau" not in content
+
+
+@pytest.mark.asyncio
+async def test_continue_queued_topic_starts_at_q1_without_validated_facts(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("queued workflow continuation should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "Continue queued workflow: GEN3-T03"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert "family violence" in content
+    assert "Have you applied to the Legal Aid Bureau" not in content
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+@pytest.mark.asyncio
+async def test_known_singapore_citizen_skips_downstream_residency_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known residency should be reused deterministically")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    initial = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant is a Singapore Citizen and wants help with divorce."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    result = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": "Applicant is a Singapore Citizen and wants help with divorce."},
+            {"role": "assistant", "content": initial["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Carried over from" in content
+    assert "Singapore Citizen or PR" in content
+    assert "Next question: Q3 from GEN3-T03" in content
+    assert "Are you a Singapore Citizen or PR?" not in visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
+
+
+@pytest.mark.asyncio
+async def test_work_permit_fact_reused_across_matrimonial_to_civil_handoff(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known work permit/residency should be reused across workflows")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    initial_query = "Applicant is on a work permit and wants help with divorce."
+    first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": initial_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    second = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    third = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+            {"role": "assistant", "content": second["message"]["content"]},
+            {"role": "user", "content": "No Singaporean child."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = third["message"]["content"]
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over from" in content
+    assert "foreigner" in content
+    assert "Next question: Q4 from GEN3-T04" in content
+    assert "Are you a Singapore Citizen or PR?" not in visible_text(content).split("**Ask the applicant (read verbatim):**")[-1]
+
+
+@pytest.mark.asyncio
+async def test_fresh_chat_does_not_reuse_prior_applicant_facts_with_same_session_state(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("fresh and same-chat routing should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    prior_query = "Applicant is on a work permit and wants help with divorce."
+    prior_first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": prior_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    prior_second = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": prior_query},
+            {"role": "assistant", "content": prior_first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    prior_third = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": prior_query},
+            {"role": "assistant", "content": prior_first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+            {"role": "assistant", "content": prior_second["message"]["content"]},
+            {"role": "user", "content": "No Singaporean child."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "Carried over from" in prior_third["message"]["content"]
+    assert "Next question: Q4 from GEN3-T04" in prior_third["message"]["content"]
+
+    fresh = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a landlord-tenant dispute and requires help."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = fresh["message"]["content"]
+    assert "**Selected Entry:** GEN3-T04" in content
+    assert "Carried over" not in content
+    assert "No, foreigner" not in content
+    assert "Next question: Q1 from GEN3-T04" in content
+    assert "Are you a Singapore Citizen or PR?" in content
+    assert "Per Capita Household Income" not in content
+
+
+@pytest.mark.asyncio
+async def test_unknown_residency_still_asks_residency_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("unknown residency path should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    initial_query = "Applicant wants help with divorce."
+    first = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": initial_query}],
+        {},
+        {},
+        session_state="session-1",
+    )
+    result = await chat_approach.run_without_streaming(
+        [
+            {"role": "user", "content": initial_query},
+            {"role": "assistant", "content": first["message"]["content"]},
+            {"role": "user", "content": "No urgency or family violence."},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Next question: Q2 from GEN3-T03" in content
+    assert "Are you a Singapore Citizen or PR?" in content
+
+
+def test_prerequisite_guard_repairs_hallucinated_queued_topic_answers(chat_approach):
+    hallucinated_content = """**Selected Entry:** GEN3-T03
+
+What I gathered from your description:
+
+- Q1: family violence or court deadline within 14 days → No [GEN3-T03.json]
+- Q2: Singapore Citizen or PR → Yes [GEN3-T03.json]
+
+Triage progress:
+
+- Next question: Q3 from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q3: "Have you applied to the Legal Aid Bureau (LAB) for civil legal aid?"**"""
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        },
+        {"role": "user", "content": "ok"},
+    ]
+
+    repaired = chat_approach.repair_unvalidated_prerequisite_skip(hallucinated_content, messages, "ok")
+
+    assert repaired is not None
+    assert "returning to the required question" in visible_text(repaired)
+    assert "Next question: Q1 from GEN3-T03" in repaired
+    assert "Have you applied to the Legal Aid Bureau" not in repaired
+
+
+@pytest.mark.asyncio
+async def test_pilot_no_income_condo_reuses_lab_and_routes_hardship_to_staff(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("pilot path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    await ask("Applicant married in December 2025, stays in condo and seeks help with divorce")
+    await ask("No")
+    await ask("Yes")
+    await ask("Yes, failed means test")
+    handoff = await ask("no income, stays condo")
+
+    assert "**Selected Entry:** GEN3-T04" in handoff["message"]["content"]
+    assert "Have you applied to the Legal Aid Bureau" not in handoff["message"]["content"]
+    assert "Per Capita Household Income" not in handoff["message"]["content"]
+    assert "Next question: Q2 from GEN3-T04" in handoff["message"]["content"]
+
+    final = await ask("rep")
+    content = final["message"]["content"]
+
+    assert "**Routing Recommendation:** Route C" in content
+    assert "Route D" not in content
+    assert "No, marginal or exceptional" in content
+    assert "No income / hardship" in content
+    assert "Have you applied to the Legal Aid Bureau" not in content
+    assert "**Ask the applicant (read verbatim):**" not in visible_text(content)
+
+
+@pytest.mark.asyncio
+async def test_pilot_low_income_hdb_foreigner_with_child_routes_to_fjss(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("low-income HDB FJSS path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    await ask("35 yo, with 3 yo daughter seeks divorce")
+    await ask("No")
+    await ask("No, foreigner")
+    await ask("Yes")
+    final = await ask("currently earning $2k, staying in 3 rm HDB")
+    content = final["message"]["content"]
+
+    assert "**Routing Recommendation:** Route D (FJSS Pro Bono" in content
+    assert "FJSS Pro Bono" in content
+    assert "Route F" not in content
+    assert "Not sure" not in content
+    assert "Carried over from" in content
+
+
+@pytest.mark.asyncio
+async def test_pilot_criminal_urgent_reuses_initial_context_and_avoids_loop(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("criminal urgent pilot path should stay deterministic without RAG/LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    answers = []
+
+    async def ask(question):
+        messages = [
+            message
+            for prior_question, prior_response in answers
+            for message in (
+                {"role": "user", "content": prior_question},
+                {"role": "assistant", "content": prior_response["message"]["content"]},
+            )
+        ]
+        response = await chat_approach.run_without_streaming(
+            [*messages, {"role": "user", "content": question}],
+            {},
+            {},
+            session_state="session-1",
+        )
+        answers.append((question, response))
+        return response
+
+    first = await ask(
+        "caller said he has been charged in court for assault and has no legal representation. "
+        "he is singaporean, no money to hire a lawyer"
+    )
+    assert "Next question: Q2 from GEN3-T02" in first["message"]["content"]
+    assert "Is the offence a capital offence" not in first["message"]["content"]
+
+    urgent = await ask("yes, 7 days")
+    content = urgent["message"]["content"]
+    assert "Concurrent routing note" in content
+    assert "Next question: Q5 from GEN3-T02" in content
+    assert "Have you applied to, or been told about, the Public Defender" in content
+    assert "Have you been charged in court?" not in content
+    assert "Is the applicant a Singapore Citizen or PR?" not in content
+    assert "GEN3-T01" not in content
+
+    final = await ask("no")
+    assert "**Routing Recommendation:** Route B (Refer to PDO First)" in final["message"]["content"]
+
+
+def test_hardship_guard_repairs_llm_route_d_rejection(chat_approach):
+    hallucinated_rejection = """**Selected Entry:** GEN3-T04
+
+Triage progress:
+
+- Last answered: Q4 = No, well over, no exceptions → Route D
+
+**Routing Recommendation:** Route D (Reject and Share Self-Help Resources)"""
+    messages = [
+        {"role": "assistant", "content": """**Selected Entry:** GEN3-T04
+
+**Ask the applicant (read verbatim):**
+
+> **Q4: "Is your Per Capita Household Income (PCHI) ≤ S$5,000, does the applicant have savings of ≤ $10,000 if younger than 60 years old (or ≤ $40,000 if 60 years old or older), and does the applicant stay in non-private housing (e.g. HDB, shelter, remand/prison)?"**"""},
+        {"role": "user", "content": "no income, stays condo"},
+    ]
+
+    repaired = chat_approach.repair_hardship_rejection(
+        hallucinated_rejection,
+        messages,
+        "no income, stays condo",
+    )
+
+    assert repaired is not None
+    assert "**Routing Recommendation:** Route C" in repaired
+    assert "Route D (Reject" not in repaired
+    assert "Repair note" in repaired
 
 
 @pytest.mark.asyncio
@@ -1902,7 +3283,7 @@ async def test_run_with_streaming_uses_deterministic_fast_path_for_locked_flow(c
         events.append(event)
 
     assert events[0]["session_state"] == "session-1"
-    assert events[1]["delta"]["content"].startswith("**Selected Entry:** GEN3-T02")
+    assert "**Selected Stream:** Criminal Legal Aid Stream" in visible_text(events[1]["delta"]["content"])
     assert "Next question: Q2 from GEN3-T02" in events[1]["delta"]["content"]
     assert events[2]["context"]["pbsg_triage_state"]["mode"] == "FAST_ROUTING"
 

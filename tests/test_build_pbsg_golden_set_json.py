@@ -154,3 +154,38 @@ def test_builder_preserves_existing_routing_structured(pbsg_build, tmp_path, mon
     entries = pbsg_build.preserve_routing_structured([{"id": "GEN3-T99", "routing": ["Route A (X): Source."]}], preserved)
 
     assert entries[0]["routing_structured"]["Route A"]["script"] == "Exact structured script."
+
+
+def test_builder_preserves_existing_means_test_structured(pbsg_build, tmp_path, monkeypatch):
+    output_dir = tmp_path / "pbsg_golden_set_by_id"
+    output_dir.mkdir()
+    (output_dir / "GEN3-T99.json").write_text(
+        json.dumps(
+            {
+                "id": "GEN3-T99",
+                "branching_logic": {
+                    "Q5": {
+                        "question": "Means?",
+                        "means_test_structured": {
+                            "branches": {
+                                "if_yes": {
+                                    "label": "Structured means",
+                                    "conditions_all": [{"fact": "applicant.pchi", "lte": 1000}],
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pbsg_build, "OUTPUT_DIR", output_dir)
+
+    preserved = pbsg_build.load_existing_means_test_structured()
+    entries = pbsg_build.preserve_means_test_structured(
+        [{"id": "GEN3-T99", "branching_logic": {"Q5": {"question": "Means?"}}}],
+        preserved,
+    )
+
+    assert entries[0]["branching_logic"]["Q5"]["means_test_structured"]["branches"]["if_yes"]["label"] == "Structured means"

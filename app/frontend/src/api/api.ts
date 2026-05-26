@@ -1,6 +1,15 @@
 const BACKEND_URI = "";
 
-import { ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, Config, SimpleAPIResponse, HistoryListApiResponse, HistoryApiResponse } from "./models";
+import {
+    ChatAppResponse,
+    ChatAppResponseOrError,
+    ChatAppRequest,
+    Config,
+    SimpleAPIResponse,
+    HistoryListApiResponse,
+    HistoryApiResponse,
+    PBSGCaseSummaryResponse
+} from "./models";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../authConfig";
 
 export async function getHeaders(idToken: string | undefined): Promise<Record<string, string>> {
@@ -34,6 +43,20 @@ export async function chatApi(request: ChatAppRequest, shouldStream: boolean, id
         body: JSON.stringify(request),
         signal: signal
     });
+}
+
+export async function pbsgCaseSummaryApi(request: ChatAppRequest, idToken: string | undefined, signal?: AbortSignal): Promise<PBSGCaseSummaryResponse> {
+    const headers = await getHeaders(idToken);
+    const response = await fetch(`${BACKEND_URI}/chat/summary`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal
+    });
+    if (!response.ok) {
+        throw new Error(`Case summary request failed with status ${response.status}`);
+    }
+    return (await response.json()) as PBSGCaseSummaryResponse;
 }
 
 export async function getSpeechApi(text: string): Promise<string | null> {

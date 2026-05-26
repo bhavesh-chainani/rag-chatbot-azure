@@ -43,6 +43,7 @@ SELECTED_ENTRY_RE = re.compile(
     r"Selected Entry:\s*([A-Z]{3}-\d{2}|GEN3-[A-Z0-9-]+|Unclear)",
     re.IGNORECASE,
 )
+PBSG_STATE_MARKER_RE = re.compile(r"<!--\s*pbsg-state:\s*(?P<body>.*?)\s*-->", re.IGNORECASE | re.DOTALL)
 ROUTE_RE = re.compile(r"\bRoute\s+([A-Z])\b", re.IGNORECASE)
 
 
@@ -55,6 +56,25 @@ def normalize_text(text: str) -> str:
 def normalize_question(question: str) -> str:
     question = re.sub(r"^\s*Q\d+:\s*", "", question, flags=re.IGNORECASE).strip()
     return normalize_text(question)
+
+
+def selected_entry_from_response(response: dict[str, Any], content: str) -> str | None:
+    context = response.get("context") or {}
+    triage_state = context.get("pbsg_triage_state") or {}
+    for key in ("pending_entry_id", "active_workflow", "workflow_id"):
+        value = triage_state.get(key)
+        if isinstance(value, str) and value.startswith("GEN3-"):
+            return value
+
+    marker_matches = list(PBSG_STATE_MARKER_RE.finditer(content))
+    if marker_matches:
+        marker_body = marker_matches[-1].group("body")
+        marker_selected = re.search(r"\bselected_entry=([^;\s]+)", marker_body, flags=re.IGNORECASE)
+        if marker_selected:
+            return marker_selected.group(1).upper()
+
+    selected_match = SELECTED_ENTRY_RE.search(content)
+    return selected_match.group(1).upper() if selected_match else None
 
 
 def post_chat(
@@ -104,8 +124,7 @@ def evaluate_phase1_case(
         content = ((response.get("message") or {}).get("content") or "").strip()
         result["latency_ms"] = int((time.time() - started) * 1000)
 
-        selected_match = SELECTED_ENTRY_RE.search(content)
-        selected = selected_match.group(1).upper() if selected_match else None
+        selected = selected_entry_from_response(response, content)
         result["selected_entry"] = selected
         result["selected_entry_ok"] = selected == expected_entry_id
 
@@ -166,8 +185,7 @@ def evaluate_phase2_case(
         content = ((response.get("message") or {}).get("content") or "").strip()
         result["latency_ms"] = int((time.time() - started) * 1000)
 
-        selected_match = SELECTED_ENTRY_RE.search(content)
-        selected = selected_match.group(1).upper() if selected_match else None
+        selected = selected_entry_from_response(response, content)
         result["selected_entry"] = selected
         result["selected_entry_ok"] = selected == expected_entry_id
 
@@ -219,8 +237,7 @@ def evaluate_multi_topic_case(
         triage_state = context.get("pbsg_triage_state") or {}
         result["latency_ms"] = int((time.time() - started) * 1000)
 
-        selected_match = SELECTED_ENTRY_RE.search(content)
-        selected = selected_match.group(1).upper() if selected_match else triage_state.get("active_workflow")
+        selected = selected_entry_from_response(response, content) or triage_state.get("active_workflow")
         queued = triage_state.get("queued_workflows") or []
         monitors = triage_state.get("triggered_overlays") or []
         result["selected_entry"] = selected

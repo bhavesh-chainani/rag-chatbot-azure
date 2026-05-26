@@ -16,7 +16,17 @@ import readNDJSONStream from "ndjson-readablestream";
 import appLogo from "../../assets/pbsg_logo.png";
 import styles from "./Chat.module.css";
 
-import { chatApi, configApi, RetrievalMode, ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, ResponseMessage, SpeechConfig } from "../../api";
+import {
+    chatApi,
+    configApi,
+    pbsgCaseSummaryApi,
+    RetrievalMode,
+    ChatAppResponse,
+    ChatAppResponseOrError,
+    ChatAppRequest,
+    ResponseMessage,
+    SpeechConfig
+} from "../../api";
 import { Answer, AnswerError, AnswerLoading } from "../../components/Answer";
 import { QuestionInput } from "../../components/QuestionInput";
 import { ExampleList } from "../../components/Example";
@@ -74,6 +84,7 @@ function useCitationPanelIframeHeight(): string {
 }
 
 const Chat = () => {
+    const { t, i18n } = useTranslation();
     const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
@@ -290,6 +301,68 @@ const Chat = () => {
         return client ? await getToken(client) : undefined;
     }, [client]);
 
+    const refreshCaseSummary = useCallback(
+        async (currentAnswers: Answers, answerSentAt: number | undefined, requestEpoch: number, idToken: string | undefined) => {
+            const latestAnswer = currentAnswers[currentAnswers.length - 1]?.[1];
+            const summary = latestAnswer?.context?.pbsg_case_summary;
+            if (!summary || summary.status !== "pending") {
+                return;
+            }
+            const messages: ResponseMessage[] = currentAnswers.flatMap(a => [
+                { content: a[0], role: "user" },
+                { content: a[1].message.content, role: "assistant" }
+            ]);
+            try {
+                const response = await pbsgCaseSummaryApi(
+                    {
+                        messages,
+                        context: {
+                            overrides: {
+                                send_text_sources: sendTextSources,
+                                send_image_sources: sendImageSources,
+                                search_text_embeddings: searchTextEmbeddings,
+                                search_image_embeddings: searchImageEmbeddings,
+                                language: i18n.language,
+                                use_agentic_knowledgebase: useAgenticKnowledgeBase
+                            }
+                        },
+                        session_state: latestAnswer.session_state
+                    },
+                    idToken
+                );
+                if (chatEpochRef.current !== requestEpoch) {
+                    return;
+                }
+                const updatedAnswers = answersRef.current.map(answerTuple => {
+                    const [userQuestion, answerResponse, sentAt] = answerTuple;
+                    if (sentAt !== answerSentAt) {
+                        return answerTuple;
+                    }
+                    const updatedResponse: ChatAppResponse = {
+                        ...answerResponse,
+                        context: {
+                            ...answerResponse.context,
+                            pbsg_case_summary: response.pbsg_case_summary
+                        }
+                    };
+                    return [userQuestion, updatedResponse, sentAt] as [string, ChatAppResponse, number?];
+                });
+                setAnswers(updatedAnswers);
+                answersRef.current = updatedAnswers;
+            } catch (e) {
+                console.warn("Unable to refresh PBSG case summary", e);
+            }
+        },
+        [
+            i18n.language,
+            searchImageEmbeddings,
+            searchTextEmbeddings,
+            sendImageSources,
+            sendTextSources,
+            useAgenticKnowledgeBase
+        ]
+    );
+
     const updateStreamingPreference = (isStreamingEnabledOverride: boolean, disablesStreamingOverride: boolean) => {
         if (!isStreamingEnabledOverride) {
             setShouldStream(current => {
@@ -405,6 +478,7 @@ const Chat = () => {
                     setAnswers(newAnswers);
                     answersRef.current = newAnswers;
                     setPendingQuestionSentAt(null);
+                    void refreshCaseSummary(newAnswers, questionSentAt, requestEpoch, token);
                     if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                         enqueueHistorySave(
                             parsedResponse.session_state,
@@ -431,6 +505,7 @@ const Chat = () => {
                 setAnswers(newAnswers);
                 answersRef.current = newAnswers;
                 setPendingQuestionSentAt(null);
+                void refreshCaseSummary(newAnswers, questionSentAt, requestEpoch, token);
                 if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                     enqueueHistorySave(parsedResponse.session_state, newAnswers, getHistoryToken, historyManager);
                 }
@@ -674,7 +749,6 @@ const Chat = () => {
         }
     };
 
-    const { t, i18n } = useTranslation();
     const citationPanelIframeHeight = useCitationPanelIframeHeight();
 
     return (

@@ -397,6 +397,27 @@ async def chat_stream(auth_claims: dict[str, Any]):
         return error_response(error, "/chat")
 
 
+@bp.route("/chat/summary", methods=["POST"])
+@authenticated
+async def chat_summary(auth_claims: dict[str, Any]):
+    if not request.is_json:
+        return jsonify({"error": "request must be json"}), 415
+    request_json = await request.get_json()
+    context = request_json.get("context", {})
+    context["auth_claims"] = auth_claims
+    try:
+        approach = current_app.config[CONFIG_CHAT_APPROACH]
+        if not isinstance(approach, ChatReadRetrieveReadApproach):
+            return jsonify({"error": "case summaries are not supported for this chat approach"}), 400
+        result = await approach.generate_pbsg_case_summary(
+            request_json.get("messages", []),
+            context=context,
+        )
+        return jsonify({"pbsg_case_summary": result})
+    except Exception as error:
+        return error_response(error, "/chat/summary")
+
+
 # Send MSAL.js settings to the client UI
 @bp.route("/auth_setup", methods=["GET"])
 def auth_setup():

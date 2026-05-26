@@ -10,12 +10,15 @@ import pbsg_triage_state
 from pbsg_triage_state import (
     GOLDEN_SET_RELATIVE_DIR,
     PBSGRoutingEngine,
+    PBSGTriageFact,
     PBSGTriageState,
     PBSGWorkflowGraph,
     branch_key_for_answer,
     build_triage_state,
     candidate_golden_set_dirs,
     collapse_duplicate_route_cards,
+    convert_question_to_second_person,
+    initial_extracted_fact_supported,
     label_from_branch_key,
     load_golden_set_entries,
     parse_transition_outcome,
@@ -796,6 +799,55 @@ def test_criminal_initial_context_extracts_reusable_routing_facts():
     assert active_facts["applicant.representation_status"].branch_value == "if_no"
 
 
+def test_initial_structured_not_sure_fact_requires_explicit_user_uncertainty():
+    fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    assert not initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert initial_extracted_fact_supported(
+        fact, "Applicant has a landlord-tenant dispute and is not sure about their PR or citizenship status."
+    )
+
+
+def test_initial_routing_ignores_unsupported_not_sure_extraction():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    resolution = resolve_initial_topic(
+        entries, "Applicant has a landlord-tenant dispute and requires help. How do I triage?"
+    )
+    assert resolution is not None
+    bogus_fact = PBSGTriageFact(
+        fact_key="applicant.residency_status",
+        value="Not sure",
+        normalized_value="not sure",
+        source="structured_initial_extraction:GEN3-T04.Q1",
+        source_type="structured_extraction",
+        branch_value="if_not_sure",
+        confidence=0.9,
+    )
+
+    result = engine.execute_initial_resolution(
+        "Applicant has a landlord-tenant dispute and requires help. How do I triage?",
+        resolution,
+        extracted_facts=[bogus_fact],
+    )
+
+    assert result is not None
+    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.current_question_id == "Q1"
+    assert "Applicant response: Not sure" not in result.content
+    assert "Are you a Singapore Citizen or PR?" in result.content
+
+
 def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_facts():
     entries = load_entries()
     engine = PBSGRoutingEngine(entries)
@@ -1118,3 +1170,32 @@ def test_gen3_t13_structured_route_card_renders_overlay_script():
     assert "**Routing Recommendation:** Route B (Minor — Special Handling)" in content
     assert "I need PBSG Staff to handle this carefully" in content
     assert "Do not continue triage independently" in content
+
+
+@pytest.mark.parametrize(
+    ("entry_id", "question_id"),
+    [
+        ("GEN3-T02", "Q6"),
+        ("GEN3-T03", "Q5"),
+        ("GEN3-T04", "Q4"),
+    ],
+)
+def test_means_questions_use_lowercase_mid_sentence_clauses(entry_id: str, question_id: str):
+    entries = load_entries()
+    question_node = entries[entry_id]["branching_logic"][question_id]
+    converted = convert_question_to_second_person(question_node["question"])
+
+    assert ", Do " not in converted
+    assert ", do you " in converted
+    assert " and do you " in converted
+    assert "if you are younger than" in converted
+    assert "if you are 60 years old or older" in converted
+
+
+def test_convert_question_to_second_person_preserves_sentence_start_capitalization():
+    assert convert_question_to_second_person("Is the applicant a Singapore Citizen or PR?") == (
+        "Are you a Singapore Citizen or PR?"
+    )
+    assert convert_question_to_second_person("Has the applicant applied to the Legal Aid Bureau (LAB)?") == (
+        "Have you applied to the Legal Aid Bureau (LAB)?"
+    )

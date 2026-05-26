@@ -21,6 +21,34 @@
     padding-bottom: 1em;
 }
 
+.caseSummary {
+    margin-top: 0.75em;
+    padding: 0.875em 1em;
+    border: 1px solid #d1dbfa;
+    border-radius: 0.625em;
+    background: #f7f9ff;
+    line-height: 1.4;
+}
+
+.caseSummaryHeader {
+    display: flex;
+    justify-content: space-between;
+    gap: 1em;
+    font-weight: 700;
+    margin-bottom: 0.375em;
+}
+
+.caseSummaryStatus {
+    font-size: 0.875em;
+    font-weight: 500;
+    color: #5c5c5c;
+}
+
+.caseSummaryPlaceholder {
+    margin: 0;
+    color: #5c5c5c;
+}
+
 .answerText h1,
 h2,
 h2 {

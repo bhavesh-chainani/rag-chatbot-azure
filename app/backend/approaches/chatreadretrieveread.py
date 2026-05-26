@@ -1,5 +1,7 @@
+import hashlib
 import json
 import re
+import time
 from collections.abc import AsyncGenerator, Awaitable
 from dataclasses import asdict
 from typing import Any, Optional, cast
@@ -38,12 +40,19 @@ from pbsg_triage_state import (
     canonical_fact_key_for_node,
     classify_turn_interrupt,
     collapse_duplicate_route_cards,
+    convert_question_to_second_person,
     format_state_prompt,
     label_from_branch_key,
     load_golden_set_entries,
+    next_question_lines,
     normalize_branch_label,
     parse_transition_outcome,
+    parse_pbsg_state_marker,
+    pbsg_state_marker,
     question_text_from_entry,
+    selected_stream_lines,
+    short_question_label,
+    stream_display_name,
     user_fact_for_question,
     resolve_expected_transition,
     resolve_initial_topic,
@@ -94,6 +103,310 @@ PBSG_GLOSSARY_ANSWERS = {
     "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
+PBSG_GENERAL_ENQUIRY_FAQS = {
+    "lasco": {
+        "patterns": [r"\blasco\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["lasco"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "clas": {
+        "patterns": [r"\bclas\b", r"\bcriminal legal aid scheme\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["clas"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "lab": {
+        "patterns": [r"\blab\b", r"\blegal aid bureau\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["lab"],
+        "source_ids": ["GEN3-T03", "GEN3-T04"],
+    },
+    "fjss": {
+        "patterns": [r"\bfjss\b", r"\bfamily justice support scheme\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["fjss"],
+        "source_ids": ["GEN3-T03"],
+    },
+    "pchi": {
+        "patterns": [r"\bpchi\b", r"\bper capita household income\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["pchi"],
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "services": {
+        "patterns": [
+            r"\bwhat services\b",
+            r"\bservices (?:does|do|are)\b",
+            r"\bwhat (?:does|can) (?:pbsg|pro bono sg|probono sg) (?:provide|do|offer)\b",
+            r"\bwhat help (?:does|can) (?:pbsg|pro bono sg|probono sg) (?:provide|offer)\b",
+            r"\btypes? of help\b",
+            r"\bget legal help\b",
+            r"\blegal guidance\b",
+            r"\blegal clinic(?:s)?\b",
+            r"\blegal representation\b",
+        ],
+        "answer": (
+            "The approved triage content points applicants to different PBSG-related pathways depending on the matter: "
+            "legal guidance or legal clinics, criminal legal aid triage, family/matrimonial triage, civil guidance, "
+            "urgent handling, and escalation to PBSG Staff when the facts are too complex or sensitive for standard routing."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_route": {
+        "patterns": [
+            r"\bwhat(?:'s| is)? (?:a )?route\b",
+            r"\bwhat (?:does|do) route [a-z]\b",
+            r"\bwhat happens (?:after|when) .*route\b",
+            r"\bwhy (?:am i|is the applicant|was this) routed\b",
+            r"\bhow (?:do you|does this|does the chatbot) (?:choose|decide|determine) (?:a )?route\b",
+            r"\brouting recommendation\b",
+            r"\broute outcome\b",
+            r"\bfinal route\b",
+        ],
+        "answer": (
+            "A route is the recommended next pathway after the required triage questions are answered. The chatbot should "
+            "not invent route letters or outcomes: route decisions come from the structured Golden Set branching logic and "
+            "the deterministic routing engine. If a route applies, the response should explain what to say to the applicant, "
+            "what they need to know, access steps, documents to prepare, intern next steps, and caveats where those details "
+            "exist in the source route."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_stream": {
+        "patterns": [
+            r"\bwhat(?:'s| is)? (?:a )?(?:stream|workstream|workflow)\b",
+            r"\bwhat (?:stream|workstream|workflow) am i in\b",
+            r"\bselected stream\b",
+            r"\blegal stream\b",
+            r"\btriage stream\b",
+            r"\bcriminal stream\b",
+            r"\bfamily stream\b",
+            r"\bmatrimonial stream\b",
+            r"\bcivil stream\b",
+            r"\burgent stream\b",
+            r"\bvulnerable applicant stream\b",
+            r"\bstreaming\b",
+        ],
+        "answer": (
+            "In this chatbot, a stream or workstream means the active triage workflow, not video or audio streaming. "
+            "Common streams in the approved Golden Set include first contact, criminal legal aid, family/matrimonial, "
+            "civil and guidance, urgent matters, and vulnerable-applicant handling. Once a legal stream is selected, the "
+            "deterministic routing engine follows that stream's questions and branching logic."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "triage_process": {
+        "patterns": [
+            r"\bhow (?:does|do) (?:triage|the triage|this chatbot) work\b",
+            r"\bwhat (?:questions|information|info) (?:do you|does pbsg|will you) need\b",
+            r"\bwhy (?:are you|do you keep) asking\b",
+            r"\bwhy (?:do you|does the chatbot) ask (?:these )?questions\b",
+            r"\bwhat should i tell (?:you|the chatbot|the intern)\b",
+            r"\bwhat facts (?:are|do you) need\b",
+            r"\bstart triage\b",
+        ],
+        "answer": (
+            "The triage flow asks only the facts needed to identify the correct legal help pathway. Depending on the topic, "
+            "it may ask about the legal issue, whether there is urgency or safety risk, whether the applicant is already "
+            "represented, citizenship or residency, prior applications to agencies such as LAB or PDO, means information, "
+            "and whether staff escalation is needed. Route outcomes should come from the deterministic workflow, not an LLM guess."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "staff_escalation": {
+        "patterns": [
+            r"\bpbsg staff\b",
+            r"\bstaff escalation\b",
+            r"\bescalate\b",
+            r"\bhuman review\b",
+            r"\bstaff assessment\b",
+            r"\bcall back\b",
+            r"\bfollow up\b",
+        ],
+        "answer": (
+            "Staff escalation is used when the facts are too complex, urgent, sensitive, unclear, or outside the standard "
+            "branching path for the intern to classify safely. The intern should record the applicant's particulars and the "
+            "exact facts creating concern, then escalate to PBSG Staff according to the applicable route instructions."
+        ),
+        "source_ids": ["GEN3-T04", "GEN3-T06", "GEN3-T13"],
+    },
+    "who_can_get_help": {
+        "patterns": [
+            r"\bwho can get help\b",
+            r"\bwho is eligible\b",
+            r"\bwho qualifies\b",
+            r"\bdo i qualify\b",
+            r"\bcan i get help\b",
+            r"\bcan (?:pbsg|pro bono sg|probono sg) help\b",
+            r"\bcan (?:you|they) help me\b",
+            r"\bam i eligible\b",
+            r"\beligibility\b",
+        ],
+        "answer": (
+            "Eligibility depends on the applicant's legal issue and the pathway. The triage flow may need facts such as "
+            "the legal topic, citizenship or residency, whether another agency like LAB or PDO should be tried first, "
+            "means information, urgency, and whether staff escalation is needed."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "fees_cost": {
+        "patterns": [
+            r"\bis (?:it|pbsg|pro bono sg|probono sg) free\b",
+            r"\bfree legal\b",
+            r"\bhow much (?:does|will|is)\b",
+            r"\bfees?\b",
+            r"\bcosts?\b",
+            r"\bpay\b",
+            r"\blow-cost\b",
+            r"\bmeans test\b",
+        ],
+        "answer": (
+            "The approved triage content describes some pathways as free or low-cost, but cost and eligibility depend on "
+            "the scheme and the applicant's facts. Some routes involve means tests, merits tests, or first applying to "
+            "another agency such as LAB or PDO. The chatbot should triage the matter before confirming the relevant pathway."
+        ),
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "apply_appointment_documents": {
+        "patterns": [
+            r"\bhow (?:do|can) i apply\b",
+            r"\bapplication\b",
+            r"\bappointment\b",
+            r"\bbook\b",
+            r"\bwalk[- ]?in\b",
+            r"\bin person\b",
+            r"\bdocuments?\b",
+            r"\bwhat (?:should|do) i (?:bring|prepare)\b",
+            r"\bprepare\b",
+            r"\bform\b",
+            r"\blink\b",
+            r"\bwebsite\b",
+        ],
+        "answer": (
+            "Application steps, appointment instructions, links, and documents depend on the route. The route card should "
+            "share only the source-backed access details and preparation items for the applicable pathway. If the applicant "
+            "cannot self-apply or needs in-person help, the Golden Set includes PBSG Counter handling for some legal clinic situations."
+        ),
+        "source_ids": ["GEN3-T02", "GEN3-T03", "GEN3-T04"],
+    },
+    "legal_advice_boundary": {
+        "patterns": [
+            r"\bcan (?:you|the intern|pbsg) give legal advice\b",
+            r"\blegal advice\b",
+            r"\badvise me\b",
+            r"\bwhat should i do\b",
+            r"\bwill i win\b",
+            r"\bchances? of (?:winning|success)\b",
+            r"\binterpret\b",
+            r"\bcontract clause\b",
+            r"\bplead guilty\b",
+            r"\bshould i sue\b",
+        ],
+        "answer": (
+            "The triage content says interns and volunteers must not give legal advice, interpret documents, predict case "
+            "outcomes, or tell the applicant what they should do legally. They may help identify the right legal help pathway, "
+            "read scheme information, take down particulars, and escalate to PBSG Staff when needed."
+        ),
+        "source_ids": ["GEN3-T13"],
+    },
+    "urgency": {
+        "patterns": [
+            r"\burgent\b",
+            r"\bemergency\b",
+            r"\bimmediate\b",
+            r"\bdeadline\b",
+            r"\bcourt date\b",
+            r"\bhearing\b",
+            r"\bwithin 14 days\b",
+            r"\bunsafe\b",
+            r"\bno shelter\b",
+            r"\bno food\b",
+            r"\bself[- ]?harm\b",
+        ],
+        "answer": (
+            "Urgent handling is triggered by facts such as immediate safety risk, basic-needs or child-welfare crisis, "
+            "or a concrete legal/procedural deadline within 14 days. If those facts are present, the urgent stream should "
+            "be handled before or alongside the ordinary legal triage path."
+        ),
+        "source_ids": ["GEN3-T06"],
+    },
+    "counter_location": {
+        "patterns": [
+            r"\bstate courts help centre\b",
+            r"\bpbsg counter\b",
+            r"\bcounter\b",
+            r"\bwhere (?:are you|is pbsg|is pro bono sg)\b",
+            r"\blocated\b",
+            r"\blocation\b",
+            r"\baddress\b",
+        ],
+        "answer": (
+            "The approved triage content mentions a PBSG Counter at State Courts Help Centre, "
+            "1 Havelock Square, #B1-18 State Courts, Singapore 059724, for applicants who need in-person help with "
+            "legal clinic applications. For current office, counter, and appointment details, check Pro Bono SG's "
+            "official channels before sharing them as final operational information."
+        ),
+        "source_ids": ["GEN3-T04"],
+    },
+    "pbsg": {
+        "patterns": [
+            r"\bwhat(?:'s| is) (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\btell me more about (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\bwho (?:is|are) (?:pbsg|pro bono sg|probono sg|pro bono singapore)\b",
+            r"\bpbsg\b",
+            r"\bpro bono sg\b",
+            r"\bprobono sg\b",
+            r"\bpro bono singapore\b",
+        ],
+        "answer": (
+            "Pro Bono SG is the organisation referenced in this triage content. The chatbot uses PBSG's structured "
+            "Golden Set to help identify the right legal help pathway, such as legal clinics/guidance, criminal legal "
+            "aid pathways, family-related pathways, civil guidance, urgent handling, or staff escalation where needed."
+        ),
+        "source_ids": ["GEN3-T01", "GEN3-T02", "GEN3-T03", "GEN3-T04", "GEN3-T06"],
+    },
+    "location": {
+        "patterns": [
+            r"\bwhere (?:are you|is pbsg|is pro bono sg)\b",
+            r"\blocated\b",
+            r"\blocation\b",
+            r"\baddress\b",
+            r"\bcounter\b",
+        ],
+        "answer": (
+            "The approved triage content mentions a PBSG Counter at State Courts Help Centre, "
+            "1 Havelock Square, #B1-18 State Courts, Singapore 059724, for applicants who need in-person help with "
+            "legal clinic applications. For current office, counter, and appointment details, check Pro Bono SG's "
+            "official channels before sharing them as final operational information."
+        ),
+        "source_ids": ["GEN3-T04"],
+    },
+}
+PBSG_GENERAL_ENQUIRY_INTENT_PATTERN = re.compile(
+    r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
+    flags=re.IGNORECASE,
+)
+PBSG_TRIAGE_REQUEST_PATTERN = re.compile(
+    r"\b(applicant|caller|client|my|me|i|we|he|she|they|someone)\b.{0,80}"
+    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b"
+    r"|"
+    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b.{0,80}"
+    r"\b(help|assist|representation|lawyer|legal|case|matter|issue|problem)\b",
+    flags=re.IGNORECASE,
+)
+
+PBSG_CASE_SUMMARY_PENDING_MESSAGE = "Applicant summary is updating. You can continue with the next triage step now."
+PBSG_CASE_SUMMARY_SYSTEM_PROMPT = """You write concise applicant case summaries for Pro Bono SG hotline interns.
+
+Rules:
+- Summarize only applicant facts listed in the provided JSON evidence.
+- Do not decide eligibility, routing, route letters, or the next question.
+- Do not mention internal workflow ids, GEN3 codes, JSON filenames, hidden state, or Q numbers.
+- Do not infer residency, nationality, urgency, safety, income, representation, or eligibility. Mention those only when the evidence explicitly contains them.
+- If a fact is not in the evidence, treat it as unknown. Do not fill gaps from the current workflow, the next question, or common assumptions.
+- For high-risk facts, prefer the `summary_value` exactly.
+- For residency facts, `normalized_value: "foreigner"` means the applicant is not a Singapore Citizen or PR.
+- Keep it readable in under 15 seconds.
+- Use 2-4 short bullets, each starting with "- ".
+- If a fact is unknown, say it has not been provided yet instead of guessing.
+"""
+INTERNAL_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b|\bSelected Entry\b|\bQ\d+[A-Z]?\b", flags=re.IGNORECASE)
 
 PBSG_QUICK_REPLY_LABELS = {
     ("GEN3-T01", "Q2"): {
@@ -257,6 +570,10 @@ class ChatReadRetrieveReadApproach(Approach):
         if not content:
             return None, None
 
+        marker = parse_pbsg_state_marker(content)
+        if marker.get("pending_question"):
+            return marker.get("pending_entry") or marker.get("selected_entry"), marker["pending_question"].upper()
+
         selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
         selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
 
@@ -282,30 +599,14 @@ class ChatReadRetrieveReadApproach(Approach):
         entry_id, question_id = question_matches[-1]
         return entry_id or selected_entry_id, question_id
 
-    def convert_question_to_second_person(self, question: str) -> str:
-        question = re.sub(r"^\([^)]*\)\s*", "", question).strip()
-        replacements = [
-            (r"\bIs the applicant's\b", "Is your"),
-            (r"\bDoes the applicant's\b", "Does your"),
-            (r"\bHas the applicant's\b", "Has your"),
-            (r"\bIs the applicant\b", "Are you"),
-            (r"\bHas the applicant\b", "Have you"),
-            (r"\bDoes the applicant\b", "Do you"),
-            (r"\bthe applicant's\b", "your"),
-            (r"\bthe applicant\b", "you"),
-            (r"\bapplicant's\b", "your"),
-            (r"\bapplicant\b", "you"),
-        ]
-        for pattern, replacement in replacements:
-            question = re.sub(pattern, replacement, question, flags=re.IGNORECASE)
-        return question
-
     def normalize_asked_question_text(self, content: Optional[str], extra_info: ExtraInfo) -> Optional[str]:
         if not content:
             return content
 
         selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*([A-Z0-9-]+)", content, flags=re.IGNORECASE)
         selected_entry_id = selected_entry_matches[-1] if selected_entry_matches else None
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry", selected_entry_id)
         if not selected_entry_id:
             return content
 
@@ -349,7 +650,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(canonical_question, str) or not canonical_question:
             return content
 
-        normalized_question = self.convert_question_to_second_person(canonical_question)
+        normalized_question = convert_question_to_second_person(canonical_question)
         replacement = (
             f"{match.group('prefix')}{match.group('quote')}{normalized_question}"
             f"{match.group('closing_quote')}{match.group('suffix')}"
@@ -425,32 +726,29 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(question, str):
             return None
 
-        next_label = f"{transition.target_question_id} from {transition.target_entry_id}"
-        question_prefix = transition.target_question_id
-        if transition.transition_type == "nested_stream":
-            next_label = f"{transition.target_entry_id} {transition.target_question_id} (Urgent concurrent path)"
-            question_prefix = f"{transition.target_entry_id} {transition.target_question_id}"
-
-        return "\n".join(
+        lines = selected_stream_lines(
+            entries,
+            transition.entry_id,
+            transition.target_entry_id,
+            transition.target_question_id,
+            transition.route_label,
+        )
+        lines.extend(
             [
-                f"**Selected Entry:** {transition.entry_id}",
                 "",
-                "What I gathered from your description:",
+                "Latest triage update:",
                 "",
-                f"- {transition.question_id}: {self.label_from_branch_key(transition.branch_key)} [{transition.entry_id}.json]",
+                f"- The applicant's response: **{self.label_from_branch_key(transition.branch_key)}**.",
+                "- What this means: we should continue with the next required triage question.",
                 "",
                 "Triage progress:",
                 "",
-                f"- Last answered: {transition.question_id} = {self.label_from_branch_key(transition.branch_key)} → {transition.outcome} [{transition.entry_id}.json]",
-                f"- Next question: {next_label}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'> **{question_prefix}: "{self.convert_question_to_second_person(question)}"**',
-                "",
-                f"Type the applicant's answer here and I will determine the next question or route. [{transition.target_entry_id}.json]",
+                f"- Continue in the {stream_display_name(entries, transition.target_entry_id)}.",
+                "- Next step: ask the required follow-up question below.",
             ]
         )
+        lines.extend(next_question_lines(entries, transition.target_entry_id, transition.target_question_id, question))
+        return "\n".join(lines)
 
     def render_deterministic_transition_response(
         self, transition: PBSGTransition | None, entries: dict[str, dict[str, Any]]
@@ -546,6 +844,178 @@ class ChatReadRetrieveReadApproach(Approach):
         ]
         self.ensure_golden_set_source_entries(data_points, entry_ids)
 
+    def pbsg_case_summary_hash(self, triage_state: Any) -> str:
+        payload = {
+            "active_workflow": getattr(triage_state, "active_workflow", None),
+            "pending_entry_id": getattr(triage_state, "pending_entry_id", None),
+            "current_question_id": getattr(triage_state, "current_question_id", None),
+            "completed_workflows": getattr(triage_state, "completed_workflows", []),
+            "queued_workflows": getattr(triage_state, "queued_workflows", []),
+            "fact_ledger": [
+                {
+                    "fact_key": getattr(fact, "fact_key", None),
+                    "value": getattr(fact, "value", None),
+                    "normalized_value": getattr(fact, "normalized_value", None),
+                    "source": getattr(fact, "source", None),
+                    "status": getattr(fact, "status", None),
+                }
+                for fact in getattr(triage_state, "fact_ledger", [])
+            ],
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+    def pending_pbsg_case_summary(self, triage_state: Any) -> dict[str, Any]:
+        return {
+            "text": "",
+            "status": "pending",
+            "source_turn_hash": self.pbsg_case_summary_hash(triage_state),
+            "updated_at": None,
+        }
+
+    def response_context_with_case_summary(self, context: dict[str, Any], triage_state: Any) -> dict[str, Any]:
+        context["pbsg_case_summary"] = self.pending_pbsg_case_summary(triage_state)
+        return context
+
+    def sanitize_pbsg_case_summary(self, summary: str) -> str:
+        lines = [line.strip() for line in summary.splitlines() if line.strip()]
+        cleaned_lines: list[str] = []
+        for line in lines:
+            line = re.sub(r"^\d+[.)]\s*", "- ", line)
+            if not line.startswith("- "):
+                line = f"- {line.lstrip('- ').strip()}"
+            line = INTERNAL_ID_PATTERN.sub("", line)
+            line = re.sub(r"\s+", " ", line).strip()
+            if line and line != "-":
+                cleaned_lines.append(line)
+        return "\n".join(cleaned_lines[:4])
+
+    def reliable_case_summary_facts(self, triage_state: Any) -> list[PBSGTriageFact]:
+        reliable_source_types = {"routing_answer", "deterministic_transition", "user_message", "structured_extraction"}
+        high_risk_fact_keys = {
+            "applicant.residency_status",
+            "matter.urgency_or_safety",
+            "applicant.representation_status",
+            "applicant.means_status",
+            "applicant.lab_application_status",
+            "applicant.pdo_application_status",
+        }
+        pending_source = (
+            f"{triage_state.pending_entry_id}.{triage_state.current_question_id}"
+            if getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None)
+            else None
+        )
+        facts: list[PBSGTriageFact] = []
+        for fact in getattr(triage_state, "fact_ledger", [])[-10:]:
+            if getattr(fact, "status", None) != "active":
+                continue
+            if getattr(fact, "source_type", None) not in reliable_source_types:
+                continue
+            if pending_source and getattr(fact, "source", None) == pending_source:
+                continue
+            if fact.fact_key in high_risk_fact_keys and fact.source_type == "user_message":
+                source_text = (fact.source_text or "").lower()
+                if fact.fact_key == "applicant.residency_status" and not re.search(
+                    r"\b(singaporean|singapore citizen|sg citizen|sgc|permanent resident|\bpr\b|foreigner|"
+                    r"work permit|employment pass|s pass|dependent pass|not (?:a )?singapore citizen(?: or pr)?|"
+                    r"not (?:a )?citizen|not (?:a )?pr)\b",
+                    source_text,
+                ):
+                    continue
+            facts.append(fact)
+        return facts
+
+    def case_summary_value_for_fact(self, fact: PBSGTriageFact) -> str:
+        if fact.fact_key == "applicant.residency_status":
+            if fact.normalized_value == "foreigner" or fact.branch_value == "if_no_foreigner":
+                return "Not a Singapore Citizen or PR (foreigner)"
+            if fact.normalized_value == "sgc_pr" or fact.branch_value == "if_yes":
+                return "Singapore Citizen or PR"
+        return fact.value
+
+    def case_summary_fact_payload(self, triage_state: Any) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = []
+        for fact in self.reliable_case_summary_facts(triage_state):
+            entry_id = None
+            question_id = None
+            if "." in fact.source and fact.source.split(".", 1)[0] in self.pbsg_golden_set_entries:
+                entry_id, question_id = fact.source.split(".", 1)
+            question = question_text_from_entry(self.pbsg_golden_set_entries, entry_id, question_id)
+            payload.append(
+                {
+                    "fact_key": fact.fact_key,
+                    "value": fact.value,
+                    "summary_value": self.case_summary_value_for_fact(fact),
+                    "normalized_value": fact.normalized_value,
+                    "branch_value": fact.branch_value,
+                    "source_type": fact.source_type,
+                    "source": fact.source,
+                    "question": question,
+                    "provenance": fact.source_text or fact.provenance,
+                }
+            )
+        return payload
+
+    def compact_case_summary_facts(self, triage_state: Any) -> str:
+        facts = self.case_summary_fact_payload(triage_state)
+        if not facts:
+            return "[]"
+        return json.dumps(facts, ensure_ascii=False, indent=2)
+
+    async def generate_pbsg_case_summary(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        context = context or {}
+        triage_state = build_triage_state(messages, self.pbsg_golden_set_entries, "")
+        source_turn_hash = self.pbsg_case_summary_hash(triage_state)
+        fact_payload = self.case_summary_fact_payload(triage_state)
+        if not self.openai_client:
+            return {
+                "text": "",
+                "status": "unavailable",
+                "source_turn_hash": source_turn_hash,
+                "updated_at": None,
+                "source_fact_count": len(fact_payload),
+                "source_fact_keys": [fact["fact_key"] for fact in fact_payload],
+            }
+
+        prompt = "\n".join(
+            [
+                "Current stream: " + stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow),
+                "Queued streams: "
+                + ", ".join(stream_display_name(self.pbsg_golden_set_entries, workflow) for workflow in triage_state.queued_workflows),
+                "Completed streams: "
+                + ", ".join(stream_display_name(self.pbsg_golden_set_entries, workflow) for workflow in triage_state.completed_workflows),
+                "",
+                "Evidence JSON (use only these facts):",
+                json.dumps(fact_payload, ensure_ascii=False, indent=2) if fact_payload else "[]",
+            ]
+        )
+        response = await cast(
+            Awaitable[ChatCompletion],
+            self.create_chat_completion(
+                self.chatgpt_deployment,
+                self.chatgpt_model,
+                [
+                    {"role": "system", "content": PBSG_CASE_SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                overrides={},
+                response_token_limit=220,
+                temperature=0.1,
+            ),
+        )
+        text = self.sanitize_pbsg_case_summary(response.choices[0].message.content or "")
+        return {
+            "text": text,
+            "status": "ready" if text else "unavailable",
+            "source_turn_hash": source_turn_hash,
+            "updated_at": int(time.time()),
+            "source_fact_count": len(fact_payload),
+            "source_fact_keys": [fact["fact_key"] for fact in fact_payload],
+        }
+
     def build_deterministic_chat_response(
         self,
         deterministic_result: PBSGDeterministicResult,
@@ -587,15 +1057,18 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {
-                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {
+                        key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+                    },
+                    "followup_questions": extra_info.followup_questions,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(deterministic_result.state),
                 },
-                "followup_questions": extra_info.followup_questions,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(deterministic_result.state),
-            },
+                deterministic_result.state,
+            ),
             "session_state": session_state,
         }
 
@@ -609,6 +1082,7 @@ class ChatReadRetrieveReadApproach(Approach):
         entry = self.pbsg_golden_set_entries.get(workflow_id, {})
         topic = entry.get("topic") if isinstance(entry, dict) else None
         label_suffix = f" - {topic}" if isinstance(topic, str) and topic else ""
+        stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id)
         return QuickReply(
             mode="single",
             entryId=workflow_id,
@@ -616,8 +1090,8 @@ class ChatReadRetrieveReadApproach(Approach):
             options=[
                 QuickReplyOption(
                     id=f"continue_queued_workflow:{workflow_id}",
-                    label=f"Topic resolved - continue to {workflow_id}",
-                    value=f"Continue queued workflow: {workflow_id}{label_suffix}",
+                    label=f"Topic resolved - continue to {stream_name}",
+                    value=f"Continue queued workflow: {stream_name}{label_suffix}",
                 )
             ],
         )
@@ -629,17 +1103,27 @@ class ChatReadRetrieveReadApproach(Approach):
         workflow_id = quick_reply.entryId
         entry = self.pbsg_golden_set_entries.get(workflow_id, {})
         topic = entry.get("topic") if isinstance(entry, dict) else workflow_id
+        stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id)
+        marker = parse_pbsg_state_marker(content)
+        state_marker = pbsg_state_marker(
+            marker.get("selected_entry") or getattr(triage_state, "active_workflow", None) or getattr(triage_state, "workflow_id", None),
+            marker.get("pending_entry"),
+            marker.get("pending_question"),
+            marker.get("route_label"),
+            [workflow_id],
+        )
         note = "\n".join(
             [
                 "",
+                state_marker,
                 "**Queued topic ready:**",
                 "",
-                f"- {workflow_id}: {topic}",
+                f"- {stream_name}: {topic}",
                 "- Click the button when this routed topic has been resolved and you are ready to continue.",
                 "",
                 "Topics identified:",
-                f"1. {triage_state.active_workflow or triage_state.workflow_id or 'Current workflow'} — routed workflow",
-                f"2. {workflow_id} — queued workflow",
+                f"1. {stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow or triage_state.workflow_id)} - routed workflow",
+                f"2. {stream_name} - queued workflow",
             ]
         )
         return f"{content}{note}"
@@ -656,14 +1140,27 @@ class ChatReadRetrieveReadApproach(Approach):
         for topic in topics:
             if topic.entry_id not in [existing.entry_id for existing in unique_topics]:
                 unique_topics.append(topic)
-        active_line = f"1. {active_workflow} — active workflow" if active_workflow else "1. Current stream — active workflow"
+        active_line = (
+            f"1. {stream_display_name(self.pbsg_golden_set_entries, active_workflow)} - active workflow"
+            if active_workflow
+            else "1. Current stream - active workflow"
+        )
         queued_lines = [
-            f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+            f"{index}. {stream_display_name(self.pbsg_golden_set_entries, topic.entry_id)} - queued workflow (noted from: {topic.evidence})"
             for index, topic in enumerate(unique_topics, start=2)
         ]
+        marker = parse_pbsg_state_marker(content)
+        state_marker = pbsg_state_marker(
+            marker.get("selected_entry") or active_workflow,
+            marker.get("pending_entry"),
+            marker.get("pending_question"),
+            marker.get("route_label"),
+            [topic.entry_id for topic in unique_topics],
+        )
         note = "\n".join(
             [
                 "",
+                state_marker,
                 "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
                 "",
                 "Topics identified:",
@@ -1157,26 +1654,28 @@ class ChatReadRetrieveReadApproach(Approach):
             canonical_question = self.pbsg_routing_engine.question_text(entry_id, question_id)
             if not canonical_question:
                 return None
-            content = "\n".join(
+            content_lines = selected_stream_lines(self.pbsg_golden_set_entries, entry_id, entry_id, question_id)
+            content_lines.extend(
                 [
-                    f"**Selected Entry:** {entry_id}",
                     "",
                     "**Note:** I am asking the same Golden Set question in context-specific wording. The route options are unchanged.",
                     "",
                     "Triage progress:",
                     "",
-                    f"- Current question remains: {question_id} from {entry_id}",
+                    f"<!-- Current question remains: {question_id} from {entry_id} -->",
+                    f"- Current question remains about {short_question_label(self.pbsg_golden_set_entries, entry_id, question_id)}.",
                     "",
                     "**Ask the applicant (read verbatim):**",
                     "",
-                    f'> **{question_id}: "{script}"**',
+                    f'> **"{script}"**',
                     "",
-                    f"Type the applicant's answer here and I will determine the next question or route. [{entry_id}.json]",
+                    "Type the applicant's answer here and I will determine the next question or route.",
                 ]
             )
+            content = "\n".join(content_lines)
         elif disposition in {"not_relevant", "escalate_to_staff"}:
             content = safe_escalation_response(
-                f"**Selected Entry:** {triage_state.pending_entry_id}", self.pbsg_golden_set_entries, "context relevance"
+                pbsg_state_marker(triage_state.pending_entry_id), self.pbsg_golden_set_entries, "context relevance"
             )
         else:
             return None
@@ -1193,14 +1692,17 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-                "pbsg_question_relevance": relevance,
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                    "pbsg_question_relevance": relevance,
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1317,10 +1819,15 @@ class ChatReadRetrieveReadApproach(Approach):
                     overlays.append(entry_id)
 
         evidence = payload.get("evidence") if isinstance(payload.get("evidence"), str) else "structured topic classifier"
+        evidence = evidence.strip()
+        if evidence.lower() == "structured topic classifier":
+            classifier_reason = evidence
+        else:
+            classifier_reason = f"structured topic classifier: {evidence}"
         resolution = PBSGTopicResolution(
             entry_id=primary_entry_id,
             confidence=float(confidence),
-            reason=f"structured topic classifier: {evidence}",
+            reason=classifier_reason,
             overlays=overlays,
             queued_topics=queued_topics,
             candidates=local_resolution.candidates,
@@ -1348,14 +1855,131 @@ class ChatReadRetrieveReadApproach(Approach):
             response["context"]["thoughts"].append(extraction_thought)
         return response
 
-    def local_side_enquiry_answer(self, latest_content: str) -> str | None:
+    def general_enquiry_match(self, latest_content: str) -> tuple[str, dict[str, Any]] | None:
         normalized = latest_content.lower()
-        if not re.search(r"\b(what is|what's|what does|explain|meaning of)\b", normalized):
+        if not PBSG_GENERAL_ENQUIRY_INTENT_PATTERN.search(normalized):
             return None
-        for term, answer in PBSG_GLOSSARY_ANSWERS.items():
-            if re.search(rf"\b{re.escape(term)}\b", normalized):
-                return answer
+        for faq_key, faq in PBSG_GENERAL_ENQUIRY_FAQS.items():
+            patterns = faq.get("patterns", [])
+            if any(re.search(pattern, normalized) for pattern in patterns if isinstance(pattern, str)):
+                return faq_key, faq
         return None
+
+    def is_legal_triage_request(self, latest_content: str) -> bool:
+        return bool(PBSG_TRIAGE_REQUEST_PATTERN.search(latest_content))
+
+    def general_enquiry_answer(self, latest_content: str) -> tuple[str, list[str], str] | None:
+        match = self.general_enquiry_match(latest_content)
+        if not match:
+            return None
+        faq_key, faq = match
+        answer = faq.get("answer")
+        if not isinstance(answer, str):
+            return None
+        source_ids = [entry_id for entry_id in faq.get("source_ids", []) if entry_id in self.pbsg_golden_set_entries]
+        return answer, source_ids, faq_key
+
+    def build_general_enquiry_response(
+        self,
+        latest_content: str,
+        *,
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, source_ids, faq_key = answer_result
+
+        source_entries = {
+            entry_id: self.pbsg_golden_set_entries[entry_id]
+            for entry_id in source_ids
+            if entry_id in self.pbsg_golden_set_entries
+        }
+        data_points = self.golden_set_data_points(source_entries) if source_entries else DataPoints()
+        content = "\n\n".join(
+            [
+                "**General enquiry:**",
+                answer,
+                (
+                    "If the applicant wants to check which pathway applies to their situation, please briefly describe "
+                    "the legal issue and I will start triage."
+                ),
+            ]
+        )
+        thoughts = [
+            ThoughtStep(
+                "Deterministic PBSG general enquiry",
+                "Answered a pure organisational or scheme question from the curated local FAQ without retrieval or LLM generation.",
+                {"faq_key": faq_key, "source_ids": source_ids},
+            )
+        ]
+        return {
+            "message": {"content": content, "role": "assistant"},
+            "context": {
+                "thoughts": thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": None,
+            },
+            "session_state": session_state,
+        }
+
+    def try_initial_general_enquiry_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if len(messages) != 1:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str) or self.is_legal_triage_request(latest_content):
+            return None
+        return self.build_general_enquiry_response(latest_content, session_state=session_state)
+
+    def mixed_general_enquiry_prefix(self, messages: list[ChatCompletionMessageParam]) -> str | None:
+        if len(messages) != 1:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str) or not self.is_legal_triage_request(latest_content):
+            return None
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, _, _ = answer_result
+        return "\n\n".join(
+            [
+                "**General enquiry:**",
+                answer,
+                "**Now I will triage the legal issue:**",
+            ]
+        )
+
+    def with_general_enquiry_prefix(self, response: dict[str, Any], prefix: str | None) -> dict[str, Any]:
+        if not prefix:
+            return response
+        message = response.get("message")
+        if isinstance(message, dict) and isinstance(message.get("content"), str):
+            message["content"] = f"{prefix}\n\n{message['content']}"
+        context = response.get("context")
+        if isinstance(context, dict):
+            thoughts = context.get("thoughts")
+            if isinstance(thoughts, list):
+                thoughts.insert(
+                    0,
+                    ThoughtStep(
+                        "Deterministic PBSG mixed general enquiry",
+                        "Answered the general part from the curated local FAQ before continuing legal triage.",
+                        None,
+                    ),
+                )
+        return response
+
+    def local_side_enquiry_answer(self, latest_content: str) -> str | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        answer, _, _ = answer_result
+        return answer
 
     def try_local_side_enquiry_response(
         self,
@@ -1391,9 +2015,14 @@ class ChatReadRetrieveReadApproach(Approach):
             session_state,
         )
 
-    def parse_continue_queued_workflow(self, latest_content: str) -> str | None:
+    def parse_continue_queued_workflow(self, latest_content: str, triage_state: Any = None) -> str | None:
         match = re.search(r"\bContinue queued workflow:\s*(GEN3-[A-Z0-9-]+)\b", latest_content, flags=re.IGNORECASE)
-        return match.group(1).upper() if match else None
+        if match:
+            return match.group(1).upper()
+        if "continue queued workflow" in latest_content.lower():
+            queued_workflows = getattr(triage_state, "queued_workflows", None) or []
+            return queued_workflows[0] if queued_workflows else None
+        return None
 
     def is_route_completion_acknowledgement(self, latest_content: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\s]", " ", latest_content.lower())
@@ -1409,20 +2038,23 @@ class ChatReadRetrieveReadApproach(Approach):
         next_workflow = triage_state.queued_workflows[0] if triage_state.queued_workflows else None
         next_entry = self.pbsg_golden_set_entries.get(next_workflow or "", {})
         next_topic = next_entry.get("topic") if isinstance(next_entry, dict) else next_workflow
+        active_stream = stream_display_name(self.pbsg_golden_set_entries, active_workflow)
+        next_stream = stream_display_name(self.pbsg_golden_set_entries, next_workflow)
         content = "\n".join(
             [
-                f"**Selected Entry:** {active_workflow}",
+                pbsg_state_marker(active_workflow if active_workflow in self.pbsg_golden_set_entries else None),
+                f"**Selected Stream:** {active_stream}",
                 "",
-                f"**Note:** {active_workflow} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
+                f"**Note:** The {active_stream} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
                 "",
                 "**Queued topic ready:**",
                 "",
-                f"- {next_workflow}: {next_topic}",
+                f"- {next_stream}: {next_topic}",
                 "- Click the button when you are ready to continue.",
                 "",
                 "Topics identified:",
-                f"1. {active_workflow} — routed workflow",
-                f"2. {next_workflow} — queued workflow",
+                f"1. {active_stream} - routed workflow",
+                f"2. {next_stream} - queued workflow",
             ]
         )
         data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
@@ -1440,13 +2072,16 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1463,7 +2098,7 @@ class ChatReadRetrieveReadApproach(Approach):
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         if triage_state.routing_completion_status != "awaiting_topic_resolution" or not triage_state.queued_workflows:
             return None
-        workflow_to_continue = self.parse_continue_queued_workflow(latest_content)
+        workflow_to_continue = self.parse_continue_queued_workflow(latest_content, triage_state)
         if workflow_to_continue:
             deterministic_result = self.pbsg_routing_engine.start_queued_workflow(messages[:-1], workflow_to_continue)
             if deterministic_result:
@@ -1504,14 +2139,18 @@ class ChatReadRetrieveReadApproach(Approach):
         if not content:
             return content
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
-        selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*(GEN3-[A-Z0-9-]+)", content, flags=re.IGNORECASE)
-        selected_entry_id = selected_entry_matches[-1].upper() if selected_entry_matches else None
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry")
+        if not selected_entry_id:
+            selected_entry_matches = re.findall(r"\*\*Selected Entry:\*\*\s*(GEN3-[A-Z0-9-]+)", content, flags=re.IGNORECASE)
+            selected_entry_id = selected_entry_matches[-1].upper() if selected_entry_matches else None
         if not selected_entry_id or selected_entry_id not in self.pbsg_golden_set_entries:
             return content
-        targets = re.findall(r"Next question:\s*(Q\d+[A-Z]?)\b|>\s*\**(Q\d+[A-Z]?)\s*:", content, flags=re.IGNORECASE)
-        target_question_id = None
-        for first_match, second_match in targets:
-            target_question_id = (first_match or second_match).upper()
+        target_question_id = marker.get("pending_question")
+        if not target_question_id:
+            targets = re.findall(r"Next question:\s*(Q\d+[A-Z]?)\b|>\s*\**(Q\d+[A-Z]?)\s*:", content, flags=re.IGNORECASE)
+            for first_match, second_match in targets:
+                target_question_id = (first_match or second_match).upper()
         if not target_question_id:
             return content
         missing_question_id = self.first_missing_prerequisite_question(selected_entry_id, target_question_id, triage_state)
@@ -1520,24 +2159,19 @@ class ChatReadRetrieveReadApproach(Approach):
         question = self.pbsg_routing_engine.question_text(selected_entry_id, missing_question_id)
         if not question:
             return content
-        return "\n".join(
+        lines = selected_stream_lines(self.pbsg_golden_set_entries, selected_entry_id, selected_entry_id, missing_question_id)
+        lines.extend(
             [
-                f"**Selected Entry:** {selected_entry_id}",
                 "",
                 "**Note:** I cannot rely on unverified answers for this workflow. We need to ask the first unanswered required question.",
                 "",
                 "Triage progress:",
                 "",
-                f"- Repaired skipped prerequisite: {missing_question_id} from {selected_entry_id}",
-                f"- Next question: {missing_question_id} from {selected_entry_id}",
-                "",
-                "**Ask the applicant (read verbatim):**",
-                "",
-                f'> **{missing_question_id}: "{self.convert_question_to_second_person(question)}"**',
-                "",
-                f"Type the applicant's answer here and I will determine the next question or route. [{selected_entry_id}.json]",
+                f"- We are returning to the required question about {short_question_label(self.pbsg_golden_set_entries, selected_entry_id, missing_question_id)}.",
             ]
         )
+        lines.extend(next_question_lines(self.pbsg_golden_set_entries, selected_entry_id, missing_question_id, question))
+        return "\n".join(lines)
 
     def repair_hardship_rejection(
         self,
@@ -1545,7 +2179,9 @@ class ChatReadRetrieveReadApproach(Approach):
         messages: list[ChatCompletionMessageParam],
         latest_content: str,
     ) -> Optional[str]:
-        if not content or "**Selected Entry:** GEN3-T04" not in content or "Route D" not in content:
+        marker = parse_pbsg_state_marker(content)
+        selected_entry_id = marker.get("selected_entry")
+        if not content or ((selected_entry_id or "") != "GEN3-T04" and "**Selected Entry:** GEN3-T04" not in content) or "Route D" not in content:
             return content
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         has_hardship = any(
@@ -1807,11 +2443,13 @@ class ChatReadRetrieveReadApproach(Approach):
         for topic in turn_classification.new_topics:
             if topic.entry_id not in triage_state.queued_workflows:
                 triage_state.queued_workflows.append(topic.entry_id)
-        content_lines = [
-            f"**Selected Entry:** {entry_id}",
-            "",
-            f"**Note:** {note}",
-        ]
+        content_lines = selected_stream_lines(
+            self.pbsg_golden_set_entries,
+            entry_id,
+            entry_id if question_id else None,
+            question_id,
+        )
+        content_lines.extend(["", f"**Note:** {note}"])
         if turn_classification.reason and turn_classification.turn_type == "clarification":
             content_lines.extend(["", "**Clarification:**", "", turn_classification.reason])
         if turn_classification.new_topics:
@@ -1821,11 +2459,11 @@ class ChatReadRetrieveReadApproach(Approach):
                     "**Queued topic note:** I noted a separate possible topic and will handle it after this stream is routed.",
                     "",
                     "Topics identified:",
-                    f"1. {triage_state.active_workflow or entry_id} — active workflow",
+                    f"1. {stream_display_name(self.pbsg_golden_set_entries, triage_state.active_workflow or entry_id)} - active workflow",
                 ]
             )
             content_lines.extend(
-                f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
+                f"{index}. {stream_display_name(self.pbsg_golden_set_entries, topic.entry_id)} - queued workflow (noted from: {topic.evidence})"
                 for index, topic in enumerate(turn_classification.new_topics, start=2)
             )
         if question_id and question:
@@ -1834,13 +2472,11 @@ class ChatReadRetrieveReadApproach(Approach):
                     "",
                     "Triage progress:",
                     "",
-                    f"- Current question remains: {question_id} from {entry_id}",
-                    "",
-                    "**Ask the applicant (read verbatim):**",
-                    "",
-                    f'> **{question_id}: "{self.convert_question_to_second_person(question)}"**',
+                    f"<!-- Current question remains: {question_id} from {entry_id} -->",
+                    f"- Current question remains about {short_question_label(self.pbsg_golden_set_entries, entry_id, question_id)}.",
                 ]
             )
+            content_lines.extend(next_question_lines(self.pbsg_golden_set_entries, entry_id, question_id, question))
         data_points = self.golden_set_data_points(self.pbsg_golden_set_entries)
         extra_info = ExtraInfo(data_points=data_points)
         content = "\n".join(content_lines)
@@ -1854,13 +2490,16 @@ class ChatReadRetrieveReadApproach(Approach):
         )
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                "followup_questions": None,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                "pbsg_triage_state": asdict(triage_state),
-            },
+            "context": self.response_context_with_case_summary(
+                {
+                    "thoughts": extra_info.thoughts,
+                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                    "followup_questions": None,
+                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                    "pbsg_triage_state": asdict(triage_state),
+                },
+                triage_state,
+            ),
             "session_state": session_state,
         }
 
@@ -1890,12 +2529,16 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            return general_enquiry_response
+        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            return structured_initial_response
+            return self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            return initial_response
+            return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
@@ -1933,16 +2576,25 @@ class ChatReadRetrieveReadApproach(Approach):
         # TODO: Update for agentic? This isn't still true?
         if self.include_token_usage and extra_info.thoughts and chat_completion_response.usage:
             extra_info.thoughts[-1].update_token_usage(chat_completion_response.usage)
+        response_context = {
+            "thoughts": extra_info.thoughts,
+            "data_points": {
+                key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+            },
+            "followup_questions": extra_info.followup_questions,
+            "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+        }
+        if parse_pbsg_state_marker(content):
+            triage_state = build_triage_state(
+                [*messages, {"role": "assistant", "content": content}],
+                self.pbsg_golden_set_entries,
+                "",
+            )
+            response_context["pbsg_triage_state"] = asdict(triage_state)
+            self.response_context_with_case_summary(response_context, triage_state)
         chat_app_response = {
             "message": {"content": content, "role": role},
-            "context": {
-                "thoughts": extra_info.thoughts,
-                "data_points": {
-                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
-                },
-                "followup_questions": extra_info.followup_questions,
-                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-            },
+            "context": response_context,
             "session_state": session_state,
         }
         return chat_app_response
@@ -1954,14 +2606,23 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            return
+        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
+            structured_initial_response = self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": structured_initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             return
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
+            initial_response = self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}

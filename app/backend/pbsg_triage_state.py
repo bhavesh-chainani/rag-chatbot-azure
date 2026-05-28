@@ -268,6 +268,14 @@ RECAP_REQUEST_PATTERN = re.compile(
 CLARIFICATION_QUESTION_PATTERN = re.compile(
     r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
 )
+GENERAL_ENQUIRY_INTERRUPT_PATTERN = re.compile(
+    r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
+    flags=re.IGNORECASE,
+)
+GENERAL_ENQUIRY_KEYWORD_PATTERN = re.compile(
+    r"\b(pdo|lasco|clas|lab|fjss|pchi|legal aid|public defender(?:['’]s)? office|family justice support scheme|criminal legal aid scheme|legal aid bureau|route|stream|workflow|triage|urgent|vulnerable|escalate|staff|appointment|documents?)\b",
+    flags=re.IGNORECASE,
+)
 SAFETY_INTERRUPT_PATTERN = re.compile(
     r"\b(in danger|unsafe|not safe|violence|self[- ]?harm|homeless|no shelter|immediate threat)\b",
     flags=re.IGNORECASE,
@@ -2390,6 +2398,15 @@ def detect_candidate_topics(
     return topics
 
 
+def is_general_enquiry_interrupt(latest_user_query: str) -> bool:
+    normalized = re.sub(r"\s+", " ", latest_user_query).strip().lower()
+    if not normalized:
+        return False
+    if not GENERAL_ENQUIRY_INTERRUPT_PATTERN.search(normalized):
+        return False
+    return bool(GENERAL_ENQUIRY_KEYWORD_PATTERN.search(normalized))
+
+
 def classify_turn_interrupt(
     entries: dict[str, dict[str, Any]],
     state: PBSGTriageState,
@@ -2404,7 +2421,8 @@ def classify_turn_interrupt(
     if not isinstance(question_node, dict):
         return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
 
-    branch_key = branch_key_for_answer(question_node, latest_user_query)
+    has_general_enquiry = is_general_enquiry_interrupt(latest_user_query)
+    branch_key = None if has_general_enquiry else branch_key_for_answer(question_node, latest_user_query)
     candidates = detect_candidate_topics(latest_user_query, entries, state.active_workflow)
     has_additive = bool(ADDITIVE_PATTERN.search(latest_user_query))
     has_correction = bool(CORRECTION_PATTERN.search(latest_user_query)) or bool(state.contradiction_signals)
@@ -2414,6 +2432,15 @@ def classify_turn_interrupt(
     has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query)) and branch_key != "if_no"
     referenced_thread_id = getattr(state, "referenced_thread_id", None)
     active_thread_id = getattr(state, "active_thread_id", None)
+
+    if has_general_enquiry:
+        return PBSGTurnClassification(
+            turn_type="current_topic_side_question",
+            should_call_llm=False,
+            reason="general enquiry interrupt",
+            pending_branch_key=None,
+            new_topics=[],
+        )
 
     if has_correction:
         return PBSGTurnClassification(
@@ -2550,10 +2577,11 @@ def build_triage_state(
             parent_workflow = resume_matches[-1][0].upper()
     resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
     is_terminal_route = bool(assistant_content and "**Routing Recommendation:**" in assistant_content and selected_entry_id)
+    is_queued_topic_hold = bool(assistant_content and "**Queued topic ready:**" in assistant_content and queued_workflows)
     routing_completion_status = "not_started"
     if contradiction_signals:
         routing_completion_status = "repair_required"
-    elif is_terminal_route and queued_workflows:
+    elif (is_terminal_route or is_queued_topic_hold) and queued_workflows:
         routing_completion_status = "awaiting_topic_resolution"
     elif is_terminal_route:
         routing_completion_status = "completed"

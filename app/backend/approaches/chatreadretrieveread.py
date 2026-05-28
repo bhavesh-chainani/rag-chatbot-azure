@@ -42,6 +42,7 @@ from pbsg_triage_state import (
     collapse_duplicate_route_cards,
     convert_question_to_second_person,
     format_state_prompt,
+    is_general_enquiry_interrupt,
     label_from_branch_key,
     load_golden_set_entries,
     next_question_lines,
@@ -281,8 +282,11 @@ COMMON_QUERY_TERMS = {
 PBSG_GLOSSARY_ANSWERS = {
     "lasco": "LASCO is the Legal Assistance Scheme for Capital Offences. It provides representation for people charged with capital offences.",
     "clas": "CLAS is the Criminal Legal Aid Scheme. It may provide free or low-cost criminal defence representation for eligible low-income applicants facing non-capital criminal charges.",
+    "pdo": "PDO is the Public Defender’s Office, the government criminal legal aid office for eligible low-income Singapore Citizens or PRs facing non-capital criminal charges.",
     "lab": "LAB is the Legal Aid Bureau, the government legal aid office for eligible Singapore Citizens or PRs facing civil or family proceedings.",
     "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
+    "urgent_issue": "An urgent issue usually means immediate safety risk, basic-needs or child-welfare crisis, or a concrete legal deadline within 14 days.",
+    "vulnerable_applicant": "A vulnerable applicant is someone who may need adapted handling because of factors like age, disability, language barriers, distress, confusion, or inability to self-help safely.",
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
 PBSG_GENERAL_ENQUIRY_FAQS = {
@@ -294,6 +298,11 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
     "clas": {
         "patterns": [r"\bclas\b", r"\bcriminal legal aid scheme\b"],
         "answer": PBSG_GLOSSARY_ANSWERS["clas"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "pdo": {
+        "patterns": [r"\bpdo\b", r"\bpublic defender(?:['’]s)? office\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["pdo"],
         "source_ids": ["GEN3-T02"],
     },
     "lab": {
@@ -489,6 +498,8 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
     },
     "urgency": {
         "patterns": [
+            r"\bwhat counts as urgent\b",
+            r"\bwhat is an urgent (?:issue|matter)\b",
             r"\burgent\b",
             r"\bemergency\b",
             r"\bimmediate\b",
@@ -507,6 +518,15 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
             "be handled before or alongside the ordinary legal triage path."
         ),
         "source_ids": ["GEN3-T06"],
+    },
+    "vulnerable_applicant": {
+        "patterns": [
+            r"\bwhat counts as vulnerable\b",
+            r"\bwhat is a vulnerable applicant\b",
+            r"\bvulnerable applicant\b",
+        ],
+        "answer": PBSG_GLOSSARY_ANSWERS["vulnerable_applicant"],
+        "source_ids": ["GEN3-T13"],
     },
     "counter_location": {
         "patterns": [
@@ -1276,7 +1296,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 QuickReplyOption(
                     id=f"continue_queued_workflow:{workflow_id}",
                     label=f"Topic resolved - continue to {stream_name}",
-                    value=f"Continue queued workflow: {stream_name}{label_suffix}",
+                    value=f"Continue queued workflow: {workflow_id}",
                 )
             ],
         )
@@ -2173,6 +2193,104 @@ class ChatReadRetrieveReadApproach(Approach):
         answer, _, _ = answer_result
         return answer
 
+    def general_enquiry_interrupt_answer(self, latest_content: str, triage_state: Any = None) -> tuple[str, list[str], str] | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        if not is_general_enquiry_interrupt(latest_content):
+            return None
+        normalized = re.sub(r"\s+", " ", latest_content).strip().lower()
+        if triage_state and getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None):
+            if normalize_branch_label(label_from_branch_key("if_not_sure")) == normalize_branch_label(normalized):
+                return None
+        return answer_result
+
+    def build_general_enquiry_interrupt_response(
+        self,
+        latest_content: str,
+        triage_state: Any,
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        answer_result = self.general_enquiry_interrupt_answer(latest_content, triage_state)
+        if not answer_result:
+            return None
+        answer, source_ids, faq_key = answer_result
+        source_entries = {
+            entry_id: self.pbsg_golden_set_entries[entry_id]
+            for entry_id in source_ids
+            if entry_id in self.pbsg_golden_set_entries
+        }
+        data_points = self.golden_set_data_points(source_entries) if source_entries else DataPoints()
+
+        if getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None):
+            triage_state.active_side_enquiry = PBSGInterruption(
+                question=latest_content,
+                parent_workflow=triage_state.pending_entry_id,
+                parent_question_id=triage_state.current_question_id,
+            )
+            triage_state.interruption_stack.append(triage_state.active_side_enquiry)
+            turn_classification = PBSGTurnClassification(
+                turn_type="current_topic_side_question",
+                should_call_llm=False,
+                reason=answer,
+            )
+            response = self.build_pending_question_response(
+                triage_state,
+                turn_classification,
+                "I answered the general enquiry and preserved the current triage question.",
+                session_state,
+            )
+            response["context"]["thoughts"].insert(
+                0,
+                ThoughtStep(
+                    "Deterministic PBSG general enquiry interrupt",
+                    "Answered a glossary or process question without advancing the active triage workflow.",
+                    {"faq_key": faq_key, "source_ids": source_ids},
+                ),
+            )
+            response["context"]["data_points"] = {
+                key: value for key, value in asdict(data_points).items() if value is not None
+            }
+            return response
+
+        if getattr(triage_state, "routing_completion_status", None) == "awaiting_topic_resolution" and getattr(
+            triage_state, "queued_workflows", None
+        ):
+            hold_response = self.build_awaiting_topic_resolution_response(triage_state, session_state)
+            hold_content = hold_response["message"]["content"]
+            prefix = "\n\n".join(["**General enquiry:**", answer])
+            hold_response["message"]["content"] = f"{prefix}\n\n{hold_content}"
+            hold_response["context"]["thoughts"].insert(
+                0,
+                ThoughtStep(
+                    "Deterministic PBSG general enquiry interrupt",
+                    "Answered a glossary or process question and preserved the queued-topic hold state.",
+                    {"faq_key": faq_key, "source_ids": source_ids},
+                ),
+            )
+            hold_response["context"]["data_points"] = {
+                key: value for key, value in asdict(data_points).items() if value is not None
+            }
+            return hold_response
+
+        return None
+
+    def try_general_enquiry_interrupt_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        if len(messages) == 1:
+            return None
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        return self.build_general_enquiry_interrupt_response(latest_content, triage_state, session_state)
+
     def try_local_side_enquiry_response(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -2185,6 +2303,8 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        if self.general_enquiry_interrupt_answer(latest_content, triage_state):
+            return None
         if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
             return None
         answer = self.local_side_enquiry_answer(latest_content)
@@ -2212,10 +2332,20 @@ class ChatReadRetrieveReadApproach(Approach):
         match = re.search(r"\bContinue queued workflow:\s*(GEN3-[A-Z0-9-]+)\b", latest_content, flags=re.IGNORECASE)
         if match:
             return match.group(1).upper()
-        if "continue queued workflow" in latest_content.lower():
-            queued_workflows = getattr(triage_state, "queued_workflows", None) or []
-            return queued_workflows[0] if queued_workflows else None
-        return None
+        if "continue queued workflow" not in latest_content.lower():
+            return None
+        queued_workflows = getattr(triage_state, "queued_workflows", None) or []
+        if not queued_workflows:
+            return None
+        normalized = re.sub(r"\s+", " ", latest_content).strip().lower()
+        for workflow_id in queued_workflows:
+            entry = self.pbsg_golden_set_entries.get(workflow_id, {})
+            stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id).lower()
+            topic = entry.get("topic") if isinstance(entry, dict) else None
+            topic_text = topic.lower() if isinstance(topic, str) else ""
+            if workflow_id.lower() in normalized or stream_name in normalized or (topic_text and topic_text in normalized):
+                return workflow_id
+        return queued_workflows[0]
 
     def is_route_completion_acknowledgement(self, latest_content: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\s]", " ", latest_content.lower())
@@ -2235,7 +2365,10 @@ class ChatReadRetrieveReadApproach(Approach):
         next_stream = stream_display_name(self.pbsg_golden_set_entries, next_workflow)
         content = "\n".join(
             [
-                pbsg_state_marker(active_workflow if active_workflow in self.pbsg_golden_set_entries else None),
+                pbsg_state_marker(
+                    active_workflow if active_workflow in self.pbsg_golden_set_entries else None,
+                    queued_workflows=triage_state.queued_workflows,
+                ),
                 f"**Selected Stream:** {active_stream}",
                 "",
                 f"**Note:** The {active_stream} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
@@ -2655,6 +2788,8 @@ class ChatReadRetrieveReadApproach(Approach):
         content_lines.extend(["", f"**Note:** {note}"])
         if turn_classification.reason and turn_classification.turn_type == "clarification":
             content_lines.extend(["", "**Clarification:**", "", turn_classification.reason])
+        elif turn_classification.reason and turn_classification.turn_type == "current_topic_side_question":
+            content_lines.extend(["", "**General enquiry:**", "", turn_classification.reason])
         if turn_classification.new_topics:
             content_lines.extend(
                 [
@@ -2744,6 +2879,12 @@ class ChatReadRetrieveReadApproach(Approach):
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
             return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            return queued_topic_response
+        general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
+        if general_enquiry_interrupt_response:
+            return general_enquiry_interrupt_response
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
@@ -2753,9 +2894,6 @@ class ChatReadRetrieveReadApproach(Approach):
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:
             return side_enquiry_response
-        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
-        if queued_topic_response:
-            return queued_topic_response
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
             return structured_response
@@ -2836,6 +2974,18 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             return
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": queued_topic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            return
+        general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
+        if general_enquiry_interrupt_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_interrupt_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
+            return
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
@@ -2853,12 +3003,6 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant"}, "context": side_enquiry_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": side_enquiry_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": side_enquiry_response["context"], "session_state": session_state}
-            return
-        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
-        if queued_topic_response:
-            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
-            yield {"delta": {"role": "assistant", "content": queued_topic_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
             return
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:

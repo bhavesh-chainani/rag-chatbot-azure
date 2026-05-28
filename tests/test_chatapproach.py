@@ -2175,6 +2175,59 @@ async def test_local_side_enquiry_answers_glossary_and_preserves_routing(chat_ap
     assert result["context"]["pbsg_triage_state"]["active_side_enquiry"]["question"] == "What is PCHI?"
     assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T04"
     assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q4"
+    assert result["context"]["pbsg_memory_pack"]["active_thread_id"] == "GEN3-T04"
+
+
+@pytest.mark.asyncio
+async def test_resolved_topic_recap_returns_short_response(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("resolved-topic recap should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "Can you recap the criminal route again?"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = visible_text(result["message"]["content"])
+    assert "Recap:" in content
+    assert "already completed this topic earlier" in content
+    assert "Last resolved route" in content
+    assert result["context"]["pbsg_triage_state"]["already_resolved"] is True
+    assert result["context"]["pbsg_triage_state"]["should_recap"] is True
+    assert result["context"]["pbsg_memory_pack"]["already_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_return_to_completed_topic_marks_resume_in_state():
+    entries = pbsg_triage_state.load_golden_set_entries()
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        }
+    ]
+
+    triage_state = build_triage_state(messages, entries, "Can we go back to the criminal issue?")
+
+    assert triage_state.referenced_thread_id == "GEN3-T02"
+    assert triage_state.already_resolved is True
+    assert triage_state.should_recap is True
 
 
 @pytest.mark.asyncio

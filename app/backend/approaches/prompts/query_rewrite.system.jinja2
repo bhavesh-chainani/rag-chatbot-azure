@@ -17,7 +17,14 @@ Do not include any text inside [] or <<>> in the search query terms.
 Do not include any special characters like '+'.
 Assume all messages are in English.
 When uncertain between history and latest message, prefer the latest message and output a concise, neutral query without a Golden Set code.
+If `pbsg_memory_pack.referenced_thread_id` is set and the newest message clearly returns to an earlier topic, revive anchor terms from that referenced thread summary and avoid unrelated terms from other threads.
+If `pbsg_memory_pack.already_resolved` and `pbsg_memory_pack.should_recap` are true, keep the query tightly anchored to the referenced resolved thread only; do not blend in newer unrelated topics.
 If you cannot generate a search query, return just the number 0.
+
+{% if pbsg_memory_pack %}
+Structured memory:
+{{ pbsg_memory_pack }}
+{% endif %}
 
 Generate search query for: My employer hasn't paid my salary for 3 months. What can I do?
 

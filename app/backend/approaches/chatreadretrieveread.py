@@ -42,6 +42,7 @@ from pbsg_triage_state import (
     collapse_duplicate_route_cards,
     convert_question_to_second_person,
     format_state_prompt,
+    is_general_enquiry_interrupt,
     label_from_branch_key,
     load_golden_set_entries,
     next_question_lines,
@@ -60,6 +61,188 @@ from pbsg_triage_state import (
     validate_response_transition,
     validate_response_questions,
 )
+
+
+def build_memory_pack(triage_state: Any) -> dict[str, Any]:
+    topic_threads = getattr(triage_state, "topic_threads", []) or []
+    return {
+        "active_thread_id": getattr(triage_state, "active_thread_id", None),
+        "referenced_thread_id": getattr(triage_state, "referenced_thread_id", None),
+        "routing_completion_status": getattr(triage_state, "routing_completion_status", None),
+        "session_summary": getattr(triage_state, "session_summary", ""),
+        "already_resolved": getattr(triage_state, "already_resolved", False),
+        "should_recap": getattr(triage_state, "should_recap", False),
+        "resume_hint": getattr(triage_state, "resume_hint", None),
+        "memory_hash": getattr(triage_state, "memory_hash", None),
+        "thread_summaries": [
+            {
+                "thread_id": thread.thread_id,
+                "entry_id": thread.entry_id,
+                "status": thread.status,
+                "summary": thread.summary,
+                "last_pending_question": thread.last_pending_question,
+                "terminal_route": thread.terminal_route,
+                "answered_question_ids": list(thread.answered_question_ids),
+                "aliases": list(thread.aliases),
+            }
+            for thread in topic_threads
+        ],
+    }
+
+
+def extract_session_memory(session_state: Any) -> dict[str, Any] | None:
+    if isinstance(session_state, dict):
+        memory = session_state.get("pbsg_session_memory")
+        if isinstance(memory, dict):
+            return memory
+    return None
+
+
+def extend_session_state_with_memory(session_state: Any, triage_state: Any) -> Any:
+    memory_pack = build_memory_pack(triage_state)
+    if isinstance(session_state, dict):
+        updated = dict(session_state)
+        updated["pbsg_session_memory"] = memory_pack
+        return updated
+    return session_state
+
+
+def hydrate_triage_state_from_session_memory(triage_state: Any, session_state: Any) -> Any:
+    previous_memory = extract_session_memory(session_state)
+    if previous_memory:
+        triage_state.memory_origin = "messages+session"
+        triage_state.memory_pack = {**previous_memory, **(getattr(triage_state, "memory_pack", {}) or {})}
+    else:
+        triage_state.memory_pack = build_memory_pack(triage_state)
+    return triage_state
+
+
+def context_with_triage_memory(context: dict[str, Any], triage_state: Any) -> dict[str, Any]:
+    context["pbsg_memory_pack"] = build_memory_pack(triage_state)
+    if getattr(triage_state, "session_summary", ""):
+        context["pbsg_session_summary"] = triage_state.session_summary
+    referenced_thread_id = getattr(triage_state, "referenced_thread_id", None)
+    if referenced_thread_id:
+        context["pbsg_referenced_thread_id"] = referenced_thread_id
+    return context
+
+
+def prompt_vars_with_memory(system_template_variables: dict[str, Any], triage_state: Any) -> dict[str, Any]:
+    memory_pack = build_memory_pack(triage_state)
+    return system_template_variables | {
+        "pbsg_memory_pack": memory_pack,
+        "pbsg_session_summary": memory_pack.get("session_summary", ""),
+        "pbsg_active_thread_id": memory_pack.get("active_thread_id"),
+        "pbsg_referenced_thread_id": memory_pack.get("referenced_thread_id"),
+    }
+
+
+def rewrite_vars_with_memory(user_query: str, past_messages: list[ChatCompletionMessageParam], triage_state: Any) -> dict[str, Any]:
+    memory_pack = build_memory_pack(triage_state)
+    return {
+        "user_query": user_query,
+        "past_messages": past_messages,
+        "pbsg_memory_pack": memory_pack,
+        "pbsg_session_summary": memory_pack.get("session_summary", ""),
+        "pbsg_active_thread_id": memory_pack.get("active_thread_id"),
+        "pbsg_referenced_thread_id": memory_pack.get("referenced_thread_id"),
+    }
+
+
+def should_use_resolved_recap(triage_state: Any) -> bool:
+    return bool(getattr(triage_state, "already_resolved", False) and getattr(triage_state, "should_recap", False))
+
+
+def recap_from_triage_state(entries: dict[str, dict[str, Any]], triage_state: Any) -> str | None:
+    referenced_thread_id = getattr(triage_state, "referenced_thread_id", None) or getattr(triage_state, "active_thread_id", None)
+    if not referenced_thread_id:
+        return None
+    thread = next(
+        (candidate for candidate in getattr(triage_state, "topic_threads", []) if candidate.thread_id == referenced_thread_id),
+        None,
+    )
+    if not thread or thread.status != "completed":
+        return None
+    stream_name = stream_display_name(entries, thread.entry_id)
+    route = thread.terminal_route or getattr(triage_state, "last_resolved_route_by_thread", {}).get(thread.thread_id)
+    summary_line = thread.summary or stream_name
+    lines = [
+        f"**Selected Stream:** {stream_name}",
+        "",
+        "**Recap:** We already completed this topic earlier.",
+        "",
+        f"- {summary_line}",
+    ]
+    if route:
+        lines.append(f"- Last resolved route: {route}.")
+    if thread.answered_question_ids:
+        lines.append(f"- Questions already resolved: {', '.join(thread.answered_question_ids)}.")
+    lines.append(
+        "- If any material facts changed, tell me what changed and I will reassess. Otherwise, we do not need to restart this stream."
+    )
+    return "\n".join(lines)
+
+
+def resolved_topic_recap_response(entries: dict[str, dict[str, Any]], triage_state: Any, session_state: Any = None) -> dict[str, Any] | None:
+    content = recap_from_triage_state(entries, triage_state)
+    if not content:
+        return None
+    context = context_with_triage_memory(
+        {
+            "thoughts": [],
+            "data_points": {},
+            "followup_questions": None,
+            "quick_reply": None,
+            "pbsg_triage_state": asdict(triage_state),
+        },
+        triage_state,
+    )
+    return {
+        "message": {"content": content, "role": "assistant"},
+        "context": context,
+        "session_state": extend_session_state_with_memory(session_state, triage_state),
+    }
+
+
+def apply_memory_notes(content: str, triage_state: Any) -> str:
+    if should_use_resolved_recap(triage_state):
+        return f"**Note:** This topic was already resolved earlier, so I am giving a short recap instead of restarting it.\n\n{content}"
+    resume_hint = getattr(triage_state, "resume_hint", None)
+    referenced_thread_id = getattr(triage_state, "referenced_thread_id", None)
+    active_thread_id = getattr(triage_state, "active_thread_id", None)
+    if resume_hint and referenced_thread_id and referenced_thread_id != active_thread_id:
+        return f"**Note:** {resume_hint}\n\n{content}"
+    return content
+
+
+def turn_requires_pending_question_preservation(turn_classification: PBSGTurnClassification | None) -> bool:
+    if not turn_classification:
+        return False
+    return turn_classification.turn_type in {
+        "current_topic_side_question",
+        "true_new_topic",
+        "return_to_completed_topic",
+        "return_to_queued_topic",
+        "correction",
+    }
+
+
+def turn_memory_reason(turn_classification: PBSGTurnClassification | None, triage_state: Any) -> str | None:
+    if turn_classification and turn_classification.reason:
+        return turn_classification.reason
+    if getattr(triage_state, "already_resolved", False):
+        return "Referenced a previously resolved topic and avoided restarting it."
+    resume_hint = getattr(triage_state, "resume_hint", None)
+    if resume_hint:
+        return resume_hint
+    return None
+
+
+def maybe_resolved_recap(entries: dict[str, dict[str, Any]], triage_state: Any, session_state: Any) -> dict[str, Any] | None:
+    if not should_use_resolved_recap(triage_state):
+        return None
+    return resolved_topic_recap_response(entries, triage_state, session_state)
+
 from prepdocslib.blobmanager import AdlsBlobManager, BlobManager
 from prepdocslib.embeddings import ImageEmbeddings
 
@@ -99,8 +282,11 @@ COMMON_QUERY_TERMS = {
 PBSG_GLOSSARY_ANSWERS = {
     "lasco": "LASCO is the Legal Assistance Scheme for Capital Offences. It provides representation for people charged with capital offences.",
     "clas": "CLAS is the Criminal Legal Aid Scheme. It may provide free or low-cost criminal defence representation for eligible low-income applicants facing non-capital criminal charges.",
+    "pdo": "PDO is the Public Defender’s Office, the government criminal legal aid office for eligible low-income Singapore Citizens or PRs facing non-capital criminal charges.",
     "lab": "LAB is the Legal Aid Bureau, the government legal aid office for eligible Singapore Citizens or PRs facing civil or family proceedings.",
     "fjss": "FJSS refers to Family Justice Support Scheme pathways for eligible matrimonial and family matters.",
+    "urgent_issue": "An urgent issue usually means immediate safety risk, basic-needs or child-welfare crisis, or a concrete legal deadline within 14 days.",
+    "vulnerable_applicant": "A vulnerable applicant is someone who may need adapted handling because of factors like age, disability, language barriers, distress, confusion, or inability to self-help safely.",
     "pchi": "PCHI means per capita household income. PCHI means total monthly household income divided by household members, including the applicant and all dependants.",
 }
 PBSG_GENERAL_ENQUIRY_FAQS = {
@@ -112,6 +298,11 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
     "clas": {
         "patterns": [r"\bclas\b", r"\bcriminal legal aid scheme\b"],
         "answer": PBSG_GLOSSARY_ANSWERS["clas"],
+        "source_ids": ["GEN3-T02"],
+    },
+    "pdo": {
+        "patterns": [r"\bpdo\b", r"\bpublic defender(?:['’]s)? office\b"],
+        "answer": PBSG_GLOSSARY_ANSWERS["pdo"],
         "source_ids": ["GEN3-T02"],
     },
     "lab": {
@@ -307,6 +498,8 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
     },
     "urgency": {
         "patterns": [
+            r"\bwhat counts as urgent\b",
+            r"\bwhat is an urgent (?:issue|matter)\b",
             r"\burgent\b",
             r"\bemergency\b",
             r"\bimmediate\b",
@@ -325,6 +518,15 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
             "be handled before or alongside the ordinary legal triage path."
         ),
         "source_ids": ["GEN3-T06"],
+    },
+    "vulnerable_applicant": {
+        "patterns": [
+            r"\bwhat counts as vulnerable\b",
+            r"\bwhat is a vulnerable applicant\b",
+            r"\bvulnerable applicant\b",
+        ],
+        "answer": PBSG_GLOSSARY_ANSWERS["vulnerable_applicant"],
+        "source_ids": ["GEN3-T13"],
     },
     "counter_location": {
         "patterns": [
@@ -1038,6 +1240,7 @@ class ChatReadRetrieveReadApproach(Approach):
             content = self.append_queued_topic_note(content, deterministic_result.state.active_workflow, queued_topics)
         if content:
             content = self.append_route_completion_note(content, deterministic_result.state)
+            content = apply_memory_notes(content, deterministic_result.state)
         extra_info.quick_reply = self.build_continue_queued_topic_quick_reply(deterministic_result.state)
         if not extra_info.quick_reply:
             extra_info.quick_reply = self.build_quick_reply(content, extra_info)
@@ -1055,21 +1258,23 @@ class ChatReadRetrieveReadApproach(Approach):
                 },
             )
         )
+        response_context = self.response_context_with_case_summary(
+            {
+                "thoughts": extra_info.thoughts,
+                "data_points": {
+                    key: value for key, value in asdict(extra_info.data_points).items() if value is not None
+                },
+                "followup_questions": extra_info.followup_questions,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(deterministic_result.state),
+            },
+            deterministic_result.state,
+        )
+        response_context = context_with_triage_memory(response_context, deterministic_result.state)
         return {
             "message": {"content": content, "role": "assistant"},
-            "context": self.response_context_with_case_summary(
-                {
-                    "thoughts": extra_info.thoughts,
-                    "data_points": {
-                        key: value for key, value in asdict(extra_info.data_points).items() if value is not None
-                    },
-                    "followup_questions": extra_info.followup_questions,
-                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                    "pbsg_triage_state": asdict(deterministic_result.state),
-                },
-                deterministic_result.state,
-            ),
-            "session_state": session_state,
+            "context": response_context,
+            "session_state": extend_session_state_with_memory(session_state, deterministic_result.state),
         }
 
     def build_continue_queued_topic_quick_reply(self, triage_state: Any) -> Optional[QuickReply]:
@@ -1091,7 +1296,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 QuickReplyOption(
                     id=f"continue_queued_workflow:{workflow_id}",
                     label=f"Topic resolved - continue to {stream_name}",
-                    value=f"Continue queued workflow: {stream_name}{label_suffix}",
+                    value=f"Continue queued workflow: {workflow_id}",
                 )
             ],
         )
@@ -1181,6 +1386,7 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(latest_content, str):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
         turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
         deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
         if turn_classification.should_call_llm and not deterministic_result:
@@ -1608,6 +1814,10 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(latest_content, str):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        recap_response = maybe_resolved_recap(self.pbsg_golden_set_entries, triage_state, session_state)
+        if recap_response:
+            return recap_response
         if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
             return None
         turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
@@ -1690,20 +1900,22 @@ class ChatReadRetrieveReadApproach(Approach):
                 {"question_relevance": relevance},
             )
         )
+        response_context = self.response_context_with_case_summary(
+            {
+                "thoughts": extra_info.thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(triage_state),
+                "pbsg_question_relevance": relevance,
+            },
+            triage_state,
+        )
+        response_context = context_with_triage_memory(response_context, triage_state)
         return {
-            "message": {"content": content, "role": "assistant"},
-            "context": self.response_context_with_case_summary(
-                {
-                    "thoughts": extra_info.thoughts,
-                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                    "followup_questions": None,
-                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                    "pbsg_triage_state": asdict(triage_state),
-                    "pbsg_question_relevance": relevance,
-                },
-                triage_state,
-            ),
-            "session_state": session_state,
+            "message": {"content": apply_memory_notes(content, triage_state), "role": "assistant"},
+            "context": response_context,
+            "session_state": extend_session_state_with_memory(session_state, triage_state),
         }
 
     async def try_structured_llm_initial_topic_response(
@@ -1981,6 +2193,104 @@ class ChatReadRetrieveReadApproach(Approach):
         answer, _, _ = answer_result
         return answer
 
+    def general_enquiry_interrupt_answer(self, latest_content: str, triage_state: Any = None) -> tuple[str, list[str], str] | None:
+        answer_result = self.general_enquiry_answer(latest_content)
+        if not answer_result:
+            return None
+        if not is_general_enquiry_interrupt(latest_content):
+            return None
+        normalized = re.sub(r"\s+", " ", latest_content).strip().lower()
+        if triage_state and getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None):
+            if normalize_branch_label(label_from_branch_key("if_not_sure")) == normalize_branch_label(normalized):
+                return None
+        return answer_result
+
+    def build_general_enquiry_interrupt_response(
+        self,
+        latest_content: str,
+        triage_state: Any,
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        answer_result = self.general_enquiry_interrupt_answer(latest_content, triage_state)
+        if not answer_result:
+            return None
+        answer, source_ids, faq_key = answer_result
+        source_entries = {
+            entry_id: self.pbsg_golden_set_entries[entry_id]
+            for entry_id in source_ids
+            if entry_id in self.pbsg_golden_set_entries
+        }
+        data_points = self.golden_set_data_points(source_entries) if source_entries else DataPoints()
+
+        if getattr(triage_state, "pending_entry_id", None) and getattr(triage_state, "current_question_id", None):
+            triage_state.active_side_enquiry = PBSGInterruption(
+                question=latest_content,
+                parent_workflow=triage_state.pending_entry_id,
+                parent_question_id=triage_state.current_question_id,
+            )
+            triage_state.interruption_stack.append(triage_state.active_side_enquiry)
+            turn_classification = PBSGTurnClassification(
+                turn_type="current_topic_side_question",
+                should_call_llm=False,
+                reason=answer,
+            )
+            response = self.build_pending_question_response(
+                triage_state,
+                turn_classification,
+                "I answered the general enquiry and preserved the current triage question.",
+                session_state,
+            )
+            response["context"]["thoughts"].insert(
+                0,
+                ThoughtStep(
+                    "Deterministic PBSG general enquiry interrupt",
+                    "Answered a glossary or process question without advancing the active triage workflow.",
+                    {"faq_key": faq_key, "source_ids": source_ids},
+                ),
+            )
+            response["context"]["data_points"] = {
+                key: value for key, value in asdict(data_points).items() if value is not None
+            }
+            return response
+
+        if getattr(triage_state, "routing_completion_status", None) == "awaiting_topic_resolution" and getattr(
+            triage_state, "queued_workflows", None
+        ):
+            hold_response = self.build_awaiting_topic_resolution_response(triage_state, session_state)
+            hold_content = hold_response["message"]["content"]
+            prefix = "\n\n".join(["**General enquiry:**", answer])
+            hold_response["message"]["content"] = f"{prefix}\n\n{hold_content}"
+            hold_response["context"]["thoughts"].insert(
+                0,
+                ThoughtStep(
+                    "Deterministic PBSG general enquiry interrupt",
+                    "Answered a glossary or process question and preserved the queued-topic hold state.",
+                    {"faq_key": faq_key, "source_ids": source_ids},
+                ),
+            )
+            hold_response["context"]["data_points"] = {
+                key: value for key, value in asdict(data_points).items() if value is not None
+            }
+            return hold_response
+
+        return None
+
+    def try_general_enquiry_interrupt_response(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        session_state: Any = None,
+    ) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        latest_content = messages[-1].get("content")
+        if not isinstance(latest_content, str):
+            return None
+        if len(messages) == 1:
+            return None
+        triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        return self.build_general_enquiry_interrupt_response(latest_content, triage_state, session_state)
+
     def try_local_side_enquiry_response(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -1992,6 +2302,9 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(latest_content, str):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        if self.general_enquiry_interrupt_answer(latest_content, triage_state):
+            return None
         if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
             return None
         answer = self.local_side_enquiry_answer(latest_content)
@@ -2019,10 +2332,20 @@ class ChatReadRetrieveReadApproach(Approach):
         match = re.search(r"\bContinue queued workflow:\s*(GEN3-[A-Z0-9-]+)\b", latest_content, flags=re.IGNORECASE)
         if match:
             return match.group(1).upper()
-        if "continue queued workflow" in latest_content.lower():
-            queued_workflows = getattr(triage_state, "queued_workflows", None) or []
-            return queued_workflows[0] if queued_workflows else None
-        return None
+        if "continue queued workflow" not in latest_content.lower():
+            return None
+        queued_workflows = getattr(triage_state, "queued_workflows", None) or []
+        if not queued_workflows:
+            return None
+        normalized = re.sub(r"\s+", " ", latest_content).strip().lower()
+        for workflow_id in queued_workflows:
+            entry = self.pbsg_golden_set_entries.get(workflow_id, {})
+            stream_name = stream_display_name(self.pbsg_golden_set_entries, workflow_id).lower()
+            topic = entry.get("topic") if isinstance(entry, dict) else None
+            topic_text = topic.lower() if isinstance(topic, str) else ""
+            if workflow_id.lower() in normalized or stream_name in normalized or (topic_text and topic_text in normalized):
+                return workflow_id
+        return queued_workflows[0]
 
     def is_route_completion_acknowledgement(self, latest_content: str) -> bool:
         normalized = re.sub(r"[^a-z0-9\s]", " ", latest_content.lower())
@@ -2042,7 +2365,10 @@ class ChatReadRetrieveReadApproach(Approach):
         next_stream = stream_display_name(self.pbsg_golden_set_entries, next_workflow)
         content = "\n".join(
             [
-                pbsg_state_marker(active_workflow if active_workflow in self.pbsg_golden_set_entries else None),
+                pbsg_state_marker(
+                    active_workflow if active_workflow in self.pbsg_golden_set_entries else None,
+                    queued_workflows=triage_state.queued_workflows,
+                ),
                 f"**Selected Stream:** {active_stream}",
                 "",
                 f"**Note:** The {active_stream} has been routed. I will not start the queued topic until you confirm this topic is resolved.",
@@ -2070,19 +2396,21 @@ class ChatReadRetrieveReadApproach(Approach):
                 },
             )
         )
+        response_context = self.response_context_with_case_summary(
+            {
+                "thoughts": extra_info.thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(triage_state),
+            },
+            triage_state,
+        )
+        response_context = context_with_triage_memory(response_context, triage_state)
         return {
-            "message": {"content": content, "role": "assistant"},
-            "context": self.response_context_with_case_summary(
-                {
-                    "thoughts": extra_info.thoughts,
-                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                    "followup_questions": None,
-                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                    "pbsg_triage_state": asdict(triage_state),
-                },
-                triage_state,
-            ),
-            "session_state": session_state,
+            "message": {"content": apply_memory_notes(content, triage_state), "role": "assistant"},
+            "context": response_context,
+            "session_state": extend_session_state_with_memory(session_state, triage_state),
         }
 
     def try_queued_topic_control_response(
@@ -2096,6 +2424,10 @@ class ChatReadRetrieveReadApproach(Approach):
         if not isinstance(latest_content, str):
             return None
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        recap_response = maybe_resolved_recap(self.pbsg_golden_set_entries, triage_state, session_state)
+        if recap_response:
+            return recap_response
         if triage_state.routing_completion_status != "awaiting_topic_resolution" or not triage_state.queued_workflows:
             return None
         workflow_to_continue = self.parse_continue_queued_workflow(latest_content, triage_state)
@@ -2215,6 +2547,10 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
 
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
+        triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
+        recap_response = maybe_resolved_recap(self.pbsg_golden_set_entries, triage_state, session_state)
+        if recap_response:
+            return recap_response
         if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
             return None
         entry = self.pbsg_golden_set_entries.get(triage_state.pending_entry_id)
@@ -2452,6 +2788,8 @@ class ChatReadRetrieveReadApproach(Approach):
         content_lines.extend(["", f"**Note:** {note}"])
         if turn_classification.reason and turn_classification.turn_type == "clarification":
             content_lines.extend(["", "**Clarification:**", "", turn_classification.reason])
+        elif turn_classification.reason and turn_classification.turn_type == "current_topic_side_question":
+            content_lines.extend(["", "**General enquiry:**", "", turn_classification.reason])
         if turn_classification.new_topics:
             content_lines.extend(
                 [
@@ -2488,19 +2826,21 @@ class ChatReadRetrieveReadApproach(Approach):
                 {"turn_type": turn_classification.turn_type},
             )
         )
+        response_context = self.response_context_with_case_summary(
+            {
+                "thoughts": extra_info.thoughts,
+                "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
+                "followup_questions": None,
+                "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
+                "pbsg_triage_state": asdict(triage_state),
+            },
+            triage_state,
+        )
+        response_context = context_with_triage_memory(response_context, triage_state)
         return {
-            "message": {"content": content, "role": "assistant"},
-            "context": self.response_context_with_case_summary(
-                {
-                    "thoughts": extra_info.thoughts,
-                    "data_points": {key: value for key, value in asdict(data_points).items() if value is not None},
-                    "followup_questions": None,
-                    "quick_reply": asdict(extra_info.quick_reply) if extra_info.quick_reply else None,
-                    "pbsg_triage_state": asdict(triage_state),
-                },
-                triage_state,
-            ),
-            "session_state": session_state,
+            "message": {"content": apply_memory_notes(content, triage_state), "role": "assistant"},
+            "context": response_context,
+            "session_state": extend_session_state_with_memory(session_state, triage_state),
         }
 
     def get_search_query(self, chat_completion: ChatCompletion, default_query: str) -> str:
@@ -2539,6 +2879,12 @@ class ChatReadRetrieveReadApproach(Approach):
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
             return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            return queued_topic_response
+        general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
+        if general_enquiry_interrupt_response:
+            return general_enquiry_interrupt_response
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
@@ -2548,15 +2894,12 @@ class ChatReadRetrieveReadApproach(Approach):
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:
             return side_enquiry_response
-        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
-        if queued_topic_response:
-            return queued_topic_response
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
             return structured_response
 
         extra_info, chat_coroutine = await self.run_until_final_call(
-            messages, overrides, auth_claims, should_stream=False
+            messages, overrides, auth_claims, session_state=session_state, should_stream=False
         )
         chat_completion_response: ChatCompletion = await cast(Awaitable[ChatCompletion], chat_coroutine)
         content = chat_completion_response.choices[0].message.content
@@ -2590,8 +2933,12 @@ class ChatReadRetrieveReadApproach(Approach):
                 self.pbsg_golden_set_entries,
                 "",
             )
+            triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
             response_context["pbsg_triage_state"] = asdict(triage_state)
             self.response_context_with_case_summary(response_context, triage_state)
+            response_context = context_with_triage_memory(response_context, triage_state)
+            session_state = extend_session_state_with_memory(session_state, triage_state)
+            content = apply_memory_notes(content, triage_state)
         chat_app_response = {
             "message": {"content": content, "role": role},
             "context": response_context,
@@ -2627,6 +2974,18 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             return
+        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
+        if queued_topic_response:
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": queued_topic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
+            return
+        general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
+        if general_enquiry_interrupt_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_interrupt_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
+            return
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
@@ -2645,12 +3004,6 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": side_enquiry_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": side_enquiry_response["context"], "session_state": session_state}
             return
-        queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
-        if queued_topic_response:
-            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
-            yield {"delta": {"role": "assistant", "content": queued_topic_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": queued_topic_response["context"], "session_state": session_state}
-            return
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
             yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
@@ -2659,7 +3012,7 @@ class ChatReadRetrieveReadApproach(Approach):
             return
 
         extra_info, chat_coroutine = await self.run_until_final_call(
-            messages, overrides, auth_claims, should_stream=True
+            messages, overrides, auth_claims, session_state=session_state, should_stream=True
         )
         buffer_pbsg_stream = bool(self.extract_golden_set_entries(extra_info.data_points.text))
         yield {"delta": {"role": "assistant"}, "context": extra_info, "session_state": session_state}
@@ -2790,6 +3143,7 @@ class ChatReadRetrieveReadApproach(Approach):
         messages: list[ChatCompletionMessageParam],
         overrides: dict[str, Any],
         auth_claims: dict[str, Any],
+        session_state: Any = None,
         should_stream: bool = False,
     ) -> tuple[ExtraInfo, Awaitable[ChatCompletion] | Awaitable[AsyncStream[ChatCompletionChunk]]]:
         use_agentic_knowledgebase = True if overrides.get("use_agentic_knowledgebase") else False
@@ -2807,7 +3161,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 )
             extra_info = await self.run_agentic_retrieval_approach(messages, overrides, auth_claims)
         else:
-            extra_info = await self.run_search_approach(messages, overrides, auth_claims)
+            extra_info = await self.run_search_approach(messages, overrides, auth_claims, session_state)
 
         if extra_info.answer:
             # If agentic retrieval already provided an answer, skip final call to LLM
@@ -2820,6 +3174,7 @@ class ChatReadRetrieveReadApproach(Approach):
         triage_state_prompt = ""
         if isinstance(original_user_query, str) and golden_set_entries:
             triage_state = build_triage_state(messages[:-1], golden_set_entries, original_user_query)
+            triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
             triage_state_prompt = format_state_prompt(triage_state)
             extra_info.deterministic_transition = resolve_expected_transition(
                 golden_set_entries, triage_state, original_user_query
@@ -2855,6 +3210,8 @@ class ChatReadRetrieveReadApproach(Approach):
             "citations": extra_info.data_points.citations,
             "routing_state_prompt": triage_state_prompt,
         }
+        if isinstance(original_user_query, str) and golden_set_entries:
+            system_template_variables = prompt_vars_with_memory(system_template_variables, triage_state)
 
         messages = self.prompt_manager.build_conversation(
             system_template_path="chat_answer.system.jinja2",
@@ -2892,7 +3249,11 @@ class ChatReadRetrieveReadApproach(Approach):
         return (extra_info, chat_coroutine)
 
     async def run_search_approach(
-        self, messages: list[ChatCompletionMessageParam], overrides: dict[str, Any], auth_claims: dict[str, Any]
+        self,
+        messages: list[ChatCompletionMessageParam],
+        overrides: dict[str, Any],
+        auth_claims: dict[str, Any],
+        session_state: Any = None,
     ):
         use_text_search = overrides.get("retrieval_mode") in ["text", "hybrid", None]
         use_vector_search = overrides.get("retrieval_mode") in ["vectors", "hybrid", None]
@@ -2921,12 +3282,13 @@ class ChatReadRetrieveReadApproach(Approach):
 
         # STEP 1: Generate an optimized keyword search query based on the chat history and the last question
 
+        triage_state = hydrate_triage_state_from_session_memory(
+            build_triage_state(messages[:-1], self.pbsg_golden_set_entries, original_user_query),
+            session_state,
+        )
         rewrite_result = await self.rewrite_query(
             prompt_template="query_rewrite.system.jinja2",
-            prompt_variables={
-                "user_query": original_user_query,
-                "past_messages": messages[:-1],
-            },
+            prompt_variables=rewrite_vars_with_memory(original_user_query, messages[:-1], triage_state),
             overrides=overrides,
             chatgpt_model=self.chatgpt_model,
             chatgpt_deployment=self.chatgpt_deployment,

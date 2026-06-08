@@ -23,8 +23,10 @@ from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGTransition,
+    PBSGTriageState,
     branch_key_for_answer,
     build_triage_state,
+    classify_turn_interrupt,
     format_state_prompt,
     normalize_simple_answer,
     resolve_expected_transition,
@@ -2155,6 +2157,42 @@ Topics identified:
     ]
 
 
+def gen3_t02_q5_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+Triage progress:
+
+- Next question: Q5 from GEN3-T02
+
+**Ask the applicant (read verbatim):**
+
+> **Q5: "Have you applied to, or been told about, the Public Defender's Office (PDO)?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
+def gen3_t03_q3_messages(user_content):
+    return [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T03
+
+Triage progress:
+
+- Next question: Q3 from GEN3-T03
+
+**Ask the applicant (read verbatim):**
+
+> **Q3: "Have you applied to the Legal Aid Bureau (LAB) for civil legal aid?"**""",
+        },
+        {"role": "user", "content": user_content},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_local_side_enquiry_answers_glossary_and_preserves_routing(chat_approach, monkeypatch):
     async def fail_if_called(*args, **kwargs):
@@ -2175,6 +2213,223 @@ async def test_local_side_enquiry_answers_glossary_and_preserves_routing(chat_ap
     assert result["context"]["pbsg_triage_state"]["active_side_enquiry"]["question"] == "What is PCHI?"
     assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T04"
     assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q4"
+    assert result["context"]["pbsg_memory_pack"]["active_thread_id"] == "GEN3-T04"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_interrupt_answers_pdo_and_preserves_criminal_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known PDO enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t02_q5_messages("What is PDO?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Public Defender’s Office" in content
+    assert "Current question remains: Q5 from GEN3-T02" in content
+    assert result["context"]["pbsg_triage_state"]["active_side_enquiry"]["question"] == "What is PDO?"
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T02"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q5"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_interrupt_repeated_pdo_followup_does_not_route(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("repeated PDO explanation should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t02_q5_messages("Can you explain more about PDO?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Public Defender’s Office" in content
+    assert "Current question remains: Q5 from GEN3-T02" in content
+    assert "**Routing Recommendation:**" not in content
+    assert "Route B (Refer to PDO First)" not in content
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q5"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_interrupt_answers_fjss_and_preserves_family_question(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("known FJSS enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t03_q3_messages("What is FJSS?"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    content = result["message"]["content"]
+    assert "Family Justice Support Scheme" in content
+    assert "Current question remains: Q3 from GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q3"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_interrupt_after_route_preserves_queued_topic_hold(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("post-route general enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "What is LAB?"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "Legal Aid Bureau" in content
+    assert "**Queued topic ready:**" in content
+    assert result["context"]["pbsg_triage_state"]["routing_completion_status"] == "awaiting_topic_resolution"
+    assert result["context"]["quick_reply"]["questionId"] == "CONTINUE"
+    assert result["context"]["quick_reply"]["options"][0]["id"] == "continue_queued_workflow:GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_continue_after_post_route_general_enquiry_starts_queued_workflow(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("continue after post-route general enquiry should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    held = await chat_approach.run_without_streaming(
+        [
+            *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+            {"role": "assistant", "content": routed["message"]["content"]},
+            {"role": "user", "content": "What is LAB?"},
+        ],
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "What is LAB?"},
+        {"role": "assistant", "content": held["message"]["content"]},
+        {"role": "user", "content": "Continue queued workflow: Family and Matrimonial Stream - Matrimonial Stream Triage — FJSS Pro Bono & Modest Means"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+@pytest.mark.asyncio
+async def test_continue_quick_reply_uses_canonical_workflow_id_value(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("terminal route with queued topic should stay deterministic")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    quick_reply = result["context"]["quick_reply"]
+    assert quick_reply["questionId"] == "CONTINUE"
+    assert quick_reply["options"][0]["id"] == "continue_queued_workflow:GEN3-T03"
+    assert quick_reply["options"][0]["value"] == "Continue queued workflow: GEN3-T03"
+
+
+@pytest.mark.asyncio
+async def test_resolved_topic_recap_returns_short_response(chat_approach, monkeypatch):
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = result["message"]["content"]
+    assert "**Selected Entry:** GEN3-T03" in content
+    assert "Next question: Q1 from GEN3-T03" in content
+    assert result["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T03"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+@pytest.mark.asyncio
+async def test_resolved_topic_recap_returns_short_response(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("resolved-topic recap should not run retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    routed = await chat_approach.run_without_streaming(
+        gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {},
+        {},
+        session_state="session-1",
+    )
+    messages = [
+        *gen3_t02_q1_with_queued_divorce_messages("Yes"),
+        {"role": "assistant", "content": routed["message"]["content"]},
+        {"role": "user", "content": "Can you recap the criminal route again?"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    content = visible_text(result["message"]["content"])
+    assert "Recap:" in content
+    assert "already completed this topic earlier" in content
+    assert "Last resolved route" in content
+    assert result["context"]["pbsg_triage_state"]["already_resolved"] is True
+    assert result["context"]["pbsg_triage_state"]["should_recap"] is True
+    assert result["context"]["pbsg_memory_pack"]["already_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_return_to_completed_topic_marks_resume_in_state():
+    entries = pbsg_triage_state.load_golden_set_entries()
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T02
+
+**Routing Recommendation:** Route A (LASCO)
+
+Topics identified:
+1. GEN3-T02 — routed workflow
+2. GEN3-T03 — queued workflow""",
+        }
+    ]
+
+    triage_state = build_triage_state(messages, entries, "Can we go back to the criminal issue?")
+
+    assert triage_state.referenced_thread_id == "GEN3-T02"
+    assert triage_state.already_resolved is True
+    assert triage_state.should_recap is True
 
 
 @pytest.mark.asyncio
@@ -2720,6 +2975,25 @@ async def test_structured_switch_answers_clarification_without_advancing(chat_ap
 
     assert "PCHI means total monthly household income" in result["message"]["content"]
     assert "Current question remains: Q4 from GEN3-T04" in result["message"]["content"]
+
+
+def test_classify_turn_interrupt_treats_general_enquiry_as_side_question():
+    entries = pbsg_triage_state.load_golden_set_entries()
+    state = PBSGTriageState(
+        mode="FAST_ROUTING",
+        workflow_locked=True,
+        active_workflow="GEN3-T02",
+        workflow_id="GEN3-T02",
+        pending_entry_id="GEN3-T02",
+        current_question_id="Q5",
+    )
+
+    classification = classify_turn_interrupt(entries, state, "Can you explain more about PDO?")
+
+    assert classification.turn_type == "current_topic_side_question"
+    assert classification.should_call_llm is False
+    assert classification.pending_branch_key is None
+    assert classification.reason == "general enquiry interrupt"
 
 
 def test_create_chat_completion_uses_max_completion_tokens_for_gpt5_variants(chat_approach):

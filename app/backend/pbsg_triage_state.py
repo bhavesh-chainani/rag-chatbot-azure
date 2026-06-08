@@ -41,6 +41,22 @@ class PBSGInterruption:
 
 
 @dataclass
+class PBSGTopicThread:
+    thread_id: str
+    entry_id: str
+    status: str = "active"
+    summary: str = ""
+    answered_question_ids: list[str] = field(default_factory=list)
+    terminal_route: str | None = None
+    route_explained_at_turn: int | None = None
+    last_pending_question: str | None = None
+    last_touched_turn: int | None = None
+    material_fact_keys: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
+    requires_reopen_if_fact_keys_changed: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PBSGTriageState:
     mode: str = "ORCHESTRATION"
     workflow_id: str | None = None
@@ -71,6 +87,19 @@ class PBSGTriageState:
     active_side_enquiry: PBSGInterruption | None = None
     interruption_stack: list[PBSGInterruption] = field(default_factory=list)
     routing_completion_status: str = "not_started"
+    topic_threads: list[PBSGTopicThread] = field(default_factory=list)
+    active_thread_id: str | None = None
+    referenced_thread_id: str | None = None
+    last_resolved_route_by_thread: dict[str, str] = field(default_factory=dict)
+    thread_aliases: dict[str, list[str]] = field(default_factory=dict)
+    session_summary: str = ""
+    memory_hash: str | None = None
+    already_resolved: bool = False
+    should_recap: bool = False
+    last_material_change_fact_keys: list[str] = field(default_factory=list)
+    memory_origin: str = "messages"
+    resume_hint: str | None = None
+    memory_pack: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -228,8 +257,24 @@ CAPITAL_OFFENCE_PATTERN = re.compile(
 )
 ADDITIVE_PATTERN = re.compile(r"\b(also|and also|another issue|separate matter|by the way)\b", flags=re.IGNORECASE)
 CORRECTION_PATTERN = re.compile(r"\b(actually|sorry|correction|i meant|not anymore)\b", flags=re.IGNORECASE)
+RETURN_REFERENCE_PATTERN = re.compile(
+    r"\b(back to|go back|again|earlier|previous|resume|that other|that earlier|the other issue|the earlier issue)\b",
+    flags=re.IGNORECASE,
+)
+RECAP_REQUEST_PATTERN = re.compile(
+    r"\b(remind me|recap|summari[sz]e|repeat|what did you say|what was the route|what can i do again)\b",
+    flags=re.IGNORECASE,
+)
 CLARIFICATION_QUESTION_PATTERN = re.compile(
     r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
+)
+GENERAL_ENQUIRY_INTERRUPT_PATTERN = re.compile(
+    r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
+    flags=re.IGNORECASE,
+)
+GENERAL_ENQUIRY_KEYWORD_PATTERN = re.compile(
+    r"\b(pdo|lasco|clas|lab|fjss|pchi|legal aid|public defender(?:['’]s)? office|family justice support scheme|criminal legal aid scheme|legal aid bureau|route|stream|workflow|triage|urgent|vulnerable|escalate|staff|appointment|documents?)\b",
+    flags=re.IGNORECASE,
 )
 SAFETY_INTERRUPT_PATTERN = re.compile(
     r"\b(in danger|unsafe|not safe|violence|self[- ]?harm|homeless|no shelter|immediate threat)\b",
@@ -1472,6 +1517,207 @@ def extract_completed_workflows_from_messages(messages: list[ChatCompletionMessa
     return completed
 
 
+def thread_id_for_entry(entry_id: str) -> str:
+    return entry_id.upper()
+
+
+def thread_reference_score(normalized_latest: str, aliases: list[str]) -> int:
+    if not normalized_latest:
+        return 0
+    stopwords = {
+        "the",
+        "a",
+        "an",
+        "to",
+        "back",
+        "go",
+        "again",
+        "earlier",
+        "previous",
+        "resume",
+        "issue",
+        "matter",
+        "stream",
+        "legal",
+        "aid",
+        "route",
+    }
+    score = 0
+    for alias in aliases:
+        if not isinstance(alias, str):
+            continue
+        candidate = alias.strip().lower()
+        if len(candidate) <= 2:
+            continue
+        if re.search(rf"\b{re.escape(candidate)}\b", normalized_latest):
+            score = max(score, 100)
+            continue
+        alias_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", candidate)
+            if len(token) > 2 and token not in stopwords
+        }
+        if not alias_tokens:
+            continue
+        matched_tokens = [token for token in alias_tokens if re.search(rf"\b{re.escape(token)}\b", normalized_latest)]
+        if matched_tokens:
+            score = max(score, len(matched_tokens) * 10)
+    return score
+
+
+def thread_aliases_for_entry(entries: dict[str, dict[str, Any]], entry_id: str, fact_ledger: list[PBSGTriageFact]) -> list[str]:
+    aliases: list[str] = []
+    entry = entries.get(entry_id, {})
+    for candidate in [entry_id, stream_display_name(entries, entry_id), clean_stream_topic(entry.get("topic") if isinstance(entry, dict) else None)]:
+        if isinstance(candidate, str) and candidate.strip():
+            aliases.append(candidate.strip())
+    for fact in fact_ledger:
+        if fact.status != "active":
+            continue
+        if fact.workflow_scope not in {"global", "workflow", entry_id} and fact.scope != "global":
+            continue
+        if fact.workflow_scope == entry_id or fact.scope == "global" or fact.fact_key in {
+            "matter.legal_topic",
+            "matter.charged_in_court",
+            "matter.capital_offence",
+            "matter.urgency_or_safety",
+        }:
+            aliases.append(fact.value)
+            if fact.source_text:
+                aliases.append(fact.source_text)
+    return unique_preserve_order([alias for alias in aliases if isinstance(alias, str) and alias.strip()])
+
+
+def build_topic_threads(
+    entries: dict[str, dict[str, Any]],
+    active_workflow: str | None,
+    queued_workflows: list[str],
+    completed_workflows: list[str],
+    current_question_id: str | None,
+    fact_ledger: list[PBSGTriageFact],
+    latest_user_query: str,
+    selected_entry_id: str | None,
+    assistant_content: str | None,
+    routing_completion_status: str,
+) -> tuple[list[PBSGTopicThread], str | None, dict[str, str], dict[str, list[str]], str | None, bool, bool, str | None]:
+    ordered_entry_ids: list[str] = []
+    for workflow_id in [active_workflow, *(queued_workflows or []), *(completed_workflows or [])]:
+        if isinstance(workflow_id, str) and workflow_id in entries and workflow_id not in ordered_entry_ids:
+            ordered_entry_ids.append(workflow_id)
+
+    route_match = ROUTE_PATTERN.search(assistant_content or "")
+    current_route = f"Route {route_match.group(1).upper()}" if route_match else None
+    threads: list[PBSGTopicThread] = []
+    last_resolved_route_by_thread: dict[str, str] = {}
+    aliases_by_thread: dict[str, list[str]] = {}
+
+    for entry_id in ordered_entry_ids:
+        thread_id = thread_id_for_entry(entry_id)
+        answered_question_ids: list[str] = []
+        material_fact_keys: list[str] = []
+        for fact in fact_ledger:
+            if fact.status != "active":
+                continue
+            if fact.workflow_scope not in {"global", "workflow", entry_id} and fact.scope != "global":
+                continue
+            if fact.source.startswith(f"{entry_id}."):
+                question_id = fact.source.split(".", 1)[1]
+                if question_id not in answered_question_ids:
+                    answered_question_ids.append(question_id)
+            if fact.fact_key not in material_fact_keys:
+                material_fact_keys.append(fact.fact_key)
+        status = "queued"
+        if entry_id == active_workflow:
+            status = "completed" if routing_completion_status in {"completed", "awaiting_topic_resolution"} and current_question_id is None else "active"
+        elif entry_id in completed_workflows:
+            status = "completed"
+        summary_bits = [stream_display_name(entries, entry_id)]
+        if entry_id == active_workflow and current_question_id:
+            summary_bits.append(f"pending {current_question_id}")
+        if current_route and entry_id == selected_entry_id:
+            summary_bits.append(current_route)
+            last_resolved_route_by_thread[thread_id] = current_route
+        aliases = thread_aliases_for_entry(entries, entry_id, fact_ledger)
+        aliases_by_thread[thread_id] = aliases
+        threads.append(
+            PBSGTopicThread(
+                thread_id=thread_id,
+                entry_id=entry_id,
+                status=status,
+                summary="; ".join(summary_bits),
+                answered_question_ids=answered_question_ids,
+                terminal_route=current_route if status == "completed" and entry_id == selected_entry_id else None,
+                route_explained_at_turn=None,
+                last_pending_question=current_question_id if entry_id == active_workflow else None,
+                last_touched_turn=None,
+                material_fact_keys=material_fact_keys,
+                aliases=aliases,
+                requires_reopen_if_fact_keys_changed=material_fact_keys,
+            )
+        )
+
+    active_thread_id = thread_id_for_entry(active_workflow) if active_workflow else None
+    referenced_thread_id: str | None = None
+    resume_hint: str | None = None
+    should_recap = False
+    already_resolved = False
+    normalized_latest = re.sub(r"\s+", " ", latest_user_query).strip().lower()
+    if normalized_latest and RETURN_REFERENCE_PATTERN.search(normalized_latest):
+        generic_return = any(term in normalized_latest for term in ["back to", "go back", "earlier", "previous", "resume", "again"])
+        active_thread = next((thread for thread in threads if thread.thread_id == active_thread_id), None)
+        allow_active_thread_reference = bool(active_thread and active_thread.status == "completed")
+        ranked_threads: list[tuple[int, int, int, PBSGTopicThread]] = []
+        for idx, thread in enumerate(threads):
+            if thread.thread_id == active_thread_id and not allow_active_thread_reference:
+                continue
+            aliases = aliases_by_thread.get(thread.thread_id, [])
+            reference_score = thread_reference_score(normalized_latest, aliases)
+            if reference_score <= 0 and not generic_return:
+                continue
+            status_score = 1 if thread.status == "completed" else 0
+            recency_score = len(threads) - idx
+            ranked_threads.append((reference_score, status_score, recency_score, thread))
+        if ranked_threads:
+            _, _, _, thread = max(ranked_threads, key=lambda item: (item[0], item[1], item[2]))
+            referenced_thread_id = thread.thread_id
+            resume_hint = f"Resume {stream_display_name(entries, thread.entry_id)}"
+            already_resolved = thread.status == "completed"
+            should_recap = already_resolved and bool(RECAP_REQUEST_PATTERN.search(normalized_latest) or generic_return)
+        elif generic_return:
+            fallback_thread = next(
+                (
+                    thread
+                    for thread in threads
+                    if thread.thread_id != active_thread_id or allow_active_thread_reference
+                ),
+                None,
+            )
+            if fallback_thread is not None:
+                referenced_thread_id = fallback_thread.thread_id
+                resume_hint = f"Resume {stream_display_name(entries, fallback_thread.entry_id)}"
+                already_resolved = fallback_thread.status == "completed"
+                should_recap = already_resolved and bool(RECAP_REQUEST_PATTERN.search(normalized_latest) or generic_return)
+    elif normalized_latest and RECAP_REQUEST_PATTERN.search(normalized_latest):
+        if active_thread_id:
+            referenced_thread_id = active_thread_id
+            active_thread = next((thread for thread in threads if thread.thread_id == active_thread_id), None)
+            if active_thread and active_thread.status == "completed":
+                already_resolved = True
+                should_recap = True
+                resume_hint = f"Recap {stream_display_name(entries, active_thread.entry_id)}"
+
+    return (
+        threads,
+        active_thread_id,
+        last_resolved_route_by_thread,
+        aliases_by_thread,
+        referenced_thread_id,
+        already_resolved,
+        should_recap,
+        resume_hint,
+    )
+
+
 def allowed_branch_keys(entries: dict[str, dict[str, Any]], entry_id: str | None, question_id: str | None) -> list[str]:
     if not entry_id or not question_id:
         return []
@@ -2152,6 +2398,15 @@ def detect_candidate_topics(
     return topics
 
 
+def is_general_enquiry_interrupt(latest_user_query: str) -> bool:
+    normalized = re.sub(r"\s+", " ", latest_user_query).strip().lower()
+    if not normalized:
+        return False
+    if not GENERAL_ENQUIRY_INTERRUPT_PATTERN.search(normalized):
+        return False
+    return bool(GENERAL_ENQUIRY_KEYWORD_PATTERN.search(normalized))
+
+
 def classify_turn_interrupt(
     entries: dict[str, dict[str, Any]],
     state: PBSGTriageState,
@@ -2166,12 +2421,26 @@ def classify_turn_interrupt(
     if not isinstance(question_node, dict):
         return PBSGTurnClassification(turn_type="not_locked", should_call_llm=False)
 
-    branch_key = branch_key_for_answer(question_node, latest_user_query)
+    has_general_enquiry = is_general_enquiry_interrupt(latest_user_query)
+    branch_key = None if has_general_enquiry else branch_key_for_answer(question_node, latest_user_query)
     candidates = detect_candidate_topics(latest_user_query, entries, state.active_workflow)
     has_additive = bool(ADDITIVE_PATTERN.search(latest_user_query))
     has_correction = bool(CORRECTION_PATTERN.search(latest_user_query)) or bool(state.contradiction_signals)
     has_clarification = bool(CLARIFICATION_QUESTION_PATTERN.search(latest_user_query))
+    has_return_reference = bool(RETURN_REFERENCE_PATTERN.search(latest_user_query))
+    has_recap_request = bool(RECAP_REQUEST_PATTERN.search(latest_user_query))
     has_safety = bool(SAFETY_INTERRUPT_PATTERN.search(latest_user_query)) and branch_key != "if_no"
+    referenced_thread_id = getattr(state, "referenced_thread_id", None)
+    active_thread_id = getattr(state, "active_thread_id", None)
+
+    if has_general_enquiry:
+        return PBSGTurnClassification(
+            turn_type="current_topic_side_question",
+            should_call_llm=False,
+            reason="general enquiry interrupt",
+            pending_branch_key=None,
+            new_topics=[],
+        )
 
     if has_correction:
         return PBSGTurnClassification(
@@ -2184,7 +2453,7 @@ def classify_turn_interrupt(
         )
     if has_clarification:
         return PBSGTurnClassification(
-            turn_type="clarification",
+            turn_type="current_topic_side_question",
             should_call_llm=True,
             reason="clarification question",
             pending_branch_key=branch_key,
@@ -2198,9 +2467,29 @@ def classify_turn_interrupt(
             pending_branch_key=branch_key,
             new_topics=candidates,
         )
+    if referenced_thread_id and referenced_thread_id != active_thread_id:
+        referenced_thread = next(
+            (thread for thread in getattr(state, "topic_threads", []) if thread.thread_id == referenced_thread_id),
+            None,
+        )
+        return PBSGTurnClassification(
+            turn_type="return_to_completed_topic" if referenced_thread and referenced_thread.status == "completed" else "return_to_queued_topic",
+            should_call_llm=False,
+            reason=getattr(state, "resume_hint", None) or "return to prior topic",
+            pending_branch_key=branch_key,
+            new_topics=[],
+        )
+    if has_recap_request and getattr(state, "already_resolved", False):
+        return PBSGTurnClassification(
+            turn_type="return_to_completed_topic",
+            should_call_llm=False,
+            reason=getattr(state, "resume_hint", None) or "recap requested for resolved topic",
+            pending_branch_key=branch_key,
+            new_topics=[],
+        )
     if candidates and has_additive:
         return PBSGTurnClassification(
-            turn_type="answer_plus_new_topic" if branch_key else "new_topic_only",
+            turn_type="answer_plus_new_topic" if branch_key else "true_new_topic",
             should_call_llm=True,
             reason="possible new topic in locked flow",
             pending_branch_key=branch_key,
@@ -2208,18 +2497,26 @@ def classify_turn_interrupt(
         )
     if branch_key:
         return PBSGTurnClassification(
-            turn_type="answer_only",
+            turn_type="current_topic_refinement",
             should_call_llm=False,
             pending_branch_key=branch_key,
             pending_answer_confidence=1.0,
         )
     if candidates:
         return PBSGTurnClassification(
-            turn_type="new_topic_only",
+            turn_type="true_new_topic",
             should_call_llm=True,
             reason="possible new topic in locked flow",
             pending_branch_key=branch_key,
             new_topics=candidates,
+        )
+    if has_return_reference:
+        return PBSGTurnClassification(
+            turn_type="return_to_completed_topic" if getattr(state, "already_resolved", False) else "return_to_queued_topic",
+            should_call_llm=False,
+            reason=getattr(state, "resume_hint", None) or "return to prior topic",
+            pending_branch_key=branch_key,
+            new_topics=[],
         )
     return PBSGTurnClassification(turn_type="ambiguous", should_call_llm=True, reason="answer did not map locally")
 
@@ -2280,15 +2577,40 @@ def build_triage_state(
             parent_workflow = resume_matches[-1][0].upper()
     resume_question_id = {"GEN3-T02": "Q3", "GEN3-T03": "Q2"}.get(parent_workflow or "")
     is_terminal_route = bool(assistant_content and "**Routing Recommendation:**" in assistant_content and selected_entry_id)
+    is_queued_topic_hold = bool(assistant_content and "**Queued topic ready:**" in assistant_content and queued_workflows)
     routing_completion_status = "not_started"
     if contradiction_signals:
         routing_completion_status = "repair_required"
-    elif is_terminal_route and queued_workflows:
+    elif (is_terminal_route or is_queued_topic_hold) and queued_workflows:
         routing_completion_status = "awaiting_topic_resolution"
     elif is_terminal_route:
         routing_completion_status = "completed"
     elif workflow_locked:
         routing_completion_status = "in_progress"
+
+    (
+        topic_threads,
+        active_thread_id,
+        last_resolved_route_by_thread,
+        thread_aliases,
+        referenced_thread_id,
+        already_resolved,
+        should_recap,
+        resume_hint,
+    ) = build_topic_threads(
+        entries,
+        active_workflow,
+        queued_workflows,
+        completed_workflows,
+        current_question_id,
+        fact_ledger,
+        latest_user_query,
+        selected_entry_id,
+        assistant_content,
+        routing_completion_status,
+    )
+    memory_hash = f"{active_thread_id or 'none'}:{referenced_thread_id or 'none'}:{routing_completion_status}:{len(fact_ledger)}"
+    session_summary_parts = [thread.summary for thread in topic_threads if thread.summary]
 
     return PBSGTriageState(
         mode=mode,
@@ -2317,6 +2639,23 @@ def build_triage_state(
         ),
         suspended_workflows=queued_workflows.copy(),
         routing_completion_status=routing_completion_status,
+        topic_threads=topic_threads,
+        active_thread_id=active_thread_id,
+        referenced_thread_id=referenced_thread_id,
+        last_resolved_route_by_thread=last_resolved_route_by_thread,
+        thread_aliases=thread_aliases,
+        session_summary=" | ".join(session_summary_parts),
+        memory_hash=memory_hash,
+        already_resolved=already_resolved,
+        should_recap=should_recap,
+        memory_origin="messages",
+        resume_hint=resume_hint,
+        memory_pack={
+            "active_thread_id": active_thread_id,
+            "referenced_thread_id": referenced_thread_id,
+            "routing_completion_status": routing_completion_status,
+            "session_summary": " | ".join(session_summary_parts),
+        },
     )
 
 
@@ -2339,12 +2678,54 @@ def format_state_prompt(state: PBSGTriageState) -> str:
         lines.append(f"- Queued workflows: {', '.join(state.queued_workflows)}. Do not ask from these workflows until the active workflow is routed, suspended by rule, or explicitly hands off.")
     if state.completed_workflows:
         lines.append(f"- Completed workflows: {', '.join(state.completed_workflows)}.")
+    if state.topic_threads:
+        lines.append("- Topic threads:")
+        lines.extend(
+            f"  - {thread.thread_id}: {thread.status}; summary={thread.summary or 'n/a'}"
+            for thread in state.topic_threads
+        )
+    if state.active_thread_id:
+        lines.append(f"- Active thread: {state.active_thread_id}.")
+    if state.referenced_thread_id:
+        lines.append(f"- Referenced thread: {state.referenced_thread_id}. {state.resume_hint or ''}".strip())
     if state.concurrent_monitors:
         lines.append(f"- Concurrent monitors: {', '.join(state.concurrent_monitors)}. They may interrupt only for urgency threshold, safety issue, or required escalation.")
     if state.pending_entry_id and state.current_question_id:
         lines.append(f"- Pending question: {state.pending_entry_id} {state.current_question_id}. Treat the user's latest message as the answer to this question.")
     if state.routing_completion_status:
         lines.append(f"- Routing completion status: {state.routing_completion_status}.")
+    if state.already_resolved:
+        lines.append("- Referenced topic already has a resolved route. Prefer recap unless material facts changed.")
+    if state.should_recap:
+        lines.append("- Recap requested for a resolved topic.")
+    if state.session_summary:
+        lines.append(f"- Session summary: {state.session_summary}.")
+    if state.memory_hash:
+        lines.append(f"- Memory hash: {state.memory_hash}.")
+    if state.memory_origin:
+        lines.append(f"- Memory origin: {state.memory_origin}.")
+    if state.memory_pack:
+        lines.append(f"- Memory pack keys: {', '.join(sorted(state.memory_pack.keys()))}.")
+    if state.last_resolved_route_by_thread:
+        lines.append(
+            "- Last resolved routes by thread: "
+            + "; ".join(f"{thread_id}={route}" for thread_id, route in state.last_resolved_route_by_thread.items())
+            + "."
+        )
+    if state.last_material_change_fact_keys:
+        lines.append(f"- Last material change fact keys: {', '.join(state.last_material_change_fact_keys)}.")
+    if state.thread_aliases:
+        lines.append(
+            "- Thread aliases: "
+            + "; ".join(f"{thread_id}={', '.join(aliases[:3])}" for thread_id, aliases in state.thread_aliases.items() if aliases)
+            + "."
+        )
+    if state.referenced_thread_id and state.active_thread_id and state.referenced_thread_id != state.active_thread_id:
+        lines.append("- If the user is returning to a prior topic, resume that topic's unresolved state instead of re-answering from scratch.")
+    if state.already_resolved:
+        lines.append("- For already resolved topics, provide a concise recap unless the user supplied materially new facts.")
+    if state.unanswered_required_fields:
+        lines.append(f"- Unanswered required fields: {', '.join(state.unanswered_required_fields)}.")
     if state.unanswered_required_fields:
         lines.append(f"- Unanswered required fields: {', '.join(state.unanswered_required_fields)}.")
     if state.fact_ledger:

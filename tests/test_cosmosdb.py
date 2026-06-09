@@ -516,6 +516,118 @@ async def test_chathistory_getitem_error_runtime(auth_public_documents_client, m
     assert response.status_code == 500
 
 
+@pytest.mark.asyncio
+async def test_chathistory_renameitem(auth_public_documents_client, monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def mock_read_item(container_proxy, item, partition_key, **kwargs):
+        assert item == "123"
+        assert partition_key == ["OID_X", "123"]
+        return {
+            "id": "123",
+            "session_id": "123",
+            "entra_oid": "OID_X",
+            "title": "Old title",
+            "timestamp": 123456789,
+            "type": "session",
+        }
+
+    async def mock_upsert_item(container_proxy, body, **kwargs):
+        captured["body"] = body
+
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item)
+    monkeypatch.setattr(ContainerProxy, "upsert_item", mock_upsert_item)
+
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "  Renamed chat   history  "},
+    )
+    assert response.status_code == 200
+    assert captured["body"]["title"] == "Renamed chat history"
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_empty_title(auth_public_documents_client):
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "   "},
+    )
+    assert response.status_code == 400
+    assert await response.get_json() == {"error": "Title is required"}
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_not_found(auth_public_documents_client, monkeypatch):
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item_session_not_found)
+
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "Renamed chat"},
+    )
+    assert response.status_code == 404
+    assert await response.get_json() == {"error": "Chat session not found"}
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_disabled(client, monkeypatch):
+    response = await client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "Renamed chat"},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_container(auth_public_documents_client, monkeypatch):
+    auth_public_documents_client.app.config["cosmos_history_container"] = None
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "Renamed chat"},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_entra(auth_public_documents_client, monkeypatch):
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        json={"title": "Renamed chat"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_chathistory_renameitem_error_runtime(auth_public_documents_client, monkeypatch):
+
+    async def mock_upsert_item(container_proxy, body, **kwargs):
+        raise Exception("Test Exception")
+
+    async def mock_read_item(container_proxy, item, partition_key, **kwargs):
+        return {
+            "id": item,
+            "session_id": item,
+            "entra_oid": "OID_X",
+            "title": "Old title",
+            "timestamp": 123456789,
+            "type": "session",
+        }
+
+    monkeypatch.setattr(ContainerProxy, "read_item", mock_read_item)
+    monkeypatch.setattr(ContainerProxy, "upsert_item", mock_upsert_item)
+
+    response = await auth_public_documents_client.patch(
+        "/chat_history/sessions/123",
+        headers={"Authorization": "Bearer MockToken"},
+        json={"title": "Renamed chat"},
+    )
+    assert response.status_code == 500
+
+
 # Tests for deleting an individual chat history item
 @pytest.mark.asyncio
 async def test_chathistory_deleteitem(auth_public_documents_client, monkeypatch):

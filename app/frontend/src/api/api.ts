@@ -219,6 +219,21 @@ export async function getChatHistoryApi(id: string, idToken: string): Promise<Hi
     return dataResponse;
 }
 
+export async function renameChatHistoryApi(id: string, title: string, idToken: string): Promise<SimpleAPIResponse> {
+    const headers = await getHeaders(idToken);
+    const response = await fetch(`/chat_history/sessions/${id}`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ title })
+    });
+
+    if (!response.ok) {
+        throw new Error(`Renaming chat history failed: ${response.statusText}`);
+    }
+
+    return (await response.json()) as SimpleAPIResponse;
+}
+
 export async function deleteChatHistoryApi(id: string, idToken: string): Promise<any> {
     const headers = await getHeaders(idToken);
     const response = await fetch(`/chat_history/sessions/${id}`, {

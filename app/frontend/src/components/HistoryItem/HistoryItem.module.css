@@ -2,6 +2,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+    gap: 8px;
     padding: 10px 12px;
     border-radius: 8px;
     background-color: #ffffff;
@@ -19,8 +20,13 @@
     box-shadow: 0 2px 8px rgba(155, 35, 53, 0.1);
 }
 
+.historyItemMain {
+    flex: 1;
+    min-width: 0;
+}
+
 .historyItemButton {
-    flex-grow: 1;
+    width: 100%;
     text-align: left;
     padding: 0;
     margin-right: 4px;
@@ -37,12 +43,19 @@
     color: #1f2937;
 }
 
-.deleteIcon {
+.actionButtons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.actionIcon {
     width: 20px;
     height: 20px;
 }
 
-.deleteButton {
+.iconButton {
     opacity: 0;
     transition: opacity 0.2s;
     background: none;
@@ -54,14 +67,31 @@
     flex-shrink: 0;
 }
 
-.historyItem:hover .deleteButton,
-.deleteButton:focus {
+.historyItem:hover .iconButton,
+.iconButton:focus {
     opacity: 1;
 }
 
-.deleteButton:hover {
+.iconButton:hover {
     color: #7a1c29;
     background-color: rgba(155, 35, 53, 0.08);
+}
+
+.renameInput {
+    width: 100%;
+}
+
+.renameActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.renameError {
+    margin-top: 6px;
+    color: #b42318;
+    font-size: 0.75rem;
 }
 
 .modalOverlay {

@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 chat_history_cosmosdb_bp = Blueprint("chat_history_cosmos", __name__, static_folder="static")
 
+MAX_CHAT_TITLE_LENGTH = 120
+
 
 def _optional_user_sent_at_ms(message_pair: list[Any]) -> int | None:
     """Third element from the client is epoch ms when the user sent the message (optional)."""
@@ -63,6 +65,14 @@ def _message_pair_sort_key(item: dict[str, Any]) -> int:
     except ValueError:
         return 0
 
+
+def normalize_chat_title(title: str) -> str:
+    normalized = " ".join(title.split()).strip()
+    if not normalized:
+        raise ValueError("Title is required")
+    return normalized[:MAX_CHAT_TITLE_LENGTH]
+
+
 TITLE_GENERATION_PROMPT = (
     "Generate a short chat title that summarizes the message topic. "
     "Requirements: 5-15 words, concise summary of the message topic, no quotes. "
@@ -91,7 +101,7 @@ async def generate_chat_title(message: str) -> str:
         words = title.split()
         if len(words) > 15:
             title = " ".join(words[:15])
-        return title[:120]
+        return normalize_chat_title(title)
     except Exception as e:
         logger.warning("Failed to generate chat title: %s", e)
         raise
@@ -331,6 +341,37 @@ async def get_chat_history_session(auth_claims: dict[str, Any], session_id: str)
             ),
             200,
         )
+    except Exception as error:
+        return error_response(error, f"/chat_history/sessions/{session_id}")
+
+
+@chat_history_cosmosdb_bp.patch("/chat_history/sessions/<session_id>")
+@authenticated
+async def rename_chat_history_session(auth_claims: dict[str, Any], session_id: str):
+    if not current_app.config[CONFIG_CHAT_HISTORY_COSMOS_ENABLED]:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    container: ContainerProxy = current_app.config[CONFIG_COSMOS_HISTORY_CONTAINER]
+    if not container:
+        return jsonify({"error": "Chat history not enabled"}), 400
+
+    entra_oid = auth_claims.get("oid")
+    if not entra_oid:
+        return jsonify({"error": "User OID not found"}), 401
+
+    try:
+        request_json = await request.get_json()
+        title = normalize_chat_title(request_json.get("title", ""))
+        session_item = await container.read_item(item=session_id, partition_key=[entra_oid, session_id])
+        if session_item.get("type") != "session":
+            raise CosmosResourceNotFoundError(message="Session not found")
+        session_item["title"] = title
+        await container.upsert_item(session_item)
+        return jsonify({"message": "Chat history renamed"}), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except CosmosResourceNotFoundError:
+        return jsonify({"error": "Chat session not found"}), 404
     except Exception as error:
         return error_response(error, f"/chat_history/sessions/{session_id}")
 

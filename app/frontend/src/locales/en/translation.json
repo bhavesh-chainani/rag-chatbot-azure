@@ -14,11 +14,19 @@
         "deleteModalTitle": "Delete chat history",
         "deleteModalDescription": "This action cannot be undone. Delete this chat history?",
         "deleteLabel": "Delete",
+        "deleteAriaLabel": "delete this chat history",
+        "renameLabel": "Rename",
+        "renameAriaLabel": "Rename chat history",
+        "renamePlaceholder": "Rename chat",
+        "renameValidation": "Enter a chat name",
+        "renameError": "Couldn't rename chat. Please try again.",
+        "saveLabel": "Save",
         "cancelLabel": "Cancel",
         "today": "Today",
         "yesterday": "Yesterday",
         "last7days": "Last 7 days",
-        "last30days": "Last 30 days"
+        "last30days": "Last 30 days",
+        "noMatches": "No matching chats"
     },
     "upload": {
         "fileLabel": "Upload file:",

@@ -118,6 +118,21 @@ export class IndexedDBProvider implements IHistoryProvider {
         return item ? item.answers : null;
     }
 
+    async renameItem(id: string, title: string): Promise<void> {
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle) {
+            throw new Error("Title is required");
+        }
+
+        const db = await this.init();
+        const existingItem = await db.get(this.storeName, id);
+        if (!existingItem) {
+            return;
+        }
+
+        await db.put(this.storeName, { ...existingItem, title: trimmedTitle });
+    }
+
     async deleteItem(id: string): Promise<void> {
         const db = await this.init();
         await db.delete(this.storeName, id);

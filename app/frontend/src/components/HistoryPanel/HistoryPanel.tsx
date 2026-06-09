@@ -77,6 +77,12 @@ export const HistoryPanel = ({
         setHistory(prevHistory => prevHistory.filter(item => item.id !== id));
     };
 
+    const handleRename = async (id: string, title: string) => {
+        const token = client ? await getToken(client) : undefined;
+        await historyManager.renameItem(id, title, token);
+        setHistory(prevHistory => prevHistory.map(item => (item.id === id ? { ...item, title } : item)));
+    };
+
     const filteredHistory = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
         if (!query) {
@@ -173,7 +179,7 @@ export const HistoryPanel = ({
                         <ul className={styles.chatList} role="list">
                             {items.map(item => (
                                 <li key={item.id} className={styles.chatListItem}>
-                                    <HistoryItem item={item} onSelect={handleSelect} onDelete={handleDelete} />
+                                    <HistoryItem item={item} onSelect={handleSelect} onDelete={handleDelete} onRename={handleRename} />
                                 </li>
                             ))}
                         </ul>
@@ -182,7 +188,7 @@ export const HistoryPanel = ({
                 {isLoading && <Spinner className={styles.spinner} />}
                 {history.length === 0 && !isLoading && <p className={styles.emptyState}>{t("history.noHistory")}</p>}
                 {history.length > 0 && filteredHistory.length === 0 && !isLoading && (
-                    <p className={styles.emptySearch}>No matching chats</p>
+                    <p className={styles.emptySearch}>{t("history.noMatches")}</p>
                 )}
                 {hasMoreHistory && !isLoading && !isSearching && <InfiniteLoadingButton func={loadMoreHistory} />}
             </DrawerBody>

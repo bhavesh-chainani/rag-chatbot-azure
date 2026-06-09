@@ -222,7 +222,7 @@ URGENT_PATTERN = re.compile(
     r"\b("
     r"immediate threat|in danger|unsafe|not safe|family violence|domestic violence|"
     r"threaten(?:ed|ing)?|self[- ]?harm|suicid|homeless|no shelter|evict(?:ed|ion)?|"
-    r"no food|no money|police custody|detention|detained|deport(?:ed|ation)?|"
+    r"no food|police custody|detention|detained|deport(?:ed|ation)?|"
     r"pass expir(?:e|ing)|removal tonight"
     r")\b",
     flags=re.IGNORECASE,
@@ -2319,6 +2319,21 @@ def queued_topics_from_candidates(
     return queued
 
 
+def substantive_initial_candidates(
+    candidates: list[PBSGTopicCandidate],
+    entries: dict[str, dict[str, Any]],
+) -> list[PBSGTopicCandidate]:
+    substantive_entry_ids = {"GEN3-T02", "GEN3-T03", "GEN3-T04"}
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.entry_id in substantive_entry_ids
+        and candidate.entry_id in entries
+        and candidate.candidate_type == "primary_topic"
+        and candidate.confidence >= 0.6
+    ]
+
+
 def resolve_initial_topics(
     entries: dict[str, dict[str, Any]],
     latest_user_query: str,
@@ -2333,17 +2348,6 @@ def resolve_initial_topics(
             confidence=0.55,
             reason="defaulted to first-contact triage because no clear specialty facts were present",
             overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
-        )
-    if CAPITAL_OFFENCE_PATTERN.search(normalized) and "GEN3-T02" in entries:
-        candidates = initial_topic_candidates(entries, latest_user_query)
-        queued_topics = queued_topics_from_candidates(candidates, "GEN3-T02", entries)
-        return PBSGTopicResolution(
-            entry_id="GEN3-T02",
-            confidence=1.0,
-            reason="capital offence signal",
-            overlays=initial_topic_overlays(normalized, "GEN3-T02", entries),
-            queued_topics=queued_topics,
-            candidates=candidates,
         )
 
     candidates = initial_topic_candidates(entries, latest_user_query)
@@ -2361,7 +2365,61 @@ def resolve_initial_topics(
             candidates=candidates,
         )
 
+    substantive_candidates = substantive_initial_candidates(primary_candidates, entries)
+    overlays = initial_topic_overlays(normalized, fallback_entry_id, entries)
+    has_urgent = "GEN3-T06" in overlays
+    has_vulnerability = "GEN3-T13" in overlays
+
+    if has_urgent:
+        return PBSGTopicResolution(
+            entry_id="GEN3-T06",
+            confidence=max(candidate.confidence for candidate in primary_candidates),
+            reason="priority urgent signal detected on first turn",
+            queued_topics=[
+                PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
+                for candidate in substantive_candidates
+            ],
+            candidates=candidates,
+        )
+
+    if has_vulnerability and substantive_candidates:
+        return PBSGTopicResolution(
+            entry_id="GEN3-T13",
+            confidence=max(candidate.confidence for candidate in primary_candidates),
+            reason="priority vulnerability signal detected on first turn",
+            queued_topics=[
+                PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
+                for candidate in substantive_candidates
+            ],
+            candidates=candidates,
+        )
+
     best_candidate = primary_candidates[0]
+    if substantive_candidates and "GEN3-T01" in entries:
+        reason = substantive_candidates[0].evidence
+        if len(substantive_candidates) > 1:
+            reason = f"multi-topic match: {substantive_candidates[0].evidence}"
+        return PBSGTopicResolution(
+            entry_id="GEN3-T01",
+            confidence=substantive_candidates[0].confidence,
+            reason=reason,
+            queued_topics=[
+                PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
+                for candidate in substantive_candidates
+            ],
+            candidates=candidates,
+        )
+
+    if CAPITAL_OFFENCE_PATTERN.search(normalized) and "GEN3-T02" in entries:
+        return PBSGTopicResolution(
+            entry_id="GEN3-T01",
+            confidence=1.0,
+            reason="capital offence signal preserved for first-contact intake",
+            queued_topics=[PBSGQueuedTopic(entry_id="GEN3-T02", evidence="capital offence signal", confidence=1.0)],
+            candidates=candidates,
+        )
+
+
     queued_topics = queued_topics_from_candidates(primary_candidates, best_candidate.entry_id, entries)
     reason = best_candidate.evidence
     if queued_topics:
@@ -3478,28 +3536,6 @@ class PBSGRoutingEngine:
             fact_ledger=initial_facts,
             routing_completion_status="in_progress",
         )
-        if resolution.entry_id == "GEN3-T02" and CAPITAL_OFFENCE_PATTERN.search(latest_user_query):
-            transition = self.graph.transition_for("GEN3-T02", "Q1", "if_yes")
-            if not transition:
-                return None
-            content = self.render_transition(transition)
-            if not content:
-                return None
-            state = PBSGTriageState(
-                mode="FAST_ROUTING",
-                workflow_id="GEN3-T02",
-                workflow_locked=True,
-                active_workflow="GEN3-T02",
-                current_question_id="Q1",
-                pending_entry_id="GEN3-T02",
-                latest_answer_classification="YES",
-                concurrent_monitors=concurrent_monitors_from_flags(monitor_flags(latest_user_query)),
-                triggered_overlays=resolution.overlays,
-                queued_workflows=[topic.entry_id for topic in resolution.queued_topics],
-            )
-            self.apply_transition_to_state(state, transition)
-            return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
-
         transition = PBSGTransition(
             entry_id=resolution.entry_id,
             question_id="START",
@@ -3509,9 +3545,16 @@ class PBSGRoutingEngine:
             target_entry_id=resolution.entry_id,
             target_question_id="Q1",
         )
-        transition = self.advance_transition_through_known_facts(seed_state, transition)
+
+        if resolution.entry_id != "GEN3-T01":
+            transition = self.advance_transition_through_known_facts(seed_state, transition)
+
         content = self.render_initial_question(resolution)
-        if transition.question_id != "START" or transition.target_question_id != "Q1" or transition.transition_type != "proceed_question":
+        if resolution.entry_id != "GEN3-T01" and (
+            transition.question_id != "START"
+            or transition.target_question_id != "Q1"
+            or transition.transition_type != "proceed_question"
+        ):
             content = self.render_queued_workflow_start(transition, resolution.entry_id)
         if not content:
             return None

@@ -67,24 +67,27 @@ def test_initial_topic_resolver_defaults_vague_starts_to_gen3_t01(query):
 
 
 @pytest.mark.parametrize(
-    ("query", "expected_entry_id"),
+    ("query", "expected_downstream_entry_id"),
     [
         ("Applicant has a criminal charge in court.", "GEN3-T02"),
         ("Applicant wants a divorce and has custody issues.", "GEN3-T03"),
         ("Applicant's employer has not paid salary for three months.", "GEN3-T04"),
     ],
 )
-def test_initial_topic_resolver_selects_clear_specialty_pillars(query, expected_entry_id):
+def test_initial_topic_resolver_routes_clear_substantive_matters_through_gen3_t01_first(
+    query, expected_downstream_entry_id
+):
     entries = load_entries()
 
     resolution = resolve_initial_topic(entries, query)
 
     assert resolution is not None
-    assert resolution.entry_id == expected_entry_id
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == [expected_downstream_entry_id]
     assert resolution.confidence >= 0.6
 
 
-def test_initial_topic_resolver_queues_multiple_specialty_topics_and_deadline_monitor(monkeypatch):
+def test_initial_topic_resolver_prioritizes_urgent_first_turn_and_preserves_substantive_streams(monkeypatch):
     entries = load_entries()
     monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
 
@@ -95,20 +98,20 @@ def test_initial_topic_resolver_queues_multiple_specialty_topics_and_deadline_mo
     )
 
     assert resolution is not None
-    assert resolution.entry_id == "GEN3-T02"
-    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T03"]
-    assert "GEN3-T06" in resolution.overlays
+    assert resolution.entry_id == "GEN3-T06"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02", "GEN3-T03"]
+    assert "GEN3-T06" not in resolution.overlays
     assert "weak or ambiguous" not in resolution.reason
 
 
-def test_initial_topic_resolver_treats_vulnerability_as_overlay_when_legal_issue_exists():
+def test_initial_topic_resolver_prioritizes_vulnerability_first_turn_and_preserves_legal_issue():
     entries = load_entries()
 
     resolution = resolve_initial_topic(entries, "Elderly applicant is confused and has a debt issue.")
 
     assert resolution is not None
-    assert resolution.entry_id == "GEN3-T04"
-    assert "GEN3-T13" in resolution.overlays
+    assert resolution.entry_id == "GEN3-T13"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T04"]
 
 
 def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():

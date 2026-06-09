@@ -474,6 +474,36 @@ def pbsg_state_marker(
     return f"<!-- pbsg-state: {'; '.join(parts)} -->"
 
 
+def with_queued_workflow_marker(content: str | None, queued_workflows: list[str] | None) -> str | None:
+    if not content or not queued_workflows:
+        return content
+    matches = list(PBSG_STATE_MARKER_PATTERN.finditer(content))
+    if not matches:
+        selected_entry_id = extract_selected_entry_id(content)
+        targets = extract_question_targets(content)
+        pending_target = targets[-1] if targets else None
+        marker = pbsg_state_marker(
+            selected_entry_id,
+            pending_target.entry_id if pending_target and pending_target.entry_id else selected_entry_id,
+            pending_target.question_id if pending_target else None,
+            queued_workflows=queued_workflows,
+        )
+        return f"{marker}\n{content}"
+    marker_values = parse_pbsg_state_marker(content)
+    targets = extract_question_targets(content)
+    pending_target = targets[-1] if targets else None
+    replacement = pbsg_state_marker(
+        marker_values.get("selected_entry") or extract_selected_entry_id(content),
+        marker_values.get("pending_entry")
+        or (pending_target.entry_id if pending_target and pending_target.entry_id else marker_values.get("selected_entry")),
+        marker_values.get("pending_question") or (pending_target.question_id if pending_target else None),
+        marker_values.get("route_label"),
+        queued_workflows=queued_workflows,
+    )
+    last_match = matches[-1]
+    return f"{content[:last_match.start()]}{replacement}{content[last_match.end():]}"
+
+
 def clean_stream_topic(topic: str | None) -> str:
     if not isinstance(topic, str) or not topic.strip():
         return ""
@@ -3559,6 +3589,8 @@ class PBSGRoutingEngine:
         if not content:
             return None
         self.apply_transition_to_state(seed_state, transition)
+        if seed_state.queued_workflows:
+            content = with_queued_workflow_marker(content, seed_state.queued_workflows) or content
         return PBSGDeterministicResult(content=content, state=seed_state, transition=transition, entries=self.entries)
 
     def execute_locked_turn(
@@ -3598,6 +3630,8 @@ class PBSGRoutingEngine:
         if not content:
             return None
         self.apply_transition_to_state(state, transition)
+        if state.queued_workflows:
+            content = with_queued_workflow_marker(content, state.queued_workflows) or content
         return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
 
     def resolve_fact_transition(
@@ -3848,12 +3882,20 @@ class PBSGRoutingEngine:
             state.active_workflow = transition.target_entry_id
             state.pending_entry_id = transition.target_entry_id
             state.current_question_id = transition.target_question_id
+            if transition.target_entry_id in state.queued_workflows and transition.target_entry_id != transition.entry_id:
+                state.queued_workflows = [
+                    workflow_id for workflow_id in state.queued_workflows if workflow_id != transition.target_entry_id
+                ]
             state.routing_completion_status = "in_progress"
         elif transition.transition_type in {"handoff_entry", "cross_reference"}:
             state.active_workflow = transition.target_entry_id
             state.pending_entry_id = transition.target_entry_id
             state.current_question_id = "Q1"
             state.workflow_id = transition.target_entry_id
+            if transition.target_entry_id in state.queued_workflows:
+                state.queued_workflows = [
+                    workflow_id for workflow_id in state.queued_workflows if workflow_id != transition.target_entry_id
+                ]
             state.routing_completion_status = "in_progress"
         elif transition.transition_type == "nested_stream":
             state.active_workflow = transition.target_entry_id

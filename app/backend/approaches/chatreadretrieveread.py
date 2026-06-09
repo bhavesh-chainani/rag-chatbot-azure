@@ -2036,12 +2036,41 @@ class ChatReadRetrieveReadApproach(Approach):
             classifier_reason = evidence
         else:
             classifier_reason = f"structured topic classifier: {evidence}"
+
+        substantive_entry_ids = {"GEN3-T02", "GEN3-T03", "GEN3-T04"}
+        effective_entry_id = primary_entry_id
+        effective_queued_topics = queued_topics
+        predicted_substantive_topics: list[PBSGQueuedTopic] = []
+        if primary_entry_id in substantive_entry_ids:
+            predicted_substantive_topics.append(
+                PBSGQueuedTopic(
+                    entry_id=primary_entry_id,
+                    evidence=evidence or "structured topic classifier",
+                    confidence=float(confidence),
+                )
+            )
+        for topic in queued_topics:
+            if topic.entry_id in substantive_entry_ids and topic.entry_id not in {
+                existing.entry_id for existing in predicted_substantive_topics
+            }:
+                predicted_substantive_topics.append(topic)
+
+        if "GEN3-T06" in overlays:
+            effective_entry_id = "GEN3-T06"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T13" in overlays and predicted_substantive_topics:
+            effective_entry_id = "GEN3-T13"
+            effective_queued_topics = predicted_substantive_topics
+        elif predicted_substantive_topics and "GEN3-T01" in self.pbsg_golden_set_entries:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+
         resolution = PBSGTopicResolution(
-            entry_id=primary_entry_id,
+            entry_id=effective_entry_id,
             confidence=float(confidence),
             reason=classifier_reason,
             overlays=overlays,
-            queued_topics=queued_topics,
+            queued_topics=effective_queued_topics,
             candidates=local_resolution.candidates,
         )
         extracted_facts, extraction_thought = await self.extract_structured_initial_facts(

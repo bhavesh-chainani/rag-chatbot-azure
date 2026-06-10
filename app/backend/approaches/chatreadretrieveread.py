@@ -152,9 +152,12 @@ def contact_capture_needed(messages: list[ChatCompletionMessageParam], session_s
 
 
 def is_contact_capture_reply(messages: list[ChatCompletionMessageParam], session_state: Any) -> bool:
-    if len(messages) != 2:
+    if not messages:
         return False
-    latest_content = messages[-1].get("content") if messages else None
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return False
+    latest_content = latest_message.get("content")
     if not isinstance(latest_content, str):
         return False
     contact_state = extract_contact_capture_state(session_state)
@@ -163,6 +166,113 @@ def is_contact_capture_reply(messages: list[ChatCompletionMessageParam], session
     return contact_state.get("status") == "awaiting_response" and bool(
         decode_contact_pending_message(contact_state.get("pending_initial_message"))
     )
+
+
+def strip_contact_capture_turns(messages: list[ChatCompletionMessageParam], session_state: Any) -> list[ChatCompletionMessageParam]:
+    if not is_contact_capture_reply(messages, session_state):
+        return messages
+    original_message = decode_contact_pending_message((extract_contact_capture_state(session_state) or {}).get("pending_initial_message"))
+    if not original_message:
+        return messages
+    return [{"role": "user", "content": original_message}]
+
+
+def latest_session_state_from_messages(messages: list[ChatCompletionMessageParam], fallback_session_state: Any) -> Any:
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        if "**Before we begin:**" not in content:
+            continue
+        candidate = message.get("session_state")
+        if candidate is not None:
+            return candidate
+    return fallback_session_state
+
+
+def normalize_contact_capture_session_state(messages: list[ChatCompletionMessageParam], session_state: Any) -> Any:
+    return latest_session_state_from_messages(messages, session_state)
+
+
+def inject_contact_capture_assistant_turn(messages: list[ChatCompletionMessageParam], session_state: Any) -> list[ChatCompletionMessageParam]:
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state or contact_state.get("status") != "awaiting_response":
+        return messages
+    original_message = decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    if not original_message:
+        return messages
+    if any(message.get("role") == "assistant" and isinstance(message.get("content"), str) and "**Before we begin:**" in message.get("content") for message in messages):
+        return messages
+    prompt_response = build_contact_capture_prompt_response(session_state, original_message)
+    return [
+        *messages[:-1],
+        {"role": "assistant", "content": prompt_response["message"]["content"], "session_state": prompt_response["session_state"]},
+        messages[-1],
+    ]
+
+
+def normalize_contact_capture_messages(messages: list[ChatCompletionMessageParam], session_state: Any) -> tuple[list[ChatCompletionMessageParam], Any]:
+    normalized_session_state = normalize_contact_capture_session_state(messages, session_state)
+    normalized_messages = inject_contact_capture_assistant_turn(messages, normalized_session_state)
+    return normalized_messages, normalized_session_state
+
+
+def consume_contact_capture_reply(
+    messages: list[ChatCompletionMessageParam], session_state: Any
+) -> tuple[list[ChatCompletionMessageParam], Any]:
+    normalized_messages, normalized_session_state = normalize_contact_capture_messages(messages, session_state)
+    if not is_contact_capture_reply(normalized_messages, normalized_session_state):
+        return normalized_messages, normalized_session_state
+    latest_content = normalized_messages[-1].get("content")
+    if not isinstance(latest_content, str):
+        return normalized_messages, normalized_session_state
+    contact_state, original_message = parse_contact_capture_reply(latest_content, normalized_session_state)
+    updated_session_state = extend_session_state_with_contact_capture(normalized_session_state, contact_state)
+    if original_message:
+        return [{"role": "user", "content": original_message}], updated_session_state
+    return strip_contact_capture_turns(normalized_messages, normalized_session_state), updated_session_state
+
+
+def restore_contact_capture_prompt(message: dict[str, Any], session_state: Any) -> dict[str, Any]:
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state or contact_state.get("status") != "awaiting_response":
+        return message
+    content = message.get("content")
+    if isinstance(content, str) and "**Before we begin:**" not in content:
+        prompt_response = build_contact_capture_prompt_response(session_state, decode_contact_pending_message(contact_state.get("pending_initial_message")) or "")
+        return {"role": message.get("role", "assistant"), "content": prompt_response["message"]["content"]}
+    return message
+
+
+def parse_contact_capture_reply(latest_content: str, session_state: Any) -> tuple[dict[str, Any], str | None]:
+    contact_state = dict(extract_contact_capture_state(session_state) or {})
+    original_message = decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    normalized = re.sub(r"\s+", " ", latest_content).strip()
+    lowered = normalized.lower()
+    refusal = bool(
+        re.search(r"\b(skip|prefer not|rather not|do not want|don't want|no name|no phone|no number|continue without)\b", lowered)
+    )
+    phone_match = re.search(r"(?:\+65\s*)?(\d{8})\b", normalized)
+    phone = phone_match.group(1) if phone_match else None
+    name_candidate = normalized
+    if phone_match:
+        name_candidate = (normalized[: phone_match.start()] + " " + normalized[phone_match.end() :]).strip(" ,;:-")
+    if refusal:
+        name = None
+        status = "skipped"
+        phone = phone if phone else None
+    else:
+        name = name_candidate if name_candidate and not re.fullmatch(r"[\W_]+", name_candidate) else None
+        status = "completed" if (name or phone) else "skipped"
+    updated_state = {
+        "status": status,
+        "name": name,
+        "phone": phone,
+        "pending_initial_message": None,
+    }
+    return updated_state, original_message
 
 
 def build_contact_capture_prompt_response(session_state: Any, original_message: str) -> dict[str, Any]:
@@ -2148,6 +2258,7 @@ class ChatReadRetrieveReadApproach(Approach):
                     isinstance(entry_id, str)
                     and entry_id in self.pbsg_golden_set_entries
                     and entry_id != primary_entry_id
+                    and entry_id in local_resolution.overlays
                     and entry_id not in overlays
                 ):
                     overlays.append(entry_id)
@@ -3020,17 +3131,12 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        messages, session_state = normalize_contact_capture_messages(messages, session_state)
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):
                 return build_contact_capture_prompt_response(session_state, latest_content)
-        if is_contact_capture_reply(messages, session_state):
-            latest_content = messages[-1].get("content") if messages else None
-            if isinstance(latest_content, str):
-                contact_state, original_message = parse_contact_capture_reply(latest_content, session_state)
-                session_state = extend_session_state_with_contact_capture(session_state, contact_state)
-                if original_message:
-                    messages = [{"role": "user", "content": original_message}]
+        messages, session_state = consume_contact_capture_reply(messages, session_state)
         general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
         if general_enquiry_response:
             return general_enquiry_response
@@ -3115,6 +3221,7 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        messages, session_state = normalize_contact_capture_messages(messages, session_state)
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):
@@ -3123,13 +3230,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 yield {"delta": {"role": "assistant", "content": response["message"]["content"]}}
                 yield {"delta": {"role": "assistant"}, "context": response["context"], "session_state": response["session_state"]}
                 return
-        if is_contact_capture_reply(messages, session_state):
-            latest_content = messages[-1].get("content") if messages else None
-            if isinstance(latest_content, str):
-                contact_state, original_message = parse_contact_capture_reply(latest_content, session_state)
-                session_state = extend_session_state_with_contact_capture(session_state, contact_state)
-                if original_message:
-                    messages = [{"role": "user", "content": original_message}]
+        messages, session_state = consume_contact_capture_reply(messages, session_state)
         general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
         if general_enquiry_response:
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}

@@ -19,7 +19,7 @@ from approaches.approach import (
     ThoughtStep,
     WebResult,
 )
-from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
+from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach, build_contact_capture_prompt_response
 from approaches.promptmanager import PromptManager
 from pbsg_triage_state import (
     PBSGTransition,
@@ -259,7 +259,7 @@ def test_build_quick_reply_uses_question_specific_labels(chat_approach):
 
 **Ask the applicant (read verbatim):**
 
-> Q2: "Are you the person who needs legal help, or are they calling on behalf of someone else?"
+> Q2: "Are you the person who needs legal help, or are you calling on behalf of someone else?"
 """
 
     quick_reply = chat_approach.build_quick_reply(content, extra_info)
@@ -268,20 +268,37 @@ def test_build_quick_reply_uses_question_specific_labels(chat_approach):
     assert [(option.id, option.label, option.value) for option in quick_reply.options] == [
         (
             "if_calling_on_behalf_and_able_to_self_help",
-            "Calling for someone else; they can contact PBSG directly",
-            "Calling for someone else; they can contact PBSG directly",
+            "Calling for someone else; that person can contact PBSG directly",
+            "Calling for someone else; that person can contact PBSG directly",
         ),
         (
             "if_self_or_calling_on_behalf_and_unable_to_self_help",
-            "Applicant is calling, or cannot contact PBSG themselves",
-            "Applicant is calling, or cannot contact PBSG themselves",
+            "I am the person who needs legal help, or they cannot contact PBSG themselves",
+            "I am the person who needs legal help, or they cannot contact PBSG themselves",
         ),
         ("if_not_sure", "Not sure", "Not sure"),
     ]
     assert (
-        branch_key_for_answer(entry["branching_logic"]["Q2"], "Applicant is calling, or cannot contact PBSG themselves")
+        branch_key_for_answer(
+            entry["branching_logic"]["Q2"],
+            "I am the person who needs legal help, or they cannot contact PBSG themselves",
+        )
         == "if_self_or_calling_on_behalf_and_unable_to_self_help"
     )
+
+
+def test_build_contact_capture_prompt_response_uses_verbatim_block_format():
+    response = build_contact_capture_prompt_response({}, "Applicant has a criminal matter")
+    content = response["message"]["content"]
+
+    assert content == "\n\n".join(
+        [
+            "**Before we begin:**",
+            "**Ask the applicant (read verbatim):**",
+            '> **"Can I take your name and phone number for follow-up? If you do not want to share your name, that is okay — a phone number alone is fine. If you do not want to share either, just let me know and we will continue."**',
+        ]
+    )
+    assert response["context"]["quick_reply"] is None
 
 
 def test_build_quick_reply_uses_explicit_pending_entry(chat_approach):

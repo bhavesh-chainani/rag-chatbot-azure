@@ -1202,3 +1202,26 @@ def test_convert_question_to_second_person_preserves_sentence_start_capitalizati
     assert convert_question_to_second_person("Has the applicant applied to the Legal Aid Bureau (LAB)?") == (
         "Have you applied to the Legal Aid Bureau (LAB)?"
     )
+
+
+def test_convert_question_to_second_person_fixes_caller_capacity_wording():
+    assert convert_question_to_second_person(
+        "Is the applicant the person who needs legal help, or are they calling on behalf of someone else?"
+    ) == "Are you the person who needs legal help, or are you calling on behalf of someone else?"
+
+
+@pytest.mark.parametrize(
+    ("branch_key", "expected"),
+    [
+        (
+            "if_calling_on_behalf_and_able_to_self_help",
+            "Calling for someone else; that person can contact PBSG directly",
+        ),
+        (
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+            "I am the person who needs legal help, or they cannot contact PBSG themselves",
+        ),
+    ],
+)
+def test_label_from_branch_key_uses_clearer_caller_capacity_copy(branch_key: str, expected: str):
+    assert label_from_branch_key(branch_key) == expected

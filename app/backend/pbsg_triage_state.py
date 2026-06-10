@@ -867,6 +867,37 @@ def deterministic_facts_from_user_text(text: str, source_turn_index: int | None 
     elif re.search(r"\b(has a lawyer|have a lawyer|represented|lawyer filed|solicitor|counsel)\b", normalized):
         add_fact("applicant.representation_status", "Has lawyer", "yes", "if_yes")
 
+    if re.search(r"\b(calling for myself|for myself|my own matter|this is my matter|personal legal matter)\b", normalized):
+        add_fact(
+            "applicant.caller_capacity",
+            "Self, or cannot self-help",
+            "self_or_calling_on_behalf_and_unable_to_self_help",
+            "if_self_or_calling_on_behalf_and_unable_to_self_help",
+            confidence=0.85,
+        )
+
+    if re.search(r"\b(personal legal matter|personal matter|personal capacity|not a business|not commercial)\b", normalized):
+        add_fact("matter.business_or_commercial", "Personal / not business", "no", "if_no", confidence=0.85)
+    elif re.search(r"\b(business matter|commercial matter|company dispute|b2b|shareholder dispute)\b", normalized):
+        add_fact(
+            "matter.business_or_commercial",
+            "Business or commercial matter",
+            "yes_and_for_profit",
+            "if_yes_and_for_profit",
+            confidence=0.85,
+        )
+
+    if re.search(
+        r"\b(not liaised with a lawyer|have not liaised with a lawyer|has not liaised with a lawyer|not spoken to a lawyer|have not spoken to a lawyer|has not spoken to a lawyer|no legal advice|not received legal advice|have not received legal advice|has not received legal advice)\b",
+        normalized,
+    ):
+        add_fact("applicant.prior_legal_advice", "No prior legal advice", "no", "if_no", confidence=0.85)
+    elif re.search(
+        r"\b(received legal advice|already got legal advice|liaised with a lawyer|spoken to a lawyer|lawyer advised)\b",
+        normalized,
+    ):
+        add_fact("applicant.prior_legal_advice", "Has prior legal advice", "yes", "if_yes", confidence=0.85)
+
     if re.search(r"\b(no urgency|not urgent|no deadline|no court date|no safety issue|no family violence)\b", normalized):
         add_fact("matter.urgency_or_safety", "No urgency or safety issue", "no", "if_no", confidence=0.9)
     elif deadline_branch_key_from_text(text) == "if_yes" or re.search(r"\b(urgent|family violence|violence|unsafe|danger)\b", normalized):
@@ -1833,8 +1864,8 @@ def label_from_branch_key(branch_key: str) -> str:
         "representation": "Representation",
         "yes_and_nonprofit": "Yes, nonprofit",
         "yes_and_for_profit": "Yes, for-profit business",
-        "calling_on_behalf_and_able_to_self_help": "Calling on behalf, can self-help",
-        "self_or_calling_on_behalf_and_unable_to_self_help": "Self, or cannot self-help",
+        "calling_on_behalf_and_able_to_self_help": "Calling for someone else; that person can contact PBSG directly",
+        "self_or_calling_on_behalf_and_unable_to_self_help": "I am the person who needs legal help, or they cannot contact PBSG themselves",
         "yes_passed_or_processing": "Yes, passed or processing",
         "yes_failed_means_test": "Yes, failed means test",
         "yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
@@ -1887,6 +1918,12 @@ def _normalize_compound_question_readability(question: str) -> str:
     question = re.sub(
         r"\(or ≤ \$40,000 if 60 years old or older\)",
         "(or ≤ $40,000 if you are 60 years old or older)",
+        question,
+        flags=re.IGNORECASE,
+    )
+    question = re.sub(
+        r"\bAre you the person who needs legal help, or are they calling on behalf of someone else\?",
+        "Are you the person who needs legal help, or are you calling on behalf of someone else?",
         question,
         flags=re.IGNORECASE,
     )
@@ -3576,11 +3613,10 @@ class PBSGRoutingEngine:
             target_question_id="Q1",
         )
 
-        if resolution.entry_id != "GEN3-T01":
-            transition = self.advance_transition_through_known_facts(seed_state, transition)
+        transition = self.advance_transition_through_known_facts(seed_state, transition)
 
         content = self.render_initial_question(resolution)
-        if resolution.entry_id != "GEN3-T01" and (
+        if (
             transition.question_id != "START"
             or transition.target_question_id != "Q1"
             or transition.transition_type != "proceed_question"
@@ -4115,16 +4151,32 @@ class PBSGRoutingEngine:
 
         lines = self.render_header_and_answered_state(selected_entry_id, transition)
         if transition.transition_type == "concurrent_route_question" and transition.route_label:
+            structured_route = structured_route_from_entry(self.entries.get(transition.entry_id), transition.route_label)
             if transition.resume_entry_id:
                 route_note = (
-                    f"{transition.route_label}: {transition.outcome}. "
-                    f"Because this urgent stream is nested under the {stream_display_name(self.entries, transition.resume_entry_id)}, "
-                    "resume the parent stream after this check."
+                    "We need to check the urgent issue before continuing the main workflow. "
+                    f"After this urgent check, resume the {stream_display_name(self.entries, transition.resume_entry_id)}."
                 )
+            elif structured_route and structured_route.script:
+                route_note = structured_route.script
             else:
-                route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
-                route_note = route_text or transition.outcome
-            lines.extend(["", "**Concurrent routing note:**", "", f"- {route_note}"])
+                route_note = transition.outcome
+            lines.extend(["", "**Urgent handling note:**", "", f"- {route_note}"])
+            if structured_route and structured_route.intern_steps:
+                lines.extend(["", "**Intern steps:**", *[f"- {step}" for step in structured_route.intern_steps[:2]]])
+            if structured_route and structured_route.caveats:
+                lines.extend(["", "**Important caveat:**", *[f"- {note}" for note in structured_route.caveats[:1]]])
+        lines.extend(
+            [
+                "",
+                "Triage progress:",
+                "",
+                f"<!-- Handoff: {transition.entry_id} → {transition.target_entry_id} -->",
+                f"<!-- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} -->",
+                f"- Continue in the {stream_display_name(self.entries, transition.target_entry_id)}.",
+                f"- Next step: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
+            ]
+        )
         lines.extend(
             [
                 "",

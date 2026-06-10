@@ -4177,17 +4177,6 @@ class PBSGRoutingEngine:
                 f"- Next step: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
             ]
         )
-        lines.extend(
-            [
-                "",
-                "Triage progress:",
-                "",
-                f"<!-- Handoff: {transition.entry_id} → {transition.target_entry_id} -->",
-                f"<!-- Last answered: {transition.question_id} = {label_from_branch_key(transition.branch_key)} → {transition.outcome} -->",
-                f"- Continue in the {stream_display_name(self.entries, transition.target_entry_id)}.",
-                f"- Next step: {short_question_label(self.entries, transition.target_entry_id, transition.target_question_id)}.",
-            ]
-        )
         lines.extend(next_question_lines(self.entries, transition.target_entry_id, transition.target_question_id, question))
         return "\n".join(lines)
 

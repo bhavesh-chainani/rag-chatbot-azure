@@ -141,9 +141,7 @@ def contact_capture_needed(messages: list[ChatCompletionMessageParam], session_s
     if len(messages) != 1:
         return False
     latest_content = messages[-1].get("content") if messages else None
-    if not isinstance(latest_content, str):
-        return False
-    if not PBSG_TRIAGE_REQUEST_PATTERN.search(latest_content):
+    if not isinstance(latest_content, str) or not latest_content.strip():
         return False
     contact_state = extract_contact_capture_state(session_state)
     if not contact_state:
@@ -815,14 +813,6 @@ PBSG_GENERAL_ENQUIRY_FAQS = {
 }
 PBSG_GENERAL_ENQUIRY_INTENT_PATTERN = re.compile(
     r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
-    flags=re.IGNORECASE,
-)
-PBSG_TRIAGE_REQUEST_PATTERN = re.compile(
-    r"\b(applicant|caller|client|my|me|i|we|he|she|they|someone)\b.{0,80}"
-    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b"
-    r"|"
-    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b.{0,80}"
-    r"\b(help|assist|representation|lawyer|legal|case|matter|issue|problem)\b",
     flags=re.IGNORECASE,
 )
 
@@ -2340,9 +2330,6 @@ class ChatReadRetrieveReadApproach(Approach):
                 return faq_key, faq
         return None
 
-    def is_legal_triage_request(self, latest_content: str) -> bool:
-        return bool(PBSG_TRIAGE_REQUEST_PATTERN.search(latest_content))
-
     def general_enquiry_answer(self, latest_content: str) -> tuple[str, list[str], str] | None:
         match = self.general_enquiry_match(latest_content)
         if not match:
@@ -2407,47 +2394,11 @@ class ChatReadRetrieveReadApproach(Approach):
         if len(messages) != 1:
             return None
         latest_content = messages[-1].get("content")
-        if not isinstance(latest_content, str) or self.is_legal_triage_request(latest_content):
+        if not isinstance(latest_content, str):
+            return None
+        if not self.general_enquiry_answer(latest_content):
             return None
         return self.build_general_enquiry_response(latest_content, session_state=session_state)
-
-    def mixed_general_enquiry_prefix(self, messages: list[ChatCompletionMessageParam]) -> str | None:
-        if len(messages) != 1:
-            return None
-        latest_content = messages[-1].get("content")
-        if not isinstance(latest_content, str) or not self.is_legal_triage_request(latest_content):
-            return None
-        answer_result = self.general_enquiry_answer(latest_content)
-        if not answer_result:
-            return None
-        answer, _, _ = answer_result
-        return "\n\n".join(
-            [
-                "**General enquiry:**",
-                answer,
-                "**Now I will triage the legal issue:**",
-            ]
-        )
-
-    def with_general_enquiry_prefix(self, response: dict[str, Any], prefix: str | None) -> dict[str, Any]:
-        if not prefix:
-            return response
-        message = response.get("message")
-        if isinstance(message, dict) and isinstance(message.get("content"), str):
-            message["content"] = f"{prefix}\n\n{message['content']}"
-        context = response.get("context")
-        if isinstance(context, dict):
-            thoughts = context.get("thoughts")
-            if isinstance(thoughts, list):
-                thoughts.insert(
-                    0,
-                    ThoughtStep(
-                        "Deterministic PBSG mixed general enquiry",
-                        "Answered the general part from the curated local FAQ before continuing legal triage.",
-                        None,
-                    ),
-                )
-        return response
 
     def local_side_enquiry_answer(self, latest_content: str) -> str | None:
         answer_result = self.general_enquiry_answer(latest_content)
@@ -3133,6 +3084,9 @@ class ChatReadRetrieveReadApproach(Approach):
         session_state: Any = None,
     ) -> dict[str, Any]:
         messages, session_state = normalize_contact_capture_messages(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            return general_enquiry_response
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):
@@ -3141,13 +3095,12 @@ class ChatReadRetrieveReadApproach(Approach):
         general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
         if general_enquiry_response:
             return general_enquiry_response
-        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            return self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
+            return structured_initial_response
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
+            return initial_response
         queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
         if queued_topic_response:
             return queued_topic_response
@@ -3223,6 +3176,12 @@ class ChatReadRetrieveReadApproach(Approach):
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
         messages, session_state = normalize_contact_capture_messages(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            return
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):
@@ -3238,17 +3197,14 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
             return
-        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            structured_initial_response = self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": structured_initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             return
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            initial_response = self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}

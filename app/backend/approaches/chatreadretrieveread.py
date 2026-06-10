@@ -2398,9 +2398,6 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         if not self.general_enquiry_answer(latest_content):
             return None
-        resolution = resolve_initial_topic(self.pbsg_golden_set_entries, latest_content)
-        if resolution and (resolution.entry_id != "GEN3-T01" or resolution.queued_topics or resolution.overlays):
-            return None
         return self.build_general_enquiry_response(latest_content, session_state=session_state)
 
     def local_side_enquiry_answer(self, latest_content: str) -> str | None:
@@ -3087,6 +3084,9 @@ class ChatReadRetrieveReadApproach(Approach):
         session_state: Any = None,
     ) -> dict[str, Any]:
         messages, session_state = normalize_contact_capture_messages(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            return general_enquiry_response
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):
@@ -3176,6 +3176,12 @@ class ChatReadRetrieveReadApproach(Approach):
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
         messages, session_state = normalize_contact_capture_messages(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            return
         if contact_capture_needed(messages, session_state):
             latest_content = messages[-1].get("content") if messages else None
             if isinstance(latest_content, str):

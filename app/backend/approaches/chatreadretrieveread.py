@@ -1602,6 +1602,8 @@ class ChatReadRetrieveReadApproach(Approach):
         self,
         messages: list[ChatCompletionMessageParam],
         session_state: Any = None,
+        *,
+        simple_only: bool = False,
     ) -> dict[str, Any] | None:
         if not messages:
             return None
@@ -1611,7 +1613,15 @@ class ChatReadRetrieveReadApproach(Approach):
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
         turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
-        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
+        if simple_only and (
+            turn_classification.turn_type != "current_topic_refinement" or not turn_classification.pending_branch_key
+        ):
+            return None
+        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(
+            messages[:-1],
+            latest_content,
+            branch_key_override=turn_classification.pending_branch_key if simple_only else None,
+        )
         if turn_classification.should_call_llm and not deterministic_result:
             return None
         if not deterministic_result:
@@ -3107,12 +3117,12 @@ class ChatReadRetrieveReadApproach(Approach):
         general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
         if general_enquiry_interrupt_response:
             return general_enquiry_interrupt_response
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state, simple_only=True)
+        if deterministic_response:
+            return deterministic_response
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
-        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
-        if deterministic_response:
-            return deterministic_response
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:
             return side_enquiry_response
@@ -3221,17 +3231,17 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": general_enquiry_interrupt_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
             return
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state, simple_only=True)
+        if deterministic_response:
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            return
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": contextual_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
-            return
-        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
-        if deterministic_response:
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
-            yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
             return
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:

@@ -493,6 +493,8 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("locked deterministic flow should not call retrieval or LLM")
 
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
     monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
     messages = [
         {
@@ -510,6 +512,69 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
 
     assert "**Selected Entry:** GEN3-T01" in result["message"]["content"]
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+    assert result["context"]["thoughts"][-1].title == "Deterministic PBSG routing"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_deterministic_fast_path_for_full_quick_reply_label(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("quick-reply label should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q2: \"Are you the person who needs legal help, or are you calling on behalf of someone else?\"**""",
+        },
+        {
+            "role": "user",
+            "content": "I am the person who needs legal help, or they cannot contact PBSG themselves",
+        },
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    assert "**Selected Entry:** GEN3-T01" in result["message"]["content"]
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q3"
+    assert result["context"]["thoughts"][-1].title == "Deterministic PBSG routing"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_routes_correction_turns_to_contextual_handler(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("correction turn should not fall through to retrieval")
+
+    async def fake_contextual_response(messages, overrides, session_state=None):
+        return {
+            "message": {"role": "assistant", "content": "contextual correction handler"},
+            "context": {"thoughts": [], "pbsg_triage_state": {"active_workflow": "GEN3-T01"}},
+            "session_state": session_state,
+        }
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "try_contextual_locked_response", fake_contextual_response)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: \"Are you currently represented by a lawyer on this same matter?\"**""",
+        },
+        {"role": "user", "content": "Actually no"},
+    ]
+
+    result = await chat_approach.run_without_streaming(messages, {}, {}, session_state="session-1")
+
+    assert result["message"]["content"] == "contextual correction handler"
 
 
 @pytest.mark.asyncio

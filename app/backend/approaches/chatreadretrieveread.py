@@ -280,7 +280,8 @@ def build_contact_capture_prompt_response(session_state: Any, original_message: 
     content = "\n\n".join(
         [
             "**Before we begin:**",
-            'Please ask the applicant: "Can I take your name and phone number for follow-up? If you do not want to share your name, that is okay — a phone number alone is fine. If you do not want to share either, just let me know and we will continue."',
+            "**Ask the applicant (read verbatim):**",
+            '> **"Can I take your name and phone number for follow-up? If you do not want to share your name, that is okay — a phone number alone is fine. If you do not want to share either, just let me know and we will continue."**',
         ]
     )
     return {
@@ -844,9 +845,9 @@ INTERNAL_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b|\bSelected Entry\b|\bQ\d+
 
 PBSG_QUICK_REPLY_LABELS = {
     ("GEN3-T01", "Q2"): {
-        "if_calling_on_behalf_and_able_to_self_help": "Calling for someone else; they can contact PBSG directly",
+        "if_calling_on_behalf_and_able_to_self_help": "Calling for someone else; that person can contact PBSG directly",
         "if_self_or_calling_on_behalf_and_unable_to_self_help": (
-            "Applicant is calling, or cannot contact PBSG themselves"
+            "I am the person who needs legal help, or they cannot contact PBSG themselves"
         ),
     },
     ("GEN3-T01", "Q3"): {

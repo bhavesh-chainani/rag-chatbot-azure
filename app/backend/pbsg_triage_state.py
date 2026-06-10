@@ -1864,8 +1864,8 @@ def label_from_branch_key(branch_key: str) -> str:
         "representation": "Representation",
         "yes_and_nonprofit": "Yes, nonprofit",
         "yes_and_for_profit": "Yes, for-profit business",
-        "calling_on_behalf_and_able_to_self_help": "Calling on behalf, can self-help",
-        "self_or_calling_on_behalf_and_unable_to_self_help": "Self, or cannot self-help",
+        "calling_on_behalf_and_able_to_self_help": "Calling for someone else; that person can contact PBSG directly",
+        "self_or_calling_on_behalf_and_unable_to_self_help": "I am the person who needs legal help, or they cannot contact PBSG themselves",
         "yes_passed_or_processing": "Yes, passed or processing",
         "yes_failed_means_test": "Yes, failed means test",
         "yes_pdo_unable_to_assist": "Yes, PDO unable to assist",
@@ -1918,6 +1918,12 @@ def _normalize_compound_question_readability(question: str) -> str:
     question = re.sub(
         r"\(or ≤ \$40,000 if 60 years old or older\)",
         "(or ≤ $40,000 if you are 60 years old or older)",
+        question,
+        flags=re.IGNORECASE,
+    )
+    question = re.sub(
+        r"\bAre you the person who needs legal help, or are they calling on behalf of someone else\?",
+        "Are you the person who needs legal help, or are you calling on behalf of someone else?",
         question,
         flags=re.IGNORECASE,
     )

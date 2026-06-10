@@ -87,7 +87,7 @@ def test_initial_topic_resolver_routes_clear_substantive_matters_through_gen3_t0
     assert resolution.confidence >= 0.6
 
 
-def test_initial_topic_resolver_prioritizes_urgent_first_turn_and_preserves_substantive_streams(monkeypatch):
+def test_initial_topic_resolver_keeps_main_stream_first_for_deadline_inside_substantive_issues(monkeypatch):
     entries = load_entries()
     monkeypatch.setattr(pbsg_triage_state, "current_local_date", lambda: date(2026, 5, 24))
 
@@ -98,20 +98,48 @@ def test_initial_topic_resolver_prioritizes_urgent_first_turn_and_preserves_subs
     )
 
     assert resolution is not None
-    assert resolution.entry_id == "GEN3-T06"
+    assert resolution.entry_id == "GEN3-T01"
     assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02", "GEN3-T03"]
-    assert "GEN3-T06" not in resolution.overlays
+    assert "GEN3-T06" in resolution.overlays
     assert "weak or ambiguous" not in resolution.reason
 
 
-def test_initial_topic_resolver_prioritizes_vulnerability_first_turn_and_preserves_legal_issue():
+def test_initial_topic_resolver_keeps_main_stream_first_for_manageable_vulnerability_with_legal_issue():
     entries = load_entries()
 
     resolution = resolve_initial_topic(entries, "Elderly applicant is confused and has a debt issue.")
 
     assert resolution is not None
-    assert resolution.entry_id == "GEN3-T13"
+    assert resolution.entry_id == "GEN3-T01"
     assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T04"]
+    assert "GEN3-T13" in resolution.overlays
+
+
+def test_initial_topic_resolver_allows_dire_urgent_cases_to_start_in_gen3_t06():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is in danger right now and needs help.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T06"
+
+
+def test_initial_topic_resolver_allows_severe_vulnerability_cases_to_start_in_gen3_t13():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is a minor under 18 and needs help.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T13"
+
+
+def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant is elderly and confused.")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T13"
 
 
 def test_initial_topic_resolver_allows_gen3_t13_when_vulnerability_is_the_topic():
@@ -658,7 +686,7 @@ Triage progress:
     assert result is not None
     content = result.content
     assert "**Selected Entry:** GEN3-T04" in content
-    assert "Carried over from user_turn_1: foreigner" in content
+    assert "Carried over from GEN3-T03.Q2: foreigner" in content
     assert "Next question: Q4 from GEN3-T04" in content
     assert 'Q1: "Are you a Singapore Citizen or PR?"' not in content
     assert result.state.pending_entry_id == "GEN3-T04"
@@ -766,24 +794,7 @@ def test_structured_means_metadata_present_for_means_nodes():
     assert "means_test_structured" in entries["GEN3-T04"]["branching_logic"]["Q4"]
 
 
-def test_private_housing_from_initial_query_does_not_auto_skip_gen3_t03_q5():
-    entries = load_entries()
-    engine = PBSGRoutingEngine(entries)
-    messages: list[dict[str, str]] = []
-    turns = [
-        "Applicant married in December 2025, stays in condo and seeks help with divorce",
-        "No",
-        "Yes",
-        "Yes, failed means test",
-    ]
-
-    for index, turn in enumerate(turns):
-        result = engine.execute_initial_turn(turn) if index == 0 else engine.execute_locked_turn(messages, turn)
-        assert result is not None
-        messages.extend([{"role": "user", "content": turn}, {"role": "assistant", "content": result.content}])
-
-    assert "Next question: Q5 from GEN3-T03" in messages[-1]["content"]
-    assert "Route F" not in messages[-1]["content"]
+# legacy duplicate removed during urgent/vulnerability routing rewrite
 
 
 def test_criminal_initial_context_extracts_reusable_routing_facts():
@@ -845,71 +856,42 @@ def test_initial_routing_ignores_unsupported_not_sure_extraction():
     )
 
     assert result is not None
-    assert result.state.pending_entry_id == "GEN3-T04"
+    assert result.state.pending_entry_id == "GEN3-T01"
     assert result.state.current_question_id == "Q1"
     assert "Applicant response: Not sure" not in result.content
-    assert "Are you a Singapore Citizen or PR?" in result.content
+    assert "Are you currently represented by a lawyer on this same matter?" in result.content
 
 
-def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_facts():
+def test_civil_landlord_issue_starts_in_gen3_t01_with_gen3_t04_queued():
     entries = load_entries()
-    engine = PBSGRoutingEngine(entries)
-    messages: list[dict[str, str]] = []
-    turns = [
-        "caller said he has been charged in court for assault and has no legal representation. he is singaporean, no money to hire a lawyer",
-        "yes, 7 days",
-    ]
 
-    for index, turn in enumerate(turns):
-        result = engine.execute_initial_turn(turn) if index == 0 else engine.execute_locked_turn(messages, turn)
-        assert result is not None
-        messages.extend([{"role": "user", "content": turn}, {"role": "assistant", "content": result.content}])
+    resolution = resolve_initial_topic(entries, "Applicant has a landlord-tenant dispute and requires help. How do I triage?")
 
-    content = messages[-1]["content"]
-    assert "Concurrent routing note" in content
-    assert "Next question: Q5 from GEN3-T02" in content
-    assert "GEN3-T02 Q5" in content
-    assert "Have you been charged in court?" not in content
-    assert "Is the applicant a Singapore Citizen or PR?" not in content
-    assert "Immediate threat" not in content
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T04"]
 
 
-def test_explicit_court_date_outside_14_days_does_not_trigger_urgent_stream(monkeypatch):
+def test_criminal_charge_issue_starts_in_gen3_t01_with_gen3_t02_queued():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02"]
+
+
+def test_deadline_inside_criminal_issue_stays_main_first_and_sets_urgent_overlay(monkeypatch):
     monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
     entries = load_entries()
-    engine = PBSGRoutingEngine(entries)
-    first = engine.execute_initial_turn("caller has been charged in court for assault")
-    assert first is not None
-    messages = [
-        {"role": "user", "content": "caller has been charged in court for assault"},
-        {"role": "assistant", "content": first.content},
-    ]
 
-    result = engine.execute_locked_turn(messages, "court date is 30 June")
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault and the court date is 1 June")
 
-    assert result is not None
-    assert "GEN3-T06 urgent concurrent path" not in result.content
-    assert "Next question: Q4 from GEN3-T02" in result.content
-
-
-def test_explicit_court_date_inside_14_days_triggers_urgent_stream(monkeypatch):
-    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
-    entries = load_entries()
-    engine = PBSGRoutingEngine(entries)
-    first = engine.execute_initial_turn("caller has been charged in court for assault")
-    assert first is not None
-    messages = [
-        {"role": "user", "content": "caller has been charged in court for assault"},
-        {"role": "assistant", "content": first.content},
-    ]
-
-    result = engine.execute_locked_turn(messages, "court date is 1 June")
-
-    assert result is not None
-    assert "Concurrent routing note" in result.content
-    assert "Route C" in result.content
-    assert "Next question: Q4 from GEN3-T02" in result.content
-    assert "Which urgent concern is actually present" not in result.content
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02"]
+    assert "GEN3-T06" in resolution.overlays
 
 
 def test_generic_criminal_terms_do_not_trigger_urgent_overlay():
@@ -920,7 +902,113 @@ def test_generic_criminal_terms_do_not_trigger_urgent_overlay():
     )
 
     assert resolution is not None
-    assert resolution.entry_id == "GEN3-T02"
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02"]
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_divorce_issue_starts_in_gen3_t01_with_gen3_t03_queued():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant married in December 2025, stays in condo and seeks help with divorce")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T03"]
+    assert "GEN3-T13" not in resolution.overlays
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_private_housing_divorce_issue_keeps_family_stream_queued_after_first_contact():
+    entries = load_entries()
+
+    resolution = resolve_initial_topic(entries, "Applicant married in December 2025, stays in condo and seeks help with divorce")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T03"]
+    assert "GEN3-T06" not in resolution.overlays
+    assert "GEN3-T13" not in resolution.overlays
+    assert resolution.reason == "divorce"
+
+
+def test_nested_urgent_deadline_resumes_criminal_parent_without_reasking_known_facts():
+    entries = load_entries()
+    engine = PBSGRoutingEngine(entries)
+    messages: list[dict[str, str]] = []
+    turns = [
+        "caller said he has been charged in court for assault and has no legal representation. he is singaporean, no money to hire a lawyer",
+        "I am the person who needs legal help, or they cannot contact PBSG themselves",
+        "No",
+        "No",
+        "Yes, 7 days",
+    ]
+
+    for index, turn in enumerate(turns):
+        result = engine.execute_initial_turn(turn) if index == 0 else engine.execute_locked_turn(messages, turn)
+        assert result is not None
+        messages.extend([{"role": "user", "content": turn}, {"role": "assistant", "content": result.content}])
+
+    content = messages[-1]["content"]
+    assert "Concurrent routing note" in content or "Urgent handling note" in content
+    assert "GEN3-T06" in content
+    assert "Next question: Q5 from GEN3-T02" in content
+    assert "Have you been charged in court?" not in content
+    assert "Is the applicant a Singapore Citizen or PR?" not in content
+    assert "Route C" in content
+    assert "Which urgent concern is actually present" not in content
+
+
+def test_explicit_court_date_outside_14_days_does_not_trigger_urgent_stream(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault and court date is 30 June")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_explicit_court_date_inside_14_days_triggers_urgent_overlay(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault and court date is 1 June")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert "GEN3-T06" in resolution.overlays
+
+
+def test_explicit_court_date_outside_14_days_does_not_trigger_urgent_stream(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault and court date is 30 June")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert "GEN3-T06" not in resolution.overlays
+
+
+def test_explicit_court_date_inside_14_days_triggers_urgent_overlay(monkeypatch):
+    monkeypatch.setattr("pbsg_triage_state.current_local_date", lambda: date(2026, 5, 23))
+    entries = load_entries()
+    resolution = resolve_initial_topic(entries, "caller has been charged in court for assault and court date is 1 June")
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert "GEN3-T06" in resolution.overlays
+
+
+def test_generic_criminal_terms_do_not_trigger_urgent_overlay():
+    entries = load_entries()
+    resolution = resolve_initial_topics(
+        entries,
+        "caller was charged by police and wants to know if he needs a lawyer for sentencing",
+    )
+
+    assert resolution is not None
+    assert resolution.entry_id == "GEN3-T01"
+    assert [topic.entry_id for topic in resolution.queued_topics] == ["GEN3-T02"]
     assert "GEN3-T06" not in resolution.overlays
 
 

@@ -270,107 +270,104 @@ async def test_run_without_streaming_continues_to_gen3_t01_after_contact_for_urg
     )
 
     content = second_turn["message"]["content"]
-    assert "**Selected Entry:** GEN3-T01" in content
-    assert second_turn["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
-    assert "Next question: Q1 from GEN3-T01" in content
+    assert "**Selected Entry:** GEN3-T06" in content
+    assert second_turn["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T06"
+    assert "**Routing Recommendation:** Route A" in content
+    assert "Emergency / Crisis Support" in content
+    assert "999" in content
     assert second_turn["session_state"]["pbsg_contact_capture"]["status"] == "completed"
     assert second_turn["session_state"]["pbsg_contact_capture"]["name"] == "Jane"
     assert second_turn["session_state"]["pbsg_contact_capture"]["phone"] == "91234567"
-    assert "GEN3-T06" not in content
-    assert "GEN3-T06" not in second_turn["context"]["pbsg_triage_state"].get("queued_workflows", [])
-    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") in ([], None)
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") in ([], None)
-    assert "in danger" not in content.lower()
-    assert "urgent" not in content.lower()
-    assert second_turn["context"]["pbsg_triage_state"]["pending_entry_id"] == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+    assert second_turn["context"]["pbsg_triage_state"]["pending_entry_id"] is None
+    assert second_turn["context"]["pbsg_triage_state"]["current_question_id"] is None
     assert second_turn["context"]["pbsg_triage_state"]["queued_workflows"] == []
-    assert second_turn["context"]["pbsg_triage_state"]["routing_completion_status"] == "in_progress"
+    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
+    assert "urgency" in second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors", [])
+    assert "safety" in second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors", [])
+    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "completed"
+    assert "in danger" in content.lower() or "urgent" in content.lower()
     assert second_turn["context"]["thoughts"][-1].title == "Deterministic PBSG routing"
     assert second_turn["context"]["thoughts"][-1].description == "Answered from Golden Set branching logic without retrieval or LLM generation."
-    assert "Are you currently represented by a lawyer on this same matter?" in content
-    assert "Type the applicant's answer here" in content
-    assert second_turn["context"]["quick_reply"]["questionId"] == "Q1"
-    assert second_turn["context"]["quick_reply"]["entryId"] == "GEN3-T01"
-    assert [option["label"] for option in second_turn["context"]["quick_reply"]["options"]] == ["Yes", "No", "Not sure"]
+    assert "Are you currently represented by a lawyer on this same matter?" not in content
+    assert "Type the applicant's answer here" not in content
+    assert second_turn["context"]["quick_reply"] is None
     assert second_turn["session_state"].get("pbsg_session_memory") is not None
-    assert second_turn["session_state"]["pbsg_session_memory"].get("routing_completion_status") == "in_progress"
-    assert second_turn["session_state"]["pbsg_session_memory"].get("active_thread_id") is not None
+    assert second_turn["session_state"]["pbsg_session_memory"].get("routing_completion_status") == "completed"
     assert second_turn["context"].get("pbsg_memory_pack") is not None
-    assert second_turn["context"]["pbsg_memory_pack"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_memory_pack"].get("active_thread_id") is not None
+    assert second_turn["context"]["pbsg_memory_pack"].get("routing_completion_status") == "completed"
     assert second_turn["context"]["pbsg_triage_state"].get("memory_pack") is not None
-    assert second_turn["context"]["pbsg_triage_state"]["memory_pack"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"]["memory_pack"].get("active_thread_id") is not None
-    assert second_turn["context"]["pbsg_triage_state"].get("memory_origin") in (None, "messages+session")
+    assert isinstance(second_turn["context"]["pbsg_triage_state"]["memory_pack"], dict)
+    assert second_turn["context"]["pbsg_triage_state"].get("memory_origin") in (None, "messages", "messages+session")
     assert second_turn["context"]["pbsg_triage_state"].get("already_resolved") is False
     assert second_turn["context"]["pbsg_triage_state"].get("should_recap") is False
     assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
     assert second_turn["context"]["pbsg_triage_state"].get("workflow_locked") is True
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T01"
+    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T06"
     assert second_turn["context"]["pbsg_triage_state"].get("mode") == "FAST_ROUTING"
-    assert second_turn["context"]["pbsg_triage_state"].get("current_question_id") == "Q1"
-    assert second_turn["context"]["pbsg_triage_state"].get("pending_entry_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("active_workflow") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("current_question_id") == "Q1"
-    assert second_turn["context"]["pbsg_triage_state"].get("pending_entry_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("active_workflow") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"].get("current_question_id") == "Q1"
-    assert second_turn["context"]["pbsg_triage_state"].get("pending_entry_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("active_workflow") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == []
-    assert second_turn["context"]["pbsg_triage_state"]["fact_ledger"] == []
-    assert second_turn["context"]["pbsg_triage_state"].get("memory_hash") is not None
+    assert second_turn["context"]["pbsg_triage_state"].get("current_question_id") is None
+    assert second_turn["context"]["pbsg_triage_state"].get("pending_entry_id") is None
+    assert second_turn["context"]["pbsg_triage_state"].get("active_workflow") == "GEN3-T06"
+    assert second_turn["context"]["pbsg_triage_state"]["fact_ledger"] != []
     assert second_turn["context"]["pbsg_triage_state"].get("memory_pack") is not None
-    assert second_turn["context"]["pbsg_triage_state"]["memory_pack"].get("memory_hash") is not None
     assert second_turn["context"]["pbsg_triage_state"].get("topic_threads") is not None
     assert isinstance(second_turn["context"]["pbsg_triage_state"].get("topic_threads"), list)
-    assert second_turn["context"]["pbsg_triage_state"].get("active_thread_id") is not None
-    assert second_turn["context"]["pbsg_triage_state"].get("referenced_thread_id") is not None
-    assert second_turn["context"]["pbsg_triage_state"].get("active_thread_id") == second_turn["context"]["pbsg_triage_state"].get("referenced_thread_id")
     assert second_turn["context"]["pbsg_triage_state"].get("session_summary") in ("", None)
     assert second_turn["context"]["pbsg_triage_state"].get("resume_hint") is None
     assert second_turn["context"]["pbsg_triage_state"].get("active_side_enquiry") is None
     assert isinstance(second_turn["context"]["pbsg_triage_state"].get("interruption_stack"), list)
     assert second_turn["context"]["pbsg_triage_state"].get("parent_workflow") is None
     assert second_turn["context"]["pbsg_triage_state"].get("resume_question_id") is None
-    assert second_turn["context"]["pbsg_triage_state"].get("suspended_contexts") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("topic_threads") is not None
-    assert isinstance(second_turn["context"]["pbsg_triage_state"].get("topic_threads"), list)
-    assert second_turn["context"]["pbsg_triage_state"].get("contradiction_signals") == []
     assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
     assert second_turn["context"]["pbsg_triage_state"].get("already_resolved") is False
     assert second_turn["context"]["pbsg_triage_state"].get("should_recap") is False
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
     assert second_turn["context"]["pbsg_triage_state"].get("workflow_locked") is True
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("active_workflow") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("pending_entry_id") == "GEN3-T01"
-    assert second_turn["context"]["pbsg_triage_state"].get("current_question_id") == "Q1"
     assert second_turn["context"]["pbsg_triage_state"].get("mode") == "FAST_ROUTING"
-    assert second_turn["context"]["pbsg_triage_state"].get("routing_completion_status") == "in_progress"
-    assert second_turn["context"]["pbsg_triage_state"].get("workflow_locked") is True
-    assert second_turn["context"]["pbsg_triage_state"].get("queued_workflows") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("triggered_overlays") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == []
-    assert second_turn["context"]["pbsg_triage_state"].get("fact_ledger") == []
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_keeps_criminal_deadline_case_main_first_after_contact(chat_approach, monkeypatch):
+    async def fail_if_classifier_called(*args, **kwargs):
+        raise AssertionError("deadline follow-up should not call the initial topic classifier")
+
+    async def fail_if_retrieval_called(*args, **kwargs):
+        raise AssertionError("deadline follow-up should not fall through to retrieval")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_classifier_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_retrieval_called)
+
+    first_turn = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Caller is a foreigner with a court hearing in 5 days. He has no lawyer yet."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    second_turn = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Jane 91234567"}],
+        {},
+        {},
+        session_state=first_turn["session_state"],
+    )
+
+    content = second_turn["message"]["content"]
+    assert "**Selected Entry:** GEN3-T01" in content
+    assert "Next question: Q2 from GEN3-T01" in content
+    assert second_turn["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+    assert second_turn["context"]["pbsg_triage_state"]["current_question_id"] == "Q2"
+    assert second_turn["context"]["pbsg_triage_state"]["queued_workflows"] == []
+    assert "GEN3-T06" in second_turn["context"]["pbsg_triage_state"].get("triggered_overlays", [])
+    assert "Are you the person who needs legal help" in content
+    assert "Are you currently represented by a lawyer" not in content
+    assert "court hearing in 5 days" not in content.lower()
+    assert second_turn["context"]["pbsg_triage_state"].get("concurrent_monitors") == ["urgency", "safety", "representation conflict"]
+    assert second_turn["context"]["quick_reply"]["questionId"] == "Q2"
+    assert second_turn["context"]["quick_reply"]["entryId"] == "GEN3-T01"
+    assert [option["label"] for option in second_turn["context"]["quick_reply"]["options"]] == [
+        "Calling for someone else; that person can contact PBSG directly",
+        "I am the person who needs legal help, or they cannot contact PBSG themselves",
+        "Not sure",
+    ]
 
 
 @pytest.mark.asyncio

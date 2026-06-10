@@ -59,6 +59,8 @@ from pbsg_triage_state import (
     resolve_expected_transition,
     resolve_initial_topic,
     safe_escalation_response,
+    should_prioritize_urgent_first_turn,
+    should_prioritize_vulnerability_first_turn,
     validate_response_transition,
     validate_response_questions,
 )
@@ -2289,13 +2291,26 @@ class ChatReadRetrieveReadApproach(Approach):
             }:
                 predicted_substantive_topics.append(topic)
 
-        if "GEN3-T06" in overlays:
+        prioritize_urgent_first = "GEN3-T06" in overlays and should_prioritize_urgent_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+        prioritize_vulnerability_first = "GEN3-T13" in overlays and should_prioritize_vulnerability_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+
+        if prioritize_urgent_first:
             effective_entry_id = "GEN3-T06"
             effective_queued_topics = predicted_substantive_topics
-        elif "GEN3-T13" in overlays and predicted_substantive_topics:
+        elif prioritize_vulnerability_first:
             effective_entry_id = "GEN3-T13"
             effective_queued_topics = predicted_substantive_topics
         elif predicted_substantive_topics and "GEN3-T01" in self.pbsg_golden_set_entries:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T13" in overlays and effective_entry_id == "GEN3-T13" and predicted_substantive_topics:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T06" in overlays and effective_entry_id == "GEN3-T06" and predicted_substantive_topics:
             effective_entry_id = "GEN3-T01"
             effective_queued_topics = predicted_substantive_topics
 

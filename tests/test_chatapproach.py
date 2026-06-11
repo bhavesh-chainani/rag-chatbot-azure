@@ -6,7 +6,12 @@ from openai.types.chat import ChatCompletion
 
 import pbsg_triage_state
 from approaches.approach import DataPoints, ExtraInfo
-from approaches.chatreadretrieveread import build_contact_capture_prompt_response
+from approaches.chatreadretrieveread import (
+    HISTORY_SESSION_ID_KEY,
+    build_contact_capture_prompt_response,
+    extend_session_state_with_contact_capture,
+    extend_session_state_with_memory,
+)
 from pbsg_triage_state import branch_key_for_answer
 
 
@@ -59,6 +64,31 @@ def test_build_contact_capture_prompt_response_uses_verbatim_block_format():
         ]
     )
     assert response["context"]["quick_reply"] is None
+
+
+def test_extend_session_state_with_contact_capture_preserves_history_session_id():
+    result = extend_session_state_with_contact_capture("session-123", {"status": "awaiting_response"})
+
+    assert result[HISTORY_SESSION_ID_KEY] == "session-123"
+    assert result["pbsg_contact_capture"]["status"] == "awaiting_response"
+
+
+def test_extend_session_state_with_memory_preserves_history_session_id():
+    class _TriageState:
+        routing_completion_status = "completed"
+        active_thread_id = None
+        referenced_thread_id = None
+        session_summary = ""
+        already_resolved = False
+        should_recap = False
+        resume_hint = None
+        memory_hash = None
+        topic_threads = []
+
+    result = extend_session_state_with_memory("session-456", _TriageState())
+
+    assert result[HISTORY_SESSION_ID_KEY] == "session-456"
+    assert result["pbsg_session_memory"]["routing_completion_status"] == "completed"
 
 
 def test_build_quick_reply_from_selected_entry_and_question(chat_approach):

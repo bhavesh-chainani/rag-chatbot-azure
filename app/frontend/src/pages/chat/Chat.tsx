@@ -47,18 +47,36 @@ import { LanguagePicker } from "../../i18n/LanguagePicker";
 import { Settings } from "../../components/Settings/Settings";
 import { enqueueHistorySave, flushHistorySave } from "../../chatHistorySaveQueue";
 import { useChatSession } from "../../chatSessionContext";
+import { getHistorySessionId, withHistorySessionId } from "../../sessionState";
 
 function normalizeHistoryAnswers(sessionId: string, answers: Answers): Answers {
     return answers.map(([question, response, sentAt]) => {
         const normalized: [string, ChatAppResponse, number?] = [
             question,
-            { ...response, session_state: sessionId }
+            { ...response, session_state: withHistorySessionId(response.session_state, sessionId) }
         ];
         if (sentAt !== undefined) {
             normalized[2] = sentAt;
         }
         return normalized;
     });
+}
+
+function getHistorySessionIdFromResponse(response: ChatAppResponse | ChatAppResponseOrError | null | undefined): string | null {
+    return getHistorySessionId(response?.session_state);
+}
+
+function saveHistorySnapshot(
+    response: ChatAppResponse,
+    answers: Answers,
+    getHistoryToken: () => Promise<string | undefined>,
+    historyManager: ReturnType<typeof useHistoryManager>
+): void {
+    const historySessionId = getHistorySessionIdFromResponse(response);
+    if (!historySessionId) {
+        return;
+    }
+    enqueueHistorySave(historySessionId, answers, getHistoryToken, historyManager);
 }
 
 function useCitationPanelIframeHeight(): string {
@@ -479,14 +497,7 @@ const Chat = () => {
                     answersRef.current = newAnswers;
                     setPendingQuestionSentAt(null);
                     void refreshCaseSummary(newAnswers, questionSentAt, requestEpoch, token);
-                    if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
-                        enqueueHistorySave(
-                            parsedResponse.session_state,
-                            newAnswers,
-                            getHistoryToken,
-                            historyManager
-                        );
-                    }
+                    saveHistorySnapshot(parsedResponse, newAnswers, getHistoryToken, historyManager);
                 } else {
                     // Stopped before any content arrived - restore question to input
                     lastQuestionRef.current = requestAnswers.length > 0 ? requestAnswers[requestAnswers.length - 1][0] : "";
@@ -506,9 +517,7 @@ const Chat = () => {
                 answersRef.current = newAnswers;
                 setPendingQuestionSentAt(null);
                 void refreshCaseSummary(newAnswers, questionSentAt, requestEpoch, token);
-                if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
-                    enqueueHistorySave(parsedResponse.session_state, newAnswers, getHistoryToken, historyManager);
-                }
+                saveHistorySnapshot(parsedResponse as ChatAppResponse, newAnswers, getHistoryToken, historyManager);
             }
             setSpeechUrls(currentSpeechUrls => [...currentSpeechUrls, null]);
         } catch (e) {
@@ -539,10 +548,7 @@ const Chat = () => {
         const hasStreaming = streamedAnswers.length > 0;
         const toSave: Answers = hasStreaming ? [...streamedAnswers] : [...answersRef.current];
         const lastResponse = toSave.length > 0 ? toSave[toSave.length - 1][1] : null;
-        let sessionId: string | null =
-            lastResponse && typeof lastResponse.session_state === "string" && lastResponse.session_state !== ""
-                ? lastResponse.session_state
-                : null;
+        let sessionId: string | null = getHistorySessionIdFromResponse(lastResponse);
         if (toSave.length > 0 && historyProvider !== HistoryProviderOptions.None && !sessionId && historyProvider === HistoryProviderOptions.IndexedDB) {
             sessionId = crypto.randomUUID();
         }

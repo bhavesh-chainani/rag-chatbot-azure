@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import re
@@ -58,6 +59,8 @@ from pbsg_triage_state import (
     resolve_expected_transition,
     resolve_initial_topic,
     safe_escalation_response,
+    should_prioritize_urgent_first_turn,
+    should_prioritize_vulnerability_first_turn,
     validate_response_transition,
     validate_response_questions,
 )
@@ -90,6 +93,28 @@ def build_memory_pack(triage_state: Any) -> dict[str, Any]:
     }
 
 
+HISTORY_SESSION_ID_KEY = "history_session_id"
+
+
+def extract_history_session_id(session_state: Any) -> str | None:
+    if isinstance(session_state, str) and session_state:
+        return session_state
+    if isinstance(session_state, dict):
+        session_id = session_state.get(HISTORY_SESSION_ID_KEY)
+        if isinstance(session_id, str) and session_id:
+            return session_id
+    return None
+
+
+def session_state_with_history_id(session_state: Any) -> dict[str, Any] | None:
+    if isinstance(session_state, dict):
+        return dict(session_state)
+    history_session_id = extract_history_session_id(session_state)
+    if history_session_id:
+        return {HISTORY_SESSION_ID_KEY: history_session_id}
+    return None
+
+
 def extract_session_memory(session_state: Any) -> dict[str, Any] | None:
     if isinstance(session_state, dict):
         memory = session_state.get("pbsg_session_memory")
@@ -98,13 +123,241 @@ def extract_session_memory(session_state: Any) -> dict[str, Any] | None:
     return None
 
 
+def extract_contact_capture_state(session_state: Any) -> dict[str, Any] | None:
+    if isinstance(session_state, dict):
+        contact_state = session_state.get("pbsg_contact_capture")
+        if isinstance(contact_state, dict):
+            return contact_state
+    return None
+
+
+def extend_session_state_with_contact_capture(session_state: Any, contact_state: dict[str, Any]) -> Any:
+    updated = session_state_with_history_id(session_state) or {}
+    updated["pbsg_contact_capture"] = contact_state
+    return updated
+
+
+def encode_contact_pending_message(message: str) -> str:
+    return base64.b64encode(message.encode("utf-8")).decode("ascii")
+
+
+def decode_contact_pending_message(encoded: str | None) -> str | None:
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        return base64.b64decode(encoded.encode("ascii")).decode("utf-8")
+    except Exception:
+        return None
+
+
+def build_contact_capture_state(original_message: str) -> dict[str, Any]:
+    return {
+        "status": "awaiting_response",
+        "name": None,
+        "phone": None,
+        "pending_initial_message": encode_contact_pending_message(original_message),
+    }
+
+
+def contact_capture_needed(messages: list[ChatCompletionMessageParam], session_state: Any) -> bool:
+    if len(messages) != 1:
+        return False
+    latest_content = messages[-1].get("content") if messages else None
+    if not isinstance(latest_content, str) or not latest_content.strip():
+        return False
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state:
+        return True
+    return contact_state.get("status") in {"not_started", None}
+
+
+def is_contact_capture_reply(messages: list[ChatCompletionMessageParam], session_state: Any) -> bool:
+    if not messages:
+        return False
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return False
+    latest_content = latest_message.get("content")
+    if not isinstance(latest_content, str):
+        return False
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state:
+        return False
+    return contact_state.get("status") == "awaiting_response" and bool(
+        decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    )
+
+
+def strip_contact_capture_turns(messages: list[ChatCompletionMessageParam], session_state: Any) -> list[ChatCompletionMessageParam]:
+    if not is_contact_capture_reply(messages, session_state):
+        return messages
+    original_message = decode_contact_pending_message((extract_contact_capture_state(session_state) or {}).get("pending_initial_message"))
+    if not original_message:
+        return messages
+    return [{"role": "user", "content": original_message}]
+
+
+def latest_session_state_from_messages(messages: list[ChatCompletionMessageParam], fallback_session_state: Any) -> Any:
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        if "**Before we begin:**" not in content:
+            continue
+        candidate = message.get("session_state")
+        if candidate is not None:
+            return candidate
+    return fallback_session_state
+
+
+def normalize_contact_capture_session_state(messages: list[ChatCompletionMessageParam], session_state: Any) -> Any:
+    return latest_session_state_from_messages(messages, session_state)
+
+
+def inject_contact_capture_assistant_turn(messages: list[ChatCompletionMessageParam], session_state: Any) -> list[ChatCompletionMessageParam]:
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state or contact_state.get("status") != "awaiting_response":
+        return messages
+    original_message = decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    if not original_message:
+        return messages
+    if any(message.get("role") == "assistant" and isinstance(message.get("content"), str) and "**Before we begin:**" in message.get("content") for message in messages):
+        return messages
+    prompt_response = build_contact_capture_prompt_response(session_state, original_message)
+    return [
+        *messages[:-1],
+        {"role": "assistant", "content": prompt_response["message"]["content"], "session_state": prompt_response["session_state"]},
+        messages[-1],
+    ]
+
+
+def normalize_contact_capture_messages(messages: list[ChatCompletionMessageParam], session_state: Any) -> tuple[list[ChatCompletionMessageParam], Any]:
+    normalized_session_state = normalize_contact_capture_session_state(messages, session_state)
+    normalized_messages = inject_contact_capture_assistant_turn(messages, normalized_session_state)
+    return normalized_messages, normalized_session_state
+
+
+def consume_contact_capture_reply(
+    messages: list[ChatCompletionMessageParam], session_state: Any
+) -> tuple[list[ChatCompletionMessageParam], Any]:
+    normalized_messages, normalized_session_state = normalize_contact_capture_messages(messages, session_state)
+    if not is_contact_capture_reply(normalized_messages, normalized_session_state):
+        return normalized_messages, normalized_session_state
+    latest_content = normalized_messages[-1].get("content")
+    if not isinstance(latest_content, str):
+        return normalized_messages, normalized_session_state
+    contact_state, original_message = parse_contact_capture_reply(latest_content, normalized_session_state)
+    updated_session_state = extend_session_state_with_contact_capture(normalized_session_state, contact_state)
+    if original_message:
+        return [{"role": "user", "content": original_message}], updated_session_state
+    return strip_contact_capture_turns(normalized_messages, normalized_session_state), updated_session_state
+
+
+def restore_contact_capture_prompt(message: dict[str, Any], session_state: Any) -> dict[str, Any]:
+    contact_state = extract_contact_capture_state(session_state)
+    if not contact_state or contact_state.get("status") != "awaiting_response":
+        return message
+    content = message.get("content")
+    if isinstance(content, str) and "**Before we begin:**" not in content:
+        prompt_response = build_contact_capture_prompt_response(session_state, decode_contact_pending_message(contact_state.get("pending_initial_message")) or "")
+        return {"role": message.get("role", "assistant"), "content": prompt_response["message"]["content"]}
+    return message
+
+
+def parse_contact_capture_reply(latest_content: str, session_state: Any) -> tuple[dict[str, Any], str | None]:
+    contact_state = dict(extract_contact_capture_state(session_state) or {})
+    original_message = decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    normalized = re.sub(r"\s+", " ", latest_content).strip()
+    lowered = normalized.lower()
+    refusal = bool(
+        re.search(r"\b(skip|prefer not|rather not|do not want|don't want|no name|no phone|no number|continue without)\b", lowered)
+    )
+    phone_match = re.search(r"(?:\+65\s*)?(\d{8})\b", normalized)
+    phone = phone_match.group(1) if phone_match else None
+    name_candidate = normalized
+    if phone_match:
+        name_candidate = (normalized[: phone_match.start()] + " " + normalized[phone_match.end() :]).strip(" ,;:-")
+    if refusal:
+        name = None
+        status = "skipped"
+        phone = phone if phone else None
+    else:
+        name = name_candidate if name_candidate and not re.fullmatch(r"[\W_]+", name_candidate) else None
+        status = "completed" if (name or phone) else "skipped"
+    updated_state = {
+        "status": status,
+        "name": name,
+        "phone": phone,
+        "pending_initial_message": None,
+    }
+    return updated_state, original_message
+
+
+def build_contact_capture_prompt_response(session_state: Any, original_message: str) -> dict[str, Any]:
+    contact_state = build_contact_capture_state(original_message)
+    content = "\n\n".join(
+        [
+            "**Before we begin:**",
+            "**Ask the applicant (read verbatim):**",
+            '> **"Can I take your name and phone number for follow-up? If you do not want to share your name, that is okay — a phone number alone is fine. If you do not want to share either, just let me know and we will continue."**',
+        ]
+    )
+    return {
+        "message": {"content": content, "role": "assistant"},
+        "context": {
+            "thoughts": [
+                ThoughtStep(
+                    "Deterministic PBSG contact capture",
+                    "Collected basic contact details once before starting triage.",
+                    None,
+                )
+            ],
+            "data_points": {},
+            "followup_questions": None,
+            "quick_reply": None,
+        },
+        "session_state": extend_session_state_with_contact_capture(session_state, contact_state),
+    }
+
+
+def parse_contact_capture_reply(latest_content: str, session_state: Any) -> tuple[dict[str, Any], str | None]:
+    contact_state = dict(extract_contact_capture_state(session_state) or {})
+    original_message = decode_contact_pending_message(contact_state.get("pending_initial_message"))
+    normalized = re.sub(r"\s+", " ", latest_content).strip()
+    lowered = normalized.lower()
+    refusal = bool(
+        re.search(r"\b(skip|prefer not|rather not|do not want|don't want|no name|no phone|no number|continue without)\b", lowered)
+    )
+    phone_match = re.search(r"(?:\+65\s*)?(\d{8})\b", normalized)
+    phone = phone_match.group(1) if phone_match else None
+    name_candidate = normalized
+    if phone_match:
+        name_candidate = (normalized[: phone_match.start()] + " " + normalized[phone_match.end() :]).strip(" ,;:-")
+    if refusal:
+        name = None
+        status = "skipped"
+        phone = phone if phone else None
+    else:
+        name = name_candidate if name_candidate and not re.fullmatch(r"[\W_]+", name_candidate) else None
+        status = "completed" if (name or phone) else "skipped"
+    updated_state = {
+        "status": status,
+        "name": name,
+        "phone": phone,
+        "pending_initial_message": None,
+    }
+    return updated_state, original_message
+
+
 def extend_session_state_with_memory(session_state: Any, triage_state: Any) -> Any:
     memory_pack = build_memory_pack(triage_state)
-    if isinstance(session_state, dict):
-        updated = dict(session_state)
-        updated["pbsg_session_memory"] = memory_pack
-        return updated
-    return session_state
+    updated = session_state_with_history_id(session_state)
+    if updated is None:
+        return session_state
+    updated["pbsg_session_memory"] = memory_pack
+    return updated
 
 
 def hydrate_triage_state_from_session_memory(triage_state: Any, session_state: Any) -> Any:
@@ -584,14 +837,6 @@ PBSG_GENERAL_ENQUIRY_INTENT_PATTERN = re.compile(
     r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
     flags=re.IGNORECASE,
 )
-PBSG_TRIAGE_REQUEST_PATTERN = re.compile(
-    r"\b(applicant|caller|client|my|me|i|we|he|she|they|someone)\b.{0,80}"
-    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b"
-    r"|"
-    r"\b(divorce|custody|maintenance|charged|charge|criminal|police|arrest|court|employment|salary|landlord|tenant|debt|probate|estate|urgent|deadline|violence|ppo)\b.{0,80}"
-    r"\b(help|assist|representation|lawyer|legal|case|matter|issue|problem)\b",
-    flags=re.IGNORECASE,
-)
 
 PBSG_CASE_SUMMARY_PENDING_MESSAGE = "Applicant summary is updating. You can continue with the next triage step now."
 PBSG_CASE_SUMMARY_SYSTEM_PROMPT = """You write concise applicant case summaries for Pro Bono SG hotline interns.
@@ -612,9 +857,9 @@ INTERNAL_ID_PATTERN = re.compile(r"\bGEN3-[A-Z0-9-]+\b|\bSelected Entry\b|\bQ\d+
 
 PBSG_QUICK_REPLY_LABELS = {
     ("GEN3-T01", "Q2"): {
-        "if_calling_on_behalf_and_able_to_self_help": "Calling for someone else; they can contact PBSG directly",
+        "if_calling_on_behalf_and_able_to_self_help": "Calling for someone else; that person can contact PBSG directly",
         "if_self_or_calling_on_behalf_and_unable_to_self_help": (
-            "Applicant is calling, or cannot contact PBSG themselves"
+            "I am the person who needs legal help, or they cannot contact PBSG themselves"
         ),
     },
     ("GEN3-T01", "Q3"): {
@@ -1379,6 +1624,8 @@ class ChatReadRetrieveReadApproach(Approach):
         self,
         messages: list[ChatCompletionMessageParam],
         session_state: Any = None,
+        *,
+        simple_only: bool = False,
     ) -> dict[str, Any] | None:
         if not messages:
             return None
@@ -1388,7 +1635,15 @@ class ChatReadRetrieveReadApproach(Approach):
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
         triage_state = hydrate_triage_state_from_session_memory(triage_state, session_state)
         turn_classification = classify_turn_interrupt(self.pbsg_golden_set_entries, triage_state, latest_content)
-        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(messages[:-1], latest_content)
+        if simple_only and (
+            turn_classification.turn_type != "current_topic_refinement" or not turn_classification.pending_branch_key
+        ):
+            return None
+        deterministic_result = self.pbsg_routing_engine.execute_locked_turn(
+            messages[:-1],
+            latest_content,
+            branch_key_override=turn_classification.pending_branch_key if simple_only else None,
+        )
         if turn_classification.should_call_llm and not deterministic_result:
             return None
         if not deterministic_result:
@@ -2026,6 +2281,7 @@ class ChatReadRetrieveReadApproach(Approach):
                     isinstance(entry_id, str)
                     and entry_id in self.pbsg_golden_set_entries
                     and entry_id != primary_entry_id
+                    and entry_id in local_resolution.overlays
                     and entry_id not in overlays
                 ):
                     overlays.append(entry_id)
@@ -2036,12 +2292,54 @@ class ChatReadRetrieveReadApproach(Approach):
             classifier_reason = evidence
         else:
             classifier_reason = f"structured topic classifier: {evidence}"
+
+        substantive_entry_ids = {"GEN3-T02", "GEN3-T03", "GEN3-T04"}
+        effective_entry_id = primary_entry_id
+        effective_queued_topics = queued_topics
+        predicted_substantive_topics: list[PBSGQueuedTopic] = []
+        if primary_entry_id in substantive_entry_ids:
+            predicted_substantive_topics.append(
+                PBSGQueuedTopic(
+                    entry_id=primary_entry_id,
+                    evidence=evidence or "structured topic classifier",
+                    confidence=float(confidence),
+                )
+            )
+        for topic in queued_topics:
+            if topic.entry_id in substantive_entry_ids and topic.entry_id not in {
+                existing.entry_id for existing in predicted_substantive_topics
+            }:
+                predicted_substantive_topics.append(topic)
+
+        prioritize_urgent_first = "GEN3-T06" in overlays and should_prioritize_urgent_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+        prioritize_vulnerability_first = "GEN3-T13" in overlays and should_prioritize_vulnerability_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+
+        if prioritize_urgent_first:
+            effective_entry_id = "GEN3-T06"
+            effective_queued_topics = predicted_substantive_topics
+        elif prioritize_vulnerability_first:
+            effective_entry_id = "GEN3-T13"
+            effective_queued_topics = predicted_substantive_topics
+        elif predicted_substantive_topics and "GEN3-T01" in self.pbsg_golden_set_entries:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T13" in overlays and effective_entry_id == "GEN3-T13" and predicted_substantive_topics:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T06" in overlays and effective_entry_id == "GEN3-T06" and predicted_substantive_topics:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+
         resolution = PBSGTopicResolution(
-            entry_id=primary_entry_id,
+            entry_id=effective_entry_id,
             confidence=float(confidence),
             reason=classifier_reason,
             overlays=overlays,
-            queued_topics=queued_topics,
+            queued_topics=effective_queued_topics,
             candidates=local_resolution.candidates,
         )
         extracted_facts, extraction_thought = await self.extract_structured_initial_facts(
@@ -2076,9 +2374,6 @@ class ChatReadRetrieveReadApproach(Approach):
             if any(re.search(pattern, normalized) for pattern in patterns if isinstance(pattern, str)):
                 return faq_key, faq
         return None
-
-    def is_legal_triage_request(self, latest_content: str) -> bool:
-        return bool(PBSG_TRIAGE_REQUEST_PATTERN.search(latest_content))
 
     def general_enquiry_answer(self, latest_content: str) -> tuple[str, list[str], str] | None:
         match = self.general_enquiry_match(latest_content)
@@ -2144,47 +2439,11 @@ class ChatReadRetrieveReadApproach(Approach):
         if len(messages) != 1:
             return None
         latest_content = messages[-1].get("content")
-        if not isinstance(latest_content, str) or self.is_legal_triage_request(latest_content):
+        if not isinstance(latest_content, str):
+            return None
+        if not self.general_enquiry_answer(latest_content):
             return None
         return self.build_general_enquiry_response(latest_content, session_state=session_state)
-
-    def mixed_general_enquiry_prefix(self, messages: list[ChatCompletionMessageParam]) -> str | None:
-        if len(messages) != 1:
-            return None
-        latest_content = messages[-1].get("content")
-        if not isinstance(latest_content, str) or not self.is_legal_triage_request(latest_content):
-            return None
-        answer_result = self.general_enquiry_answer(latest_content)
-        if not answer_result:
-            return None
-        answer, _, _ = answer_result
-        return "\n\n".join(
-            [
-                "**General enquiry:**",
-                answer,
-                "**Now I will triage the legal issue:**",
-            ]
-        )
-
-    def with_general_enquiry_prefix(self, response: dict[str, Any], prefix: str | None) -> dict[str, Any]:
-        if not prefix:
-            return response
-        message = response.get("message")
-        if isinstance(message, dict) and isinstance(message.get("content"), str):
-            message["content"] = f"{prefix}\n\n{message['content']}"
-        context = response.get("context")
-        if isinstance(context, dict):
-            thoughts = context.get("thoughts")
-            if isinstance(thoughts, list):
-                thoughts.insert(
-                    0,
-                    ThoughtStep(
-                        "Deterministic PBSG mixed general enquiry",
-                        "Answered the general part from the curated local FAQ before continuing legal triage.",
-                        None,
-                    ),
-                )
-        return response
 
     def local_side_enquiry_answer(self, latest_content: str) -> str | None:
         answer_result = self.general_enquiry_answer(latest_content)
@@ -2869,28 +3128,36 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> dict[str, Any]:
+        messages, session_state = normalize_contact_capture_messages(messages, session_state)
         general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
         if general_enquiry_response:
             return general_enquiry_response
-        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
+        if contact_capture_needed(messages, session_state):
+            latest_content = messages[-1].get("content") if messages else None
+            if isinstance(latest_content, str):
+                return build_contact_capture_prompt_response(session_state, latest_content)
+        messages, session_state = consume_contact_capture_reply(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            return general_enquiry_response
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            return self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
+            return structured_initial_response
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            return self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
+            return initial_response
         queued_topic_response = self.try_queued_topic_control_response(messages, session_state)
         if queued_topic_response:
             return queued_topic_response
         general_enquiry_interrupt_response = self.try_general_enquiry_interrupt_response(messages, session_state)
         if general_enquiry_interrupt_response:
             return general_enquiry_interrupt_response
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state, simple_only=True)
+        if deterministic_response:
+            return deterministic_response
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             return contextual_response
-        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
-        if deterministic_response:
-            return deterministic_response
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:
             return side_enquiry_response
@@ -2953,23 +3220,36 @@ class ChatReadRetrieveReadApproach(Approach):
         auth_claims: dict[str, Any],
         session_state: Any = None,
     ) -> AsyncGenerator[dict, None]:
+        messages, session_state = normalize_contact_capture_messages(messages, session_state)
         general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
         if general_enquiry_response:
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
             return
-        mixed_general_prefix = self.mixed_general_enquiry_prefix(messages)
+        if contact_capture_needed(messages, session_state):
+            latest_content = messages[-1].get("content") if messages else None
+            if isinstance(latest_content, str):
+                response = build_contact_capture_prompt_response(session_state, latest_content)
+                yield {"delta": {"role": "assistant"}, "context": response["context"], "session_state": response["session_state"]}
+                yield {"delta": {"role": "assistant", "content": response["message"]["content"]}}
+                yield {"delta": {"role": "assistant"}, "context": response["context"], "session_state": response["session_state"]}
+                return
+        messages, session_state = consume_contact_capture_reply(messages, session_state)
+        general_enquiry_response = self.try_initial_general_enquiry_response(messages, session_state)
+        if general_enquiry_response:
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": general_enquiry_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": general_enquiry_response["context"], "session_state": session_state}
+            return
         structured_initial_response = await self.try_structured_llm_initial_topic_response(messages, overrides, session_state)
         if structured_initial_response:
-            structured_initial_response = self.with_general_enquiry_prefix(structured_initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": structured_initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": structured_initial_response["context"], "session_state": session_state}
             return
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            initial_response = self.with_general_enquiry_prefix(initial_response, mixed_general_prefix)
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
@@ -2986,17 +3266,17 @@ class ChatReadRetrieveReadApproach(Approach):
             yield {"delta": {"role": "assistant", "content": general_enquiry_interrupt_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": general_enquiry_interrupt_response["context"], "session_state": session_state}
             return
+        deterministic_response = self.try_deterministic_locked_response(messages, session_state, simple_only=True)
+        if deterministic_response:
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
+            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            return
         contextual_response = await self.try_contextual_locked_response(messages, overrides, session_state)
         if contextual_response:
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
             yield {"delta": {"role": "assistant", "content": contextual_response["message"]["content"]}}
             yield {"delta": {"role": "assistant"}, "context": contextual_response["context"], "session_state": session_state}
-            return
-        deterministic_response = self.try_deterministic_locked_response(messages, session_state)
-        if deterministic_response:
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
-            yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
             return
         side_enquiry_response = self.try_local_side_enquiry_response(messages, session_state)
         if side_enquiry_response:

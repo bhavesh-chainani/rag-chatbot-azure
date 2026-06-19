@@ -589,45 +589,44 @@ def test_chat_quick_reply_streaming(page: Page, live_server_url: str):
         if request_count == 1:
             assert post_data["messages"][-1]["content"] == "Start triage"
             answer = (
-                "**Selected Entry:** GEN3-T01\n\n"
+                "**Before we begin:**\n\n"
                 "**Ask the applicant (read verbatim):**\n\n"
-                '> Q1: "Are you currently represented by a lawyer on this same matter?"'
+                '> **"Can I take your name and phone number for follow-up? If you do not want to share your name, that is okay — a phone number alone is fine. If you do not want to share either, just let me know and we will continue."**'
             )
-            quick_reply_context = {
-                "data_points": {"text": [], "images": [], "citations": []},
-                "thoughts": [],
-                "followup_questions": None,
-                "quick_reply": {
-                    "mode": "single",
-                    "entryId": "GEN3-T01",
-                    "questionId": "Q1",
-                    "options": [
-                        {"id": "if_yes", "label": "Yes", "value": "Yes"},
-                        {"id": "if_no", "label": "No", "value": "No"},
-                    ],
-                },
-            }
             jsonl = "\n".join(
                 [
                     json.dumps(
                         {
                             "delta": {"role": "assistant"},
                             "context": {
-                                "data_points": {"text": [], "images": [], "citations": []},
+                                "data_points": {},
                                 "thoughts": [],
                                 "followup_questions": None,
+                                "quick_reply": None,
                             },
-                            "session_state": None,
+                            "session_state": {"pbsg_contact_capture": {"status": "awaiting_response"}},
                         }
                     ),
                     json.dumps({"delta": {"content": answer, "role": "assistant"}}),
-                    json.dumps({"delta": {"role": "assistant"}, "context": quick_reply_context, "session_state": None}),
+                    json.dumps(
+                        {
+                            "delta": {"role": "assistant"},
+                            "context": {
+                                "data_points": {},
+                                "thoughts": [],
+                                "followup_questions": None,
+                                "quick_reply": None,
+                            },
+                            "session_state": {"pbsg_contact_capture": {"status": "awaiting_response"}},
+                        }
+                    ),
                 ]
             )
             route.fulfill(body=jsonl, status=200, headers={"Transfer-encoding": "Chunked"})
             return
 
         assert post_data["messages"][-1]["content"] == "No"
+        assert post_data["messages"][-2]["content"].startswith("**Before we begin:**")
         jsonl = "\n".join(
             [
                 json.dumps(

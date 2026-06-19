@@ -143,10 +143,17 @@ def test_build_quick_reply_uses_question_specific_labels(chat_approach):
 @pytest.mark.parametrize(
     ("question", "expected_text"),
     [
-        ("What is LASCO?", "Legal Assistance Scheme for Capital Offences"),
-        ("Where is the PBSG counter?", "State Courts Help Centre"),
-        ("Tell me more about Pro Bono SG.", "Pro Bono SG is the organisation referenced"),
-        ("Start triage", "The triage flow asks only the facts needed"),
+        ("What is LASCO?", "scheme linked to the Courts, not PBSG"),
+        ("Where is the PBSG counter?", "1 Havelock Square"),
+        ("Tell me more about Pro Bono SG.", "helps people who cannot afford legal assistance"),
+        ("What are your operating hours?", "Hotline operating hours"),
+        ("What is annual value?", "estimated gross annual rent"),
+        ("How does the enquirer apply for PDO?", "go.gov.sg/applypdo"),
+        ("Can LAB help if the case is urgent or there is a deadline very soon?", "less than 5 working days to file a Notice of Appeal"),
+        ("What should the enquirer do if there is a court hearing or deadline in the meantime?", "The matter should then be escalated to staff"),
+        ("Can PBSG write to the court to say that an FJSS application is being processed?", "acknowledgement email received from PBSG"),
+        ("Can PBSG write to the court to say that a CLAS application is being processed?", "acknowledgement email received from PBSG"),
+        ("Can you hurry up?", "upcoming deadline or court date"),
     ],
 )
 async def test_run_without_streaming_uses_initial_faq_handler_for_fixed_faqs(
@@ -184,6 +191,8 @@ async def test_run_without_streaming_uses_initial_faq_handler_for_fixed_faqs(
         "Applicant needs help because employer has not paid salary for three months.",
         "New applicant asking for legal help. How should I start triaging this call?",
         "caller's life is in danger",
+        "Applicant wants to apply for divorce and custody help.",
+        "Applicant has documents for a criminal charge and wants representation.",
         "I need help",
         "hi",
     ],
@@ -442,7 +451,7 @@ async def test_run_without_streaming_keeps_mid_stream_general_enquiry_and_resume
 
     content = third_turn["message"]["content"]
     assert "**General enquiry:**" in content
-    assert "Legal Assistance Scheme for Capital Offences" in content
+    assert "scheme linked to the Courts, not PBSG" in content
     assert "Current question remains" in content
     assert "**Selected Entry:** GEN3-T01" in content
     assert third_turn["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
@@ -578,7 +587,23 @@ async def test_run_without_streaming_routes_correction_turns_to_contextual_handl
 
 
 @pytest.mark.asyncio
-async def test_run_without_streaming_keeps_faq_interrupt_during_locked_flow(chat_approach, monkeypatch):
+@pytest.mark.parametrize(
+    ("question", "expected_text"),
+    [
+        ("What is LASCO?", "scheme linked to the Courts, not PBSG"),
+        ("What are your operating hours?", "Hotline operating hours"),
+        ("How does the enquirer apply for PDO?", "go.gov.sg/applypdo"),
+        ("What is annual value?", "estimated gross annual rent"),
+        ("Can LAB help if the case is urgent or there is a deadline very soon?", "less than 5 working days to file a Notice of Appeal"),
+        ("What should the enquirer do if there is a court hearing or deadline in the meantime?", "The matter should then be escalated to staff"),
+        ("Can PBSG write to the court to say that an FJSS application is being processed?", "acknowledgement email received from PBSG"),
+        ("Can PBSG write to the court to say that a CLAS application is being processed?", "acknowledgement email received from PBSG"),
+        ("Can you hurry up?", "upcoming deadline or court date"),
+    ],
+)
+async def test_run_without_streaming_keeps_faq_interrupt_during_locked_flow(
+    chat_approach, monkeypatch, question, expected_text
+):
     async def fail_if_called(*args, **kwargs):
         raise AssertionError("mid-stream FAQ interrupt should not call retrieval or LLM")
 
@@ -592,7 +617,7 @@ async def test_run_without_streaming_keeps_faq_interrupt_during_locked_flow(chat
 
 > **Q1: \"Are you currently represented by a lawyer on this same matter?\"**""",
         },
-        {"role": "user", "content": "What is LASCO?"},
+        {"role": "user", "content": question},
     ]
 
     result = await chat_approach.run_without_streaming(
@@ -603,5 +628,548 @@ async def test_run_without_streaming_keeps_faq_interrupt_during_locked_flow(chat
     )
 
     assert "**General enquiry:**" in result["message"]["content"]
+    assert expected_text in result["message"]["content"]
     assert "Current question remains" in result["message"]["content"]
     assert result["context"]["thoughts"][0].title == "Deterministic PBSG general enquiry interrupt"
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_deadline_question_as_document_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("document deadline FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What should the enquirer do if there is a court hearing or deadline in the meantime?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "The matter should then be escalated to staff" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_urgent_lab_question_as_document_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("document urgent-LAB FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can LAB help if the case is urgent or there is a deadline very soon?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "less than 5 working days to file a Notice of Appeal" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_hurry_up_prompt_as_document_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("document hurry-up FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can you hurry up?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "upcoming deadline or court date" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_nonprofit_question_as_document_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("document non-profit FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I am calling on behalf of a non-profit and need help. Can PBSG help?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "nls@probono.sg" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_routes_substantive_deadline_case_instead_of_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("substantive first turn should ask contact capture before routing")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has a court hearing tomorrow and needs help."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_application_case_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("substantive first turn should ask contact capture before routing")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant wants to apply for divorce and custody help."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_documents_case_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("substantive first turn should ask contact capture before routing")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant has documents for a criminal charge and wants representation."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_treats_business_case_question_as_document_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("document business FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can you help with business matters?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "PBSG generally does not assist with business or corporate matters" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_overseas_case_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("substantive first turn should ask contact capture before routing")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Applicant is overseas and needs help with a family case."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_frontliner_role_boundary_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("frontliner-role FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "You are all lawyers, right?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "frontliners may not be lawyers" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_complaints_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("complaints FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can I complain?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "help@probono.sg" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_keeps_frontliner_role_faq_interrupt_during_locked_flow(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("mid-stream frontliner-role FAQ should not call retrieval or LLM")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+    messages = [
+        {
+            "role": "assistant",
+            "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: \"Are you currently represented by a lawyer on this same matter?\"**""",
+        },
+        {"role": "user", "content": "You are all lawyers, right?"},
+    ]
+
+    result = await chat_approach.run_without_streaming(
+        messages,
+        {},
+        {},
+        session_state={"pbsg_contact_capture": {"status": "completed", "name": "Jane", "phone": "91234567"}},
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "frontliners may not be lawyers" in result["message"]["content"]
+    assert "Current question remains" in result["message"]["content"]
+    assert result["context"]["thoughts"][0].title == "Deterministic PBSG general enquiry interrupt"
+    assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T01"
+    assert result["context"]["pbsg_triage_state"]["current_question_id"] == "Q1"
+
+
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_just_tell_me_what_to_do_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("directive prompt should not call retrieval or LLM on first turn")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Just tell me what to do."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_i_am_in_danger_now_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("danger prompt should not call retrieval or LLM on first turn")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I am in danger now."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_need_shelter_food_finances_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("basic-needs prompt should not call retrieval or LLM on first turn")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I need help with shelter, food, or finances."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_staff_lookup_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("staff lookup prompt should not call retrieval or LLM on first turn")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I am looking for a staff member, or I am a volunteer lawyer with a query."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_does_not_treat_cpd_recording_query_as_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("cpd/recording prompt should not call retrieval or LLM on first turn")
+
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "I registered for a legal talk and have questions about CPD points or the recording of the talk."}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**Before we begin:**" in result["message"]["content"]
+    assert "**General enquiry:**" not in result["message"]["content"]
+    assert result["session_state"]["pbsg_contact_capture"]["status"] == "awaiting_response"
+    assert "pbsg_triage_state" not in result["context"]
+
+
+
+
+
+
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_tfcc_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("tfcc FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is TFCC?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "South Central Community Family Service Centre" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_mwlc_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("mwlc FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "How do I contact MWLC?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "8764 8298" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_ijlc_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("ijlc FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "What is the Inclusive Justice Law Centre?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "invisible disabilities" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_fjss_court_letter_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("fjss court-letter FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can PBSG write to the court to say that an FJSS application is being processed?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "No. However, the enquirer may show the court" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_run_without_streaming_uses_clas_court_letter_faq(chat_approach, monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("clas court-letter FAQ should not call retrieval or LLM")
+
+    chat_approach.openai_client = object()
+    monkeypatch.setattr(chat_approach, "create_chat_completion", fail_if_called)
+    monkeypatch.setattr(chat_approach, "run_until_final_call", fail_if_called)
+
+    result = await chat_approach.run_without_streaming(
+        [{"role": "user", "content": "Can PBSG write to the court to say that a CLAS application is being processed?"}],
+        {},
+        {},
+        session_state="session-1",
+    )
+
+    assert "**General enquiry:**" in result["message"]["content"]
+    assert "No. However, the enquirer may show the court" in result["message"]["content"]
+    assert "pbsg_triage_state" not in result["context"]
+    assert result["session_state"] == "session-1"
+
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_match_recognises_nonprofit_scope_and_court_letter_questions(chat_approach):
+    nonprofit_match = chat_approach.general_enquiry_match("I am calling on behalf of a non-profit and need help.")
+    fjss_match = chat_approach.general_enquiry_match(
+        "Can PBSG write to the court to say that an FJSS application is being processed?"
+    )
+    clas_match = chat_approach.general_enquiry_match(
+        "Can PBSG write to the court to say that a CLAS application is being processed?"
+    )
+
+    assert nonprofit_match is None
+    assert fjss_match is not None
+    assert fjss_match[0] == "faq_501"
+    assert clas_match is not None
+    assert clas_match[0] == "faq_602"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_match_recognises_frontliner_role_boundary(chat_approach):
+    match = chat_approach.general_enquiry_match("You are all lawyers, right?")
+    assert match is not None
+    assert match[0] == "faq_670"
+
+
+@pytest.mark.asyncio
+async def test_general_enquiry_match_does_not_match_existing_lawyer_answer(chat_approach):
+    assert chat_approach.general_enquiry_match("I already have a lawyer.") is None
+    assert chat_approach.general_enquiry_answer("I already have a lawyer.") is None
+    assert pbsg_triage_state.is_general_enquiry_interrupt("I already have a lawyer.") is False
+    triage_state = pbsg_triage_state.build_triage_state(
+        [
+            {
+                "role": "assistant",
+                "content": """**Selected Entry:** GEN3-T01
+
+**Ask the applicant (read verbatim):**
+
+> **Q1: "Are you currently represented by a lawyer on this same matter?"**""",
+            }
+        ],
+        chat_approach.pbsg_golden_set_entries,
+        "I already have a lawyer.",
+    )
+    assert pbsg_triage_state.classify_turn_interrupt(
+        chat_approach.pbsg_golden_set_entries, triage_state, "I already have a lawyer."
+    ).turn_type != "current_topic_side_question"
+    assert chat_approach.general_enquiry_interrupt_answer("I already have a lawyer.", triage_state) is None
+    assert pbsg_triage_state.canonical_fact_key_for_question(
+        chat_approach.pbsg_golden_set_entries["GEN3-T01"]["branching_logic"]["Q1"]["question"]
+    ) == "applicant.representation_status"

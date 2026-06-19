@@ -7,6 +7,8 @@ from typing import Any
 
 from openai.types.chat import ChatCompletionMessageParam
 
+from pbsg_document_faqs import is_document_faq_query
+
 
 @dataclass
 class PBSGTriageQuestionTarget:
@@ -269,11 +271,11 @@ CLARIFICATION_QUESTION_PATTERN = re.compile(
     r"\b(what is|what's|what does|can you explain|could you explain|meaning of)\b", flags=re.IGNORECASE
 )
 GENERAL_ENQUIRY_INTERRUPT_PATTERN = re.compile(
-    r"\b(what is|what's|what does|what happens|why|how|tell me more|explain|meaning of|where|who can|who is|who qualifies|can .* help|get help|services|located|location|address|counter|eligible|eligibility|qualify|route|routing|stream|workstream|workflow|triage|staff|escalate|urgent|deadline|free|fees?|costs?|appointment|apply|application|documents?|legal advice|streaming)\b",
+    r"\b(what is|what's|what are|what does|what happens|why|how|how much|tell me more|explain|meaning of|where|who can|who is|who qualifies|can\b|is there|difference between|operating hours|opening hours|walk[- ]?in|waiting time|contact details|phone number|hotline|annual value|pchi|means test|merits test|services|route|routing|stream|workstream|workflow|triage|staff escalation|legal advice|clinic|confidential|volunteer|donate|complain|lawyers\b|write to the court|non-profit|charity|social enterprise|interpret(?:ation|er)?|accompan(?:y|iment)|recommend(?: me)? a lawyer)\b",
     flags=re.IGNORECASE,
 )
 GENERAL_ENQUIRY_KEYWORD_PATTERN = re.compile(
-    r"\b(pdo|lasco|clas|lab|fjss|pchi|legal aid|public defender(?:['’]s)? office|family justice support scheme|criminal legal aid scheme|legal aid bureau|route|stream|workflow|triage|urgent|vulnerable|escalate|staff|appointment|documents?)\b",
+    r"\b(pbsg|pro bono sg|pdo|lasco|clas|lab|fjss|tfcc|mwlc|ijlc|pchi|annual value|legal aid|public defender(?:['’]s)? office|family justice support scheme|criminal legal aid scheme|legal aid bureau|community law centres?|transnational family care centre|migrant workers[’']? law centre|inclusive justice law centre|route|stream|workflow|triage|vulnerable applicant|staff escalation|clinic|confidential|volunteer|donate|complain|operating hours|walk[- ]?in|waiting time|contact details|means test|merits test|lawyers\b|write to the court|non-profit|charity|social enterprise|interpreter|interpretation|recommend(?: me)? a lawyer)\b",
     flags=re.IGNORECASE,
 )
 SAFETY_INTERRUPT_PATTERN = re.compile(
@@ -2527,6 +2529,8 @@ def is_general_enquiry_interrupt(latest_user_query: str) -> bool:
     normalized = re.sub(r"\s+", " ", latest_user_query).strip().lower()
     if not normalized:
         return False
+    if is_document_faq_query(latest_user_query):
+        return True
     if not GENERAL_ENQUIRY_INTERRUPT_PATTERN.search(normalized):
         return False
     return bool(GENERAL_ENQUIRY_KEYWORD_PATTERN.search(normalized))

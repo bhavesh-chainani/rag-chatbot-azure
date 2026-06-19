@@ -2401,6 +2401,45 @@ def substantive_initial_candidates(
     ]
 
 
+def has_dire_urgent_signal(text: str) -> bool:
+    normalized = text.lower()
+    return bool(
+        re.search(
+            r"\b(immediate threat|in danger|unsafe right now|not safe right now|self[- ]?harm|suicid|"
+            r"medical emergency|police custody|detention|detained|deport(?:ed|ation)?|removal tonight|"
+            r"no safe place tonight|no shelter tonight|nowhere safe tonight|no food|no money for basic needs)\b",
+            normalized,
+        )
+    )
+
+
+def has_severe_vulnerability_signal(text: str) -> bool:
+    normalized = text.lower()
+    return bool(
+        re.search(
+            r"\b(minor|under 18|child is calling|caregiver abuse|helper appears to control|control the conversation|"
+            r"serious confusion|severely confused|cannot communicate|cannot decide|coercive control)\b",
+            normalized,
+        )
+    )
+
+
+def should_prioritize_urgent_first_turn(text: str, substantive_candidates: list[PBSGTopicCandidate]) -> bool:
+    if has_dire_urgent_signal(text):
+        return True
+    if substantive_candidates:
+        return False
+    return deadline_branch_key_from_text(text) == "if_yes"
+
+
+def should_prioritize_vulnerability_first_turn(text: str, substantive_candidates: list[PBSGTopicCandidate]) -> bool:
+    if has_severe_vulnerability_signal(text):
+        return True
+    if substantive_candidates:
+        return False
+    return bool(GEN3_T13_PRIMARY_PATTERN.search(text))
+
+
 def resolve_initial_topics(
     entries: dict[str, dict[str, Any]],
     latest_user_query: str,
@@ -2409,12 +2448,27 @@ def resolve_initial_topics(
         return None
     fallback_entry_id = "GEN3-T01" if "GEN3-T01" in entries else sorted(entries)[0]
     normalized = re.sub(r"\s+", " ", latest_user_query).strip()
+    fallback_overlays = initial_topic_overlays(normalized, fallback_entry_id, entries)
     if not normalized or BARE_START_PATTERN.match(normalized) or not SUBSTANTIVE_FACT_PATTERN.search(normalized):
+        if "GEN3-T06" in fallback_overlays and should_prioritize_urgent_first_turn(normalized, []):
+            return PBSGTopicResolution(
+                entry_id="GEN3-T06",
+                confidence=0.8,
+                reason="dire urgent signal detected on first turn",
+                overlays=[],
+            )
+        if "GEN3-T13" in fallback_overlays and should_prioritize_vulnerability_first_turn(normalized, []):
+            return PBSGTopicResolution(
+                entry_id="GEN3-T13",
+                confidence=0.75,
+                reason="severe vulnerability signal detected on first turn",
+                overlays=[],
+            )
         return PBSGTopicResolution(
             entry_id=fallback_entry_id,
             confidence=0.55,
             reason="defaulted to first-contact triage because no clear specialty facts were present",
-            overlays=initial_topic_overlays(normalized, fallback_entry_id, entries),
+            overlays=fallback_overlays,
         )
 
     candidates = initial_topic_candidates(entries, latest_user_query)
@@ -2437,11 +2491,11 @@ def resolve_initial_topics(
     has_urgent = "GEN3-T06" in overlays
     has_vulnerability = "GEN3-T13" in overlays
 
-    if has_urgent:
+    if has_urgent and should_prioritize_urgent_first_turn(normalized, substantive_candidates):
         return PBSGTopicResolution(
             entry_id="GEN3-T06",
             confidence=max(candidate.confidence for candidate in primary_candidates),
-            reason="priority urgent signal detected on first turn",
+            reason="dire urgent signal detected on first turn",
             queued_topics=[
                 PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
                 for candidate in substantive_candidates
@@ -2449,11 +2503,11 @@ def resolve_initial_topics(
             candidates=candidates,
         )
 
-    if has_vulnerability and substantive_candidates:
+    if has_vulnerability and should_prioritize_vulnerability_first_turn(normalized, substantive_candidates):
         return PBSGTopicResolution(
             entry_id="GEN3-T13",
             confidence=max(candidate.confidence for candidate in primary_candidates),
-            reason="priority vulnerability signal detected on first turn",
+            reason="severe vulnerability signal detected on first turn",
             queued_topics=[
                 PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
                 for candidate in substantive_candidates
@@ -2461,8 +2515,10 @@ def resolve_initial_topics(
             candidates=candidates,
         )
 
-    best_candidate = primary_candidates[0]
     if substantive_candidates and "GEN3-T01" in entries:
+        filtered_overlays = [
+            overlay for overlay in overlays if overlay in {"GEN3-T06", "GEN3-T13"}
+        ]
         reason = substantive_candidates[0].evidence
         if len(substantive_candidates) > 1:
             reason = f"multi-topic match: {substantive_candidates[0].evidence}"
@@ -2470,12 +2526,60 @@ def resolve_initial_topics(
             entry_id="GEN3-T01",
             confidence=substantive_candidates[0].confidence,
             reason=reason,
+            overlays=filtered_overlays,
             queued_topics=[
                 PBSGQueuedTopic(entry_id=candidate.entry_id, evidence=candidate.evidence, confidence=candidate.confidence)
                 for candidate in substantive_candidates
             ],
             candidates=candidates,
         )
+
+    if has_vulnerability and not substantive_candidates and "GEN3-T13" in entries:
+        return PBSGTopicResolution(
+            entry_id="GEN3-T13",
+            confidence=max(candidate.confidence for candidate in primary_candidates),
+            reason="vulnerability handling is the clearest first-turn issue",
+            overlays=[overlay for overlay in overlays if overlay != "GEN3-T13"],
+            candidates=candidates,
+        )
+
+    if has_urgent and not substantive_candidates and "GEN3-T06" in entries and should_prioritize_urgent_first_turn(normalized, []):
+        return PBSGTopicResolution(
+            entry_id="GEN3-T06",
+            confidence=max(candidate.confidence for candidate in primary_candidates),
+            reason="urgent handling is the clearest first-turn issue",
+            overlays=[overlay for overlay in overlays if overlay != "GEN3-T06"],
+            candidates=candidates,
+        )
+
+    if has_vulnerability and not substantive_candidates and "GEN3-T06" in entries and "GEN3-T06" in overlays and has_dire_urgent_signal(normalized):
+        return PBSGTopicResolution(
+            entry_id="GEN3-T06",
+            confidence=max(candidate.confidence for candidate in primary_candidates),
+            reason="urgent safety or basic-needs concern overrides vulnerability-first handling",
+            overlays=["GEN3-T13"],
+            candidates=candidates,
+        )
+
+    if has_urgent and not substantive_candidates and fallback_entry_id == "GEN3-T01":
+        return PBSGTopicResolution(
+            entry_id=fallback_entry_id,
+            confidence=0.6,
+            reason="defaulted to first-contact triage while noting an urgent overlay",
+            overlays=overlays,
+            candidates=candidates,
+        )
+
+    if has_vulnerability and not substantive_candidates and fallback_entry_id == "GEN3-T01":
+        return PBSGTopicResolution(
+            entry_id=fallback_entry_id,
+            confidence=0.6,
+            reason="defaulted to first-contact triage while noting a vulnerability overlay",
+            overlays=overlays,
+            candidates=candidates,
+        )
+
+    best_candidate = primary_candidates[0]
 
     if CAPITAL_OFFENCE_PATTERN.search(normalized) and "GEN3-T02" in entries:
         return PBSGTopicResolution(

@@ -59,6 +59,8 @@ from pbsg_triage_state import (
     resolve_expected_transition,
     resolve_initial_topic,
     safe_escalation_response,
+    should_prioritize_urgent_first_turn,
+    should_prioritize_vulnerability_first_turn,
     validate_response_transition,
     validate_response_questions,
 )
@@ -91,6 +93,28 @@ def build_memory_pack(triage_state: Any) -> dict[str, Any]:
     }
 
 
+HISTORY_SESSION_ID_KEY = "history_session_id"
+
+
+def extract_history_session_id(session_state: Any) -> str | None:
+    if isinstance(session_state, str) and session_state:
+        return session_state
+    if isinstance(session_state, dict):
+        session_id = session_state.get(HISTORY_SESSION_ID_KEY)
+        if isinstance(session_id, str) and session_id:
+            return session_id
+    return None
+
+
+def session_state_with_history_id(session_state: Any) -> dict[str, Any] | None:
+    if isinstance(session_state, dict):
+        return dict(session_state)
+    history_session_id = extract_history_session_id(session_state)
+    if history_session_id:
+        return {HISTORY_SESSION_ID_KEY: history_session_id}
+    return None
+
+
 def extract_session_memory(session_state: Any) -> dict[str, Any] | None:
     if isinstance(session_state, dict):
         memory = session_state.get("pbsg_session_memory")
@@ -108,11 +132,9 @@ def extract_contact_capture_state(session_state: Any) -> dict[str, Any] | None:
 
 
 def extend_session_state_with_contact_capture(session_state: Any, contact_state: dict[str, Any]) -> Any:
-    if isinstance(session_state, dict):
-        updated = dict(session_state)
-        updated["pbsg_contact_capture"] = contact_state
-        return updated
-    return {"pbsg_contact_capture": contact_state}
+    updated = session_state_with_history_id(session_state) or {}
+    updated["pbsg_contact_capture"] = contact_state
+    return updated
 
 
 def encode_contact_pending_message(message: str) -> str:
@@ -331,11 +353,11 @@ def parse_contact_capture_reply(latest_content: str, session_state: Any) -> tupl
 
 def extend_session_state_with_memory(session_state: Any, triage_state: Any) -> Any:
     memory_pack = build_memory_pack(triage_state)
-    if isinstance(session_state, dict):
-        updated = dict(session_state)
-        updated["pbsg_session_memory"] = memory_pack
-        return updated
-    return session_state
+    updated = session_state_with_history_id(session_state)
+    if updated is None:
+        return session_state
+    updated["pbsg_session_memory"] = memory_pack
+    return updated
 
 
 def hydrate_triage_state_from_session_memory(triage_state: Any, session_state: Any) -> Any:
@@ -2289,13 +2311,26 @@ class ChatReadRetrieveReadApproach(Approach):
             }:
                 predicted_substantive_topics.append(topic)
 
-        if "GEN3-T06" in overlays:
+        prioritize_urgent_first = "GEN3-T06" in overlays and should_prioritize_urgent_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+        prioritize_vulnerability_first = "GEN3-T13" in overlays and should_prioritize_vulnerability_first_turn(
+            latest_content, predicted_substantive_topics
+        )
+
+        if prioritize_urgent_first:
             effective_entry_id = "GEN3-T06"
             effective_queued_topics = predicted_substantive_topics
-        elif "GEN3-T13" in overlays and predicted_substantive_topics:
+        elif prioritize_vulnerability_first:
             effective_entry_id = "GEN3-T13"
             effective_queued_topics = predicted_substantive_topics
         elif predicted_substantive_topics and "GEN3-T01" in self.pbsg_golden_set_entries:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T13" in overlays and effective_entry_id == "GEN3-T13" and predicted_substantive_topics:
+            effective_entry_id = "GEN3-T01"
+            effective_queued_topics = predicted_substantive_topics
+        elif "GEN3-T06" in overlays and effective_entry_id == "GEN3-T06" and predicted_substantive_topics:
             effective_entry_id = "GEN3-T01"
             effective_queued_topics = predicted_substantive_topics
 

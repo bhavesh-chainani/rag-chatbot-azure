@@ -2306,6 +2306,7 @@ class ChatReadRetrieveReadApproach(Approach):
                 )
             )
         # HELLOOOOOOOOOO
+        ## WASSSUPPPP
         for topic in queued_topics:
             if topic.entry_id in substantive_entry_ids and topic.entry_id not in {
                 existing.entry_id for existing in predicted_substantive_topics

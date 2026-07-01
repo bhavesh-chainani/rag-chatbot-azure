@@ -336,9 +336,9 @@ psutil==7.1.2
     # via azure-monitor-opentelemetry-exporter
 pycparser==2.22
     # via cffi
-pydantic==2.12.5
+pydantic==2.13.4
     # via openai
-pydantic-core==2.41.5
+pydantic-core==2.47.0
     # via pydantic
 pygments==2.19.2
     # via rich

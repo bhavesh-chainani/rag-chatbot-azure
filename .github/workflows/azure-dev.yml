@@ -124,7 +124,7 @@ jobs:
       QUERY_ROUTER_ENABLED: ${{ vars.QUERY_ROUTER_ENABLED }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install azd
         uses: Azure/setup-azd@v2.3.0

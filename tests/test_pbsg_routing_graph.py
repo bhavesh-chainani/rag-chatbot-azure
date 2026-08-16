@@ -20,7 +20,6 @@ from pbsg_triage_state import (
     resolve_initial_topic,
 )
 
-
 GOLDEN_SET_DIR = Path(__file__).resolve().parents[1] / "data" / "pbsg_golden_set_by_id"
 
 
@@ -118,7 +117,9 @@ def test_gen3_routes_all_have_structured_read_aloud_cards():
         routes = route_labels(entry)
         routing_structured = entry.get("routing_structured")
         assert isinstance(routing_structured, dict), f"{entry_id} must define routing_structured"
-        assert routes <= set(routing_structured), f"{entry_id} missing structured routes: {sorted(routes - set(routing_structured))}"
+        assert routes <= set(
+            routing_structured
+        ), f"{entry_id} missing structured routes: {sorted(routes - set(routing_structured))}"
 
         for route_label in sorted(routes):
             card = routing_structured[route_label]
@@ -218,19 +219,16 @@ def test_pbsg_golden_set_branching_graph_targets_are_valid():
                 transition = parse_transition_outcome(entries, entry_id, question_id, branch_key, outcome)
                 if transition.transition_type in {"proceed_question", "concurrent_route_question"}:
                     assert transition.target_question_id in branching_logic, (
-                        f"{entry_id} {question_id}.{branch_key} points to missing "
-                        f"{transition.target_question_id}"
+                        f"{entry_id} {question_id}.{branch_key} points to missing " f"{transition.target_question_id}"
                     )
                     assert transition.target_entry_id == entry_id
                 elif transition.transition_type in {"handoff_entry", "nested_stream", "cross_reference"}:
                     assert transition.target_entry_id in entries, (
-                        f"{entry_id} {question_id}.{branch_key} points to missing "
-                        f"{transition.target_entry_id}"
+                        f"{entry_id} {question_id}.{branch_key} points to missing " f"{transition.target_entry_id}"
                     )
                 elif transition.transition_type == "terminal_route":
                     assert transition.route_label in routes, (
-                        f"{entry_id} {question_id}.{branch_key} references missing "
-                        f"{transition.route_label}"
+                        f"{entry_id} {question_id}.{branch_key} references missing " f"{transition.route_label}"
                     )
                 elif transition.transition_type == "clarification":
                     assert transition.target_entry_id == entry_id
@@ -267,7 +265,9 @@ def test_pbsg_workflow_graph_has_edge_for_every_gen3_branch():
                 continue
             for branch_key in question_node:
                 if branch_key.startswith("if_"):
-                    assert graph.edge_for(entry_id, question_id, branch_key), f"Missing graph edge for {entry_id} {question_id}.{branch_key}"
+                    assert graph.edge_for(
+                        entry_id, question_id, branch_key
+                    ), f"Missing graph edge for {entry_id} {question_id}.{branch_key}"
 
 
 def test_pbsg_routing_engine_renders_every_deterministic_branch():
@@ -360,7 +360,10 @@ def test_nested_urgent_transition_renders_structured_card():
     assert "Your criminal matter may also have an urgent deadline or safety concern" in content
     assert "Now checking: GEN3-T06 Q1" in content
     assert "After this urgent path: resume GEN3-T02 Q3" in content
-    assert "> **GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"**" in content
+    assert (
+        '> **GEN3-T06 Q1: "Is there an immediate threat to your (or someone else\'s) life or physical safety right now?"**'
+        in content
+    )
     assert "**Ask the applicant (read verbatim):**" not in content
 
 
@@ -597,7 +600,13 @@ def test_pbsg_routing_engine_renders_handoff_to_target_entry_q1():
     ("entry_id", "question_id", "branch_key", "expected_route", "expected_text"),
     [
         ("GEN3-T01", "Q2", "if_calling_on_behalf_and_able_to_self_help", "Route B", "Email: help@probono.sg"),
-        ("GEN3-T02", "Q6", "if_yes", "Route E", "Website / application link: https://www.probono.sg/get-legal-help/legal-representation"),
+        (
+            "GEN3-T02",
+            "Q6",
+            "if_yes",
+            "Route E",
+            "Website / application link: https://www.probono.sg/get-legal-help/legal-representation",
+        ),
         ("GEN3-T04", "Q4", "if_no_well_over_no_exceptions", "Route D", "Third-party resources"),
         ("GEN3-T04", "Q4", "if_not_sure", "Route C", "Take down"),
     ],

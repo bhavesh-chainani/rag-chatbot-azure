@@ -336,7 +336,9 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
         entry = entries.get(transition.target_entry_id)
         branching_logic = entry.get("branching_logic") if entry else None
-        question_node = branching_logic.get(transition.target_question_id) if isinstance(branching_logic, dict) else None
+        question_node = (
+            branching_logic.get(transition.target_question_id) if isinstance(branching_logic, dict) else None
+        )
         if not isinstance(question_node, dict):
             return None
         question = question_node.get("question")
@@ -423,7 +425,10 @@ class ChatReadRetrieveReadApproach(Approach):
 
     def golden_set_data_points(self, entries: dict[str, dict[str, Any]]) -> DataPoints:
         return DataPoints(
-            text=[f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}" for entry_id, entry in sorted(entries.items())],
+            text=[
+                f"{entry_id}.json: {json.dumps(entry, ensure_ascii=False)}"
+                for entry_id, entry in sorted(entries.items())
+            ],
             citations=[f"{entry_id}.json" for entry_id in sorted(entries)],
         )
 
@@ -520,7 +525,9 @@ class ChatReadRetrieveReadApproach(Approach):
         for topic in topics:
             if topic.entry_id not in [existing.entry_id for existing in unique_topics]:
                 unique_topics.append(topic)
-        active_line = f"1. {active_workflow} — active workflow" if active_workflow else "1. Current stream — active workflow"
+        active_line = (
+            f"1. {active_workflow} — active workflow" if active_workflow else "1. Current stream — active workflow"
+        )
         queued_lines = [
             f"{index}. {topic.entry_id} — queued workflow (noted from: {topic.evidence})"
             for index, topic in enumerate(unique_topics, start=2)
@@ -584,7 +591,11 @@ class ChatReadRetrieveReadApproach(Approach):
             return None
 
         triage_state = build_triage_state(messages[:-1], self.pbsg_golden_set_entries, latest_content)
-        if triage_state.mode != "FAST_ROUTING" or not triage_state.pending_entry_id or not triage_state.current_question_id:
+        if (
+            triage_state.mode != "FAST_ROUTING"
+            or not triage_state.pending_entry_id
+            or not triage_state.current_question_id
+        ):
             return None
         entry = self.pbsg_golden_set_entries.get(triage_state.pending_entry_id)
         branching_logic = entry.get("branching_logic") if entry else None
@@ -761,12 +772,16 @@ class ChatReadRetrieveReadApproach(Approach):
         topics = self.validated_queued_topics(payload.get("new_topics"), local_classification.new_topics)
         correction = payload.get("correction")
         affects_prior_answer = (
-            bool(correction.get("affects_prior_answer")) if isinstance(correction, dict) else local_classification.affects_prior_answer
+            bool(correction.get("affects_prior_answer"))
+            if isinstance(correction, dict)
+            else local_classification.affects_prior_answer
         )
         return PBSGTurnClassification(
             turn_type=turn_type,
             should_call_llm=True,
-            reason=payload.get("clarification_answer") if isinstance(payload.get("clarification_answer"), str) else None,
+            reason=(
+                payload.get("clarification_answer") if isinstance(payload.get("clarification_answer"), str) else None
+            ),
             pending_branch_key=branch_key,
             pending_answer_confidence=confidence,
             new_topics=topics,
@@ -945,21 +960,45 @@ class ChatReadRetrieveReadApproach(Approach):
     ) -> AsyncGenerator[dict, None]:
         initial_response = self.try_deterministic_initial_response(messages, session_state)
         if initial_response:
-            yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": initial_response["context"],
+                "session_state": session_state,
+            }
             yield {"delta": {"role": "assistant", "content": initial_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": initial_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": initial_response["context"],
+                "session_state": session_state,
+            }
             return
         deterministic_response = self.try_deterministic_locked_response(messages, session_state)
         if deterministic_response:
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": deterministic_response["context"],
+                "session_state": session_state,
+            }
             yield {"delta": {"role": "assistant", "content": deterministic_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": deterministic_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": deterministic_response["context"],
+                "session_state": session_state,
+            }
             return
         structured_response = await self.try_structured_llm_locked_response(messages, overrides, session_state)
         if structured_response:
-            yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": structured_response["context"],
+                "session_state": session_state,
+            }
             yield {"delta": {"role": "assistant", "content": structured_response["message"]["content"]}}
-            yield {"delta": {"role": "assistant"}, "context": structured_response["context"], "session_state": session_state}
+            yield {
+                "delta": {"role": "assistant"},
+                "context": structured_response["context"],
+                "session_state": session_state,
+            }
             return
 
         extra_info, chat_coroutine = await self.run_until_final_call(

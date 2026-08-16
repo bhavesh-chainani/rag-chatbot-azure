@@ -151,9 +151,15 @@ SAFETY_INTERRUPT_PATTERN = re.compile(
 TOPIC_SIGNAL_RULES = [
     ("GEN3-T02", re.compile(r"\b(criminal|charged|charge|police|arrest|offence|offense)\b", flags=re.IGNORECASE)),
     ("GEN3-T03", re.compile(r"\b(divorce|custody|maintenance|matrimonial|family violence|ppo)\b", flags=re.IGNORECASE)),
-    ("GEN3-T04", re.compile(r"\b(employment|landlord|tenant|contract|estate|probate|civil|debt)\b", flags=re.IGNORECASE)),
+    (
+        "GEN3-T04",
+        re.compile(r"\b(employment|landlord|tenant|contract|estate|probate|civil|debt)\b", flags=re.IGNORECASE),
+    ),
     ("GEN3-T06", re.compile(r"\b(urgent|danger|violence|homeless|deadline|court tomorrow)\b", flags=re.IGNORECASE)),
-    ("GEN3-T13", re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE)),
+    (
+        "GEN3-T13",
+        re.compile(r"\b(vulnerable|elderly|minor|disabled|language barrier|social worker)\b", flags=re.IGNORECASE),
+    ),
 ]
 INITIAL_TOPIC_PATTERNS = {
     "GEN3-T02": re.compile(
@@ -197,7 +203,9 @@ ADDRESS_PATTERN = re.compile(
     r"\b(?:\d+\s+[A-Z][^.|]*?(?:Square|Road|Centre|Center|Courts|Singapore\s+\d{6})[^.|]*)",
     flags=re.IGNORECASE,
 )
-HOURS_PATTERN = re.compile(r"\b(?:Mon|Mondays?|Fri|Fridays?|weekends?|PH|am|pm|appointment)[^.]*(?:\.|$)", flags=re.IGNORECASE)
+HOURS_PATTERN = re.compile(
+    r"\b(?:Mon|Mondays?|Fri|Fridays?|weekends?|PH|am|pm|appointment)[^.]*(?:\.|$)", flags=re.IGNORECASE
+)
 
 
 def candidate_golden_set_dirs() -> list[Path]:
@@ -564,7 +572,9 @@ def detect_contradiction_signals(answered_lines: list[str], latest_user_query: s
     prior_rep_no = "represented" in prior and text_has_no_answer(prior)
     prior_rep_yes = "represented" in prior and text_has_yes_answer(prior)
     latest_has_lawyer = bool(re.search(r"\b(my|his|her|their)?\s*(lawyer|solicitor|counsel)\b", latest))
-    latest_no_lawyer = bool(re.search(r"\b(no lawyer|not represented|don't have a lawyer|do not have a lawyer)\b", latest))
+    latest_no_lawyer = bool(
+        re.search(r"\b(no lawyer|not represented|don't have a lawyer|do not have a lawyer)\b", latest)
+    )
     if prior_rep_no and latest_has_lawyer:
         signals.append("representation status changed to existing lawyer")
     elif prior_rep_yes and latest_no_lawyer:
@@ -690,10 +700,14 @@ def resolve_initial_topic(
             evidence[entry_id] = match.group(0)
         if entry_id == "GEN3-T13" and match and not GEN3_T13_PRIMARY_PATTERN.search(normalized):
             score -= 0.45
-        if entry_id == "GEN3-T06" and match and any(
-            candidate in scores or INITIAL_TOPIC_PATTERNS[candidate].search(normalized)
-            for candidate in ("GEN3-T02", "GEN3-T03", "GEN3-T04")
-            if candidate in INITIAL_TOPIC_PATTERNS
+        if (
+            entry_id == "GEN3-T06"
+            and match
+            and any(
+                candidate in scores or INITIAL_TOPIC_PATTERNS[candidate].search(normalized)
+                for candidate in ("GEN3-T02", "GEN3-T03", "GEN3-T04")
+                if candidate in INITIAL_TOPIC_PATTERNS
+            )
         ):
             score -= 0.35
         if score > 0:
@@ -879,38 +893,56 @@ def format_state_prompt(state: PBSGTriageState) -> str:
         f"- Mode: {state.mode}.",
     ]
     if not state.workflow_locked or not state.workflow_id:
-        lines.append("- Workflow locked: false. Use ORCHESTRATION MODE to identify and lock the safest workflow before execution.")
+        lines.append(
+            "- Workflow locked: false. Use ORCHESTRATION MODE to identify and lock the safest workflow before execution."
+        )
         return "\n".join(lines)
 
     lines.append(
         f"- Workflow locked: {state.workflow_id}. Do not re-run workflow identification unless a branch explicitly hands off, a monitor requires escalation, material new facts appear, or repair is required."
     )
     if state.active_workflow:
-        lines.append(f"- Active workflow: {state.active_workflow}. Only this workflow may ask the next primary question.")
+        lines.append(
+            f"- Active workflow: {state.active_workflow}. Only this workflow may ask the next primary question."
+        )
     if state.queued_workflows:
-        lines.append(f"- Queued workflows: {', '.join(state.queued_workflows)}. Do not ask from these workflows until the active workflow is routed, suspended by rule, or explicitly hands off.")
+        lines.append(
+            f"- Queued workflows: {', '.join(state.queued_workflows)}. Do not ask from these workflows until the active workflow is routed, suspended by rule, or explicitly hands off."
+        )
     if state.completed_workflows:
         lines.append(f"- Completed workflows: {', '.join(state.completed_workflows)}.")
     if state.concurrent_monitors:
-        lines.append(f"- Concurrent monitors: {', '.join(state.concurrent_monitors)}. They may interrupt only for urgency threshold, safety issue, or required escalation.")
+        lines.append(
+            f"- Concurrent monitors: {', '.join(state.concurrent_monitors)}. They may interrupt only for urgency threshold, safety issue, or required escalation."
+        )
     if state.pending_entry_id and state.current_question_id:
-        lines.append(f"- Pending question: {state.pending_entry_id} {state.current_question_id}. Treat the user's latest message as the answer to this question.")
+        lines.append(
+            f"- Pending question: {state.pending_entry_id} {state.current_question_id}. Treat the user's latest message as the answer to this question."
+        )
     if state.latest_answer_classification:
-        lines.append(f"- Latest answer classification: {state.latest_answer_classification}. In FAST_ROUTING mode, execute the matching branch without filler.")
+        lines.append(
+            f"- Latest answer classification: {state.latest_answer_classification}. In FAST_ROUTING mode, execute the matching branch without filler."
+        )
     if state.allowed_transitions:
         lines.append(f"- Allowed transitions for the pending question: {', '.join(state.allowed_transitions)}.")
     if state.repair_required:
         lines.append("- Repair required: true. Enter REPAIR MODE before continuing.")
     if state.contradiction_signals:
         lines.append(f"- Material contradiction signals: {'; '.join(state.contradiction_signals)}.")
-        lines.append("- Invalidate downstream decisions that depended on the contradicted state, relock the workflow, then return to FAST_ROUTING mode.")
+        lines.append(
+            "- Invalidate downstream decisions that depended on the contradicted state, relock the workflow, then return to FAST_ROUTING mode."
+        )
     active = [name for name, enabled in state.active_monitors.items() if enabled]
     if active:
-        lines.append(f"- Active monitors triggered: {', '.join(active)}. Apply the Golden Set escalation/concurrent-routing rule if it is triggered by the current workflow.")
+        lines.append(
+            f"- Active monitors triggered: {', '.join(active)}. Apply the Golden Set escalation/concurrent-routing rule if it is triggered by the current workflow."
+        )
     if state.answered_lines:
         lines.append("- Prior visible triage state to preserve:")
         lines.extend(f"  - {line}" for line in state.answered_lines)
-    lines.append("- If the latest answer is ambiguous, unsupported, contradictory, or cannot map to one allowed branch, ask the approved single clarification or escalate to PBSG Staff. Never guess.")
+    lines.append(
+        "- If the latest answer is ambiguous, unsupported, contradictory, or cannot map to one allowed branch, ask the approved single clarification or escalate to PBSG Staff. Never guess."
+    )
     return "\n".join(lines)
 
 
@@ -996,8 +1028,15 @@ def clean_route_script(text: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"\bIf applicant is unable to self-apply\b", "If you cannot self-apply", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bIf applicant has difficulties going to PBSG\b", "If you have difficulties going to PBSG", text, flags=re.IGNORECASE)
-    text = re.sub(r"\binform applicant to apply for CLAS:\s*", "Please apply for CLAS through ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\bIf applicant has difficulties going to PBSG\b",
+        "If you have difficulties going to PBSG",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\binform applicant to apply for CLAS:\s*", "Please apply for CLAS through ", text, flags=re.IGNORECASE
+    )
     text = re.sub(r"\binform applicant to go to\b", "you may go to", text, flags=re.IGNORECASE)
     text = re.sub(r"\bInform the applicant that\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bInform applicant that\s+", "", text, flags=re.IGNORECASE)
@@ -1008,10 +1047,16 @@ def clean_route_script(text: str) -> str:
     text = re.sub(r"\bthe applicant\b", "you", text, flags=re.IGNORECASE)
     text = re.sub(r"\bapplicant's\b", "your", text, flags=re.IGNORECASE)
     text = re.sub(r"\bapplicant\b", "you", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bPBSG can provide general information on schemes to you\b", "PBSG can provide general information on schemes", text)
+    text = re.sub(
+        r"\bPBSG can provide general information on schemes to you\b",
+        "PBSG can provide general information on schemes",
+        text,
+    )
     text = re.sub(r"\bIf you is\b", "If you are", text, flags=re.IGNORECASE)
     text = re.sub(r"\byou is\b", "you are", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bif you cannot self-apply,\s*you may go\b", "If you cannot self-apply, you may go", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\bif you cannot self-apply,\s*you may go\b", "If you cannot self-apply, you may go", text, flags=re.IGNORECASE
+    )
     text = re.sub(
         r"If you cannot self-apply, you may go to PBSG Counter at State Courts Help Centre\s*\([^)]*\)\s*with documents needed\.?",
         "If you cannot self-apply, you may go to the PBSG Counter at the State Courts Help Centre with the required documents.",
@@ -1110,7 +1155,9 @@ def route_sentences_without_script(body: str, script: str) -> list[str]:
     return sentences
 
 
-def structure_route(route_text: str, entry: dict[str, Any] | None = None, route_label: str | None = None) -> StructuredRoute:
+def structure_route(
+    route_text: str, entry: dict[str, Any] | None = None, route_label: str | None = None
+) -> StructuredRoute:
     structured_route = structured_route_from_entry(entry, route_label)
     if structured_route:
         return structured_route
@@ -1120,24 +1167,20 @@ def structure_route(route_text: str, entry: dict[str, Any] | None = None, route_
     access = extract_access_items(body)
     remaining_sentences = route_sentences_without_script(body, script)
     intern_steps = unique_preserve_order(
-        [
-            item
-            for sentence in remaining_sentences
-            for item in summarize_intern_step(sentence)
-        ]
+        [item for sentence in remaining_sentences for item in summarize_intern_step(sentence)]
     )
     prepare = unique_preserve_order(
-        [
-            item
-            for sentence in remaining_sentences
-            for item in summarize_prepare_item(sentence)
-        ]
+        [item for sentence in remaining_sentences for item in summarize_prepare_item(sentence)]
     )
     caveats = unique_preserve_order(
         [
             sentence
             for sentence in remaining_sentences
-            if re.search(r"third-party websites|not affiliated|Do NOT attempt to advise|not able to give legal advice", sentence, flags=re.IGNORECASE)
+            if re.search(
+                r"third-party websites|not affiliated|Do NOT attempt to advise|not able to give legal advice",
+                sentence,
+                flags=re.IGNORECASE,
+            )
         ]
     )
     needs_to_know = unique_preserve_order(
@@ -1149,11 +1192,21 @@ def structure_route(route_text: str, entry: dict[str, Any] | None = None, route_
                 sentence,
                 flags=re.IGNORECASE,
             )
-            and not re.search(r"\bapply\b|\bgo to\b|\btake down\b|\bemail\b|\bshare\b|\bdocuments? needed\b", sentence, flags=re.IGNORECASE)
+            and not re.search(
+                r"\bapply\b|\bgo to\b|\btake down\b|\bemail\b|\bshare\b|\bdocuments? needed\b",
+                sentence,
+                flags=re.IGNORECASE,
+            )
         ]
     )
     if route_label == "Route E" and "CLAS" in route_name:
-        prepare = unique_preserve_order(prepare + ["Financial documents for the means test", "Charge details and other case details if asked on application"])
+        prepare = unique_preserve_order(
+            prepare
+            + [
+                "Financial documents for the means test",
+                "Charge details and other case details if asked on application",
+            ]
+        )
         intern_steps = unique_preserve_order(
             intern_steps
             + [
@@ -1259,7 +1312,11 @@ def parse_transition_outcome(
             resume_question_id=resume_match.group(1).upper() if resume_match else None,
         )
 
-    if entry_id == "GEN3-T06" and route_label == "Route D" and re.search(r"\bReturn to\s+GEN3-T01\b", route_context, flags=re.IGNORECASE):
+    if (
+        entry_id == "GEN3-T06"
+        and route_label == "Route D"
+        and re.search(r"\bReturn to\s+GEN3-T01\b", route_context, flags=re.IGNORECASE)
+    ):
         return PBSGTransition(
             entry_id=entry_id,
             question_id=question_id,
@@ -1328,12 +1385,16 @@ class PBSGWorkflowGraph:
                     )
         return edges
 
-    def edge_for(self, entry_id: str | None, question_id: str | None, branch_key: str | None) -> PBSGWorkflowEdge | None:
+    def edge_for(
+        self, entry_id: str | None, question_id: str | None, branch_key: str | None
+    ) -> PBSGWorkflowEdge | None:
         if not entry_id or not question_id or not branch_key:
             return None
         return self.edges.get((entry_id, question_id, branch_key))
 
-    def transition_for(self, entry_id: str | None, question_id: str | None, branch_key: str | None) -> PBSGTransition | None:
+    def transition_for(
+        self, entry_id: str | None, question_id: str | None, branch_key: str | None
+    ) -> PBSGTransition | None:
         edge = self.edge_for(entry_id, question_id, branch_key)
         return edge.transition if edge else None
 
@@ -1425,7 +1486,9 @@ def resolve_expected_transition(
         return None
     graph = PBSGWorkflowGraph(entries)
     transition = graph.transition_for(state.pending_entry_id, state.current_question_id, branch_key)
-    return transition or parse_transition_outcome(entries, state.pending_entry_id, state.current_question_id, branch_key, outcome)
+    return transition or parse_transition_outcome(
+        entries, state.pending_entry_id, state.current_question_id, branch_key, outcome
+    )
 
 
 def validate_response_questions(content: str | None, entries: dict[str, dict[str, Any]]) -> tuple[bool, str | None]:
@@ -1503,7 +1566,12 @@ def validate_response_transition(
     route_label = extract_response_route_label(content)
     selected_entry_id = extract_selected_entry_id(content)
 
-    if expected_transition.transition_type in {"proceed_question", "nested_stream", "concurrent_route_question", "cross_reference"}:
+    if expected_transition.transition_type in {
+        "proceed_question",
+        "nested_stream",
+        "concurrent_route_question",
+        "cross_reference",
+    }:
         expected_entry_id = expected_transition.target_entry_id
         expected_question_id = expected_transition.target_question_id
         if not targets:
@@ -1530,7 +1598,10 @@ def validate_response_transition(
 
     if expected_transition.transition_type == "handoff_entry":
         if selected_entry_id != expected_transition.target_entry_id:
-            return False, f"response selected {selected_entry_id}; expected handoff to {expected_transition.target_entry_id}"
+            return (
+                False,
+                f"response selected {selected_entry_id}; expected handoff to {expected_transition.target_entry_id}",
+            )
         if targets:
             target = targets[0]
             actual_entry_id = target.entry_id or selected_entry_id
@@ -1657,7 +1728,9 @@ class PBSGRoutingEngine:
                 content = self.render_transition(transition)
                 if not content:
                     return None
-                return PBSGDeterministicResult(content=content, state=state, transition=transition, entries=self.entries)
+                return PBSGDeterministicResult(
+                    content=content, state=state, transition=transition, entries=self.entries
+                )
         transition = self.resolve_transition_from_branch(state, branch_key_override)
         if not transition:
             transition = resolve_expected_transition(self.entries, state, latest_user_query)
@@ -1749,7 +1822,10 @@ class PBSGRoutingEngine:
                     "",
                     "**Concurrent monitors:**",
                     "",
-                    *[f"- {overlay} noted as a monitor, not the active workflow [{overlay}.json]" for overlay in resolution.overlays],
+                    *[
+                        f"- {overlay} noted as a monitor, not the active workflow [{overlay}.json]"
+                        for overlay in resolution.overlays
+                    ],
                 ]
             )
         lines.extend(
@@ -1848,7 +1924,14 @@ class PBSGRoutingEngine:
         lines = self.render_header_and_answered_state(selected_entry_id, transition)
         if transition.transition_type == "concurrent_route_question" and transition.route_label:
             route_text = find_route_text(self.entries.get(transition.entry_id), transition.route_label)
-            lines.extend(["", "**Concurrent routing note:**", "", f"- {route_text or transition.outcome} [{transition.entry_id}.json]"])
+            lines.extend(
+                [
+                    "",
+                    "**Concurrent routing note:**",
+                    "",
+                    f"- {route_text or transition.outcome} [{transition.entry_id}.json]",
+                ]
+            )
         lines.extend(
             [
                 "",
@@ -1918,10 +2001,16 @@ class PBSGRoutingEngine:
                 f'> **"{structured_route.script}"**',
             ]
         )
-        self.extend_route_section(lines, "What the applicant needs to know:", structured_route.needs_to_know, transition.entry_id)
+        self.extend_route_section(
+            lines, "What the applicant needs to know:", structured_route.needs_to_know, transition.entry_id
+        )
         self.extend_route_section(lines, "How to access this route:", structured_route.access, transition.entry_id)
-        self.extend_route_section(lines, "What the applicant should prepare:", structured_route.prepare, transition.entry_id)
-        self.extend_route_section(lines, "Next steps for you (the intern):", structured_route.intern_steps, transition.entry_id)
+        self.extend_route_section(
+            lines, "What the applicant should prepare:", structured_route.prepare, transition.entry_id
+        )
+        self.extend_route_section(
+            lines, "Next steps for you (the intern):", structured_route.intern_steps, transition.entry_id
+        )
         self.extend_route_section(lines, "Important caveat:", structured_route.caveats, transition.entry_id)
         return "\n".join(lines)
 

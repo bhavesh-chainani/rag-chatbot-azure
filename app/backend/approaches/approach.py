@@ -979,7 +979,9 @@ class Approach(ABC):
                 if supported_features.streaming and should_stream:
                     params["stream"] = True
                     params["stream_options"] = {"include_usage": True}
-                params["reasoning_effort"] = reasoning_effort or overrides.get("reasoning_effort") or self.reasoning_effort
+                params["reasoning_effort"] = (
+                    reasoning_effort or overrides.get("reasoning_effort") or self.reasoning_effort
+                )
 
         else:
             # Include parameters that may not be supported for reasoning models

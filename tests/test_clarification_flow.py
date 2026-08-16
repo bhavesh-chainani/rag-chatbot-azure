@@ -234,7 +234,9 @@ class TestSystemPromptClarificationOutput:
         )
         content = rendered["content"]
         assert "Final routing must be extensive and intern-friendly" in content
-        assert "Use OUTPUT A only when the matched `branching_logic` outcome is a terminal **Route <letter>**" in content
+        assert (
+            "Use OUTPUT A only when the matched `branching_logic` outcome is a terminal **Route <letter>**" in content
+        )
         assert "Do **not** use OUTPUT A for `Proceed to Q<next>` outcomes" in content
         assert "Use OUTPUT B whenever the matched `branching_logic` outcome is **Proceed to Q<next>**" in content
         assert "The next question appears exactly once" in content
@@ -270,10 +272,16 @@ class TestSystemPromptClarificationOutput:
             },
         )
         content = rendered["content"]
-        assert "Pull route details from the active selected entry's `routing` array entry matching **Route <letter>**" in content
+        assert (
+            "Pull route details from the active selected entry's `routing` array entry matching **Route <letter>**"
+            in content
+        )
         assert "Include all available links, phone numbers, emails, addresses, opening hours" in content
         assert "appointment instructions, application steps, and counter/in-person fallback instructions" in content
-        assert "Do not invent contact details, documents, addresses, deadlines, eligibility criteria, or application steps" in content
+        assert (
+            "Do not invent contact details, documents, addresses, deadlines, eligibility criteria, or application steps"
+            in content
+        )
         assert "For escalation routes, clearly list the exact details to collect" in content
         assert "For third-party resources, include the caveat from the matching route text" in content
 
@@ -370,7 +378,10 @@ class TestSystemPromptClarificationOutput:
         )
         content = rendered["content"]
         assert "Cross-Topic Handoff State Transfer Rule" in content
-        assert "Handoffs happen ONLY when the active entry's `branching_logic` explicitly says `Proceed to GEN3-Txx`" in content
+        assert (
+            "Handoffs happen ONLY when the active entry's `branching_logic` explicitly says `Proceed to GEN3-Txx`"
+            in content
+        )
         assert "Do not hand off early just because a parent answer would also answer a target entry's Q1" in content
         assert "Applies ONLY after an explicit `Proceed to GEN3-Txx` handoff" in content
         assert "While still in the parent entry, follow the parent's `branching_logic` only" in content
@@ -391,7 +402,7 @@ class TestSystemPromptClarificationOutput:
         content = rendered["content"]
         assert "Example — GEN3-T03 Q4 = No handoff to GEN3-T04" in content
         assert "GEN3-T03.branching_logic.Q4.if_no" in content
-        assert "Even if the latest user message is only \"No\" answering `GEN3-T03 Q4`" in content
+        assert 'Even if the latest user message is only "No" answering `GEN3-T03 Q4`' in content
         assert "Use the full conversation state, not only the latest user message" in content
         assert "Switch the active selected entry to `GEN3-T04`" in content
         assert "`GEN3-T03 Q2 = No, foreigner` answers `GEN3-T04 Q1 = No, foreigner`" in content
@@ -400,8 +411,8 @@ class TestSystemPromptClarificationOutput:
         assert "Carried over: GEN3-T04 Q1 = No, foreigner → Proceed to Q4" in content
         assert "Next question: Q4 (Means) from GEN3-T04" in content
         assert "Per Capita Household Income (PCHI) ≤ S$5,000" in content
-        assert "Do NOT ask \"Are you a Singapore Citizen or PR?\"" in content
-        assert "Do NOT ask \"Is the issue about a civil matter or general legal issue?\"" in content
+        assert 'Do NOT ask "Are you a Singapore Citizen or PR?"' in content
+        assert 'Do NOT ask "Is the issue about a civil matter or general legal issue?"' in content
 
     def test_system_prompt_fresh_stream_starts_at_q1(self):
         rendered = self.prompt_manager.build_system_prompt(
@@ -462,7 +473,7 @@ class TestSystemPromptClarificationOutput:
         assert "Proceed to Q2" in content
         assert "GEN3-T02.branching_logic.Q2.question" in content
         assert "Is there a court date/deadline within 14 days?" in content
-        assert "Do NOT ask \"Is there a specific legal deadline within 14 days" in content
+        assert 'Do NOT ask "Is there a specific legal deadline within 14 days' in content
         assert "That is `GEN3-T06 Q3`, and `GEN3-T06` has not been invoked yet" in content
 
     def test_system_prompt_contains_gen3_t02_route_d_to_nested_gen3_t06_q1_example(self):
@@ -483,7 +494,10 @@ class TestSystemPromptClarificationOutput:
         assert "Now, and only now, start the nested urgent leg" in content
         assert "Nested `GEN3-T06` starts at `GEN3-T06 Q1`" in content
         assert "Next question: GEN3-T06 Q1 (Urgent concurrent path)" in content
-        assert "GEN3-T06 Q1: \"Is there an immediate threat to your (or someone else's) life or physical safety right now?\"" in content
+        assert (
+            'GEN3-T06 Q1: "Is there an immediate threat to your (or someone else\'s) life or physical safety right now?"'
+            in content
+        )
 
     def test_system_prompt_forbids_later_question_state_before_prerequisites(self):
         rendered = self.prompt_manager.build_system_prompt(
@@ -521,7 +535,7 @@ class TestSystemPromptClarificationOutput:
         assert "Last answered: Q1 = Yes → Proceed to Q2 (SGC/PR path)" in content
         assert "Next question: Q2 (SGC/PR path) from GEN3-T04" in content
         assert "Are you seeking representation (a lawyer to act for you) or guidance (initial advice)?" in content
-        assert "Do NOT ask \"Are you currently represented by a lawyer on this same matter?\"" in content
+        assert 'Do NOT ask "Are you currently represented by a lawyer on this same matter?"' in content
         assert "That is `GEN3-T01 Q1`" in content
 
     def test_system_prompt_contains_gen3_t04_foreigner_to_means_question_example(self):
@@ -543,7 +557,7 @@ class TestSystemPromptClarificationOutput:
         assert "Last answered: Q1 = No, foreigner → Proceed to Q4 (Means)" in content
         assert "Next question: Q4 (Means) from GEN3-T04" in content
         assert "Next question: Q4 from `GEN3-T04.branching_logic.Q4.question`" not in content
-        assert "Do NOT ask \"What type of matter are you facing?\"" in content
+        assert 'Do NOT ask "What type of matter are you facing?"' in content
         assert "That is `GEN3-T01 Q5`" in content
 
     def test_system_prompt_visible_output_uses_friendly_question_labels(self):

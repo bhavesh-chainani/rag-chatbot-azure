@@ -876,9 +876,7 @@ def test_apply_triage_response_guard_escalates_invalid_question(chat_approach):
                 "if_yes": "Proceed to Q2",
             }
         },
-        "routing": [
-            "Route C (Escalate to PBSG Staff): Take down details and email PBSG Staff on the same day."
-        ],
+        "routing": ["Route C (Escalate to PBSG Staff): Take down details and email PBSG Staff on the same day."],
     }
     extra_info = ExtraInfo(data_points=DataPoints(text=[f"GEN3-T04.json: {json.dumps(entry)}"]))
     content = """**Selected Entry:** GEN3-T04
@@ -977,7 +975,10 @@ async def test_run_without_streaming_routes_obvious_capital_offence_without_llm(
     assert "**Routing Recommendation:** Route A (LASCO)" in content
     assert "GEN3-T06 Q1" not in content
     assert result["context"]["pbsg_triage_state"]["active_workflow"] == "GEN3-T02"
-    assert result["context"]["thoughts"][-1].description == "Answered from Golden Set branching logic without retrieval or LLM generation."
+    assert (
+        result["context"]["thoughts"][-1].description
+        == "Answered from Golden Set branching logic without retrieval or LLM generation."
+    )
 
 
 @pytest.mark.asyncio
@@ -1057,7 +1058,9 @@ async def test_initial_topic_source_pack_injects_default_t01_over_high_ranked_t1
         citations=["GEN3-T13.json"],
     )
 
-    chat_approach.ensure_initial_topic_sources(data_points, [{"role": "user", "content": "start triage"}], "start triage")
+    chat_approach.ensure_initial_topic_sources(
+        data_points, [{"role": "user", "content": "start triage"}], "start triage"
+    )
     entries = chat_approach.extract_golden_set_entries(data_points.text)
 
     assert "GEN3-T01" in entries
@@ -1133,9 +1136,7 @@ async def test_run_without_streaming_uses_deterministic_fast_path_for_locked_flo
 
 
 @pytest.mark.asyncio
-async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_locked_answer(
-    chat_approach, monkeypatch
-):
+async def test_run_without_streaming_uses_structured_llm_fallback_for_complex_locked_answer(chat_approach, monkeypatch):
     class FakeCompletions:
         async def create(self, **kwargs):
             return ChatCompletion.model_validate(

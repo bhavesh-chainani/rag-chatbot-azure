@@ -151,6 +151,8 @@ def test_builder_preserves_existing_routing_structured(pbsg_build, tmp_path, mon
     monkeypatch.setattr(pbsg_build, "OUTPUT_DIR", output_dir)
 
     preserved = pbsg_build.load_existing_routing_structured()
-    entries = pbsg_build.preserve_routing_structured([{"id": "GEN3-T99", "routing": ["Route A (X): Source."]}], preserved)
+    entries = pbsg_build.preserve_routing_structured(
+        [{"id": "GEN3-T99", "routing": ["Route A (X): Source."]}], preserved
+    )
 
     assert entries[0]["routing_structured"]["Route A"]["script"] == "Exact structured script."

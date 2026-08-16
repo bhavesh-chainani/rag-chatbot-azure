@@ -50,6 +50,7 @@ def _cosmos_message_pair_to_answer_row(item: dict[str, Any]) -> list[Any]:
             pass
     return row
 
+
 TITLE_GENERATION_PROMPT = (
     "Generate a short chat title that summarizes the message topic. "
     "Requirements: 5-15 words, concise summary of the message topic, no quotes. "

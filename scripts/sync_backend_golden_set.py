@@ -1,7 +1,6 @@
 import shutil
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "data" / "pbsg_golden_set_by_id"
 TARGET_DIR = ROOT / "app" / "backend" / "data" / "pbsg_golden_set_by_id"

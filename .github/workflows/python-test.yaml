@@ -29,7 +29,7 @@ jobs:
         # @vitejs/plugin-react@6 requires ^20.19.0 || >=22.12.0; Node 22+ for toolchain (e.g. rollup-plugin-visualizer@7)
         node_version: ["22.12", "24"]
     steps:
-        - uses: actions/checkout@v6
+        - uses: actions/checkout@v7
           with:
             # Fetch full history so diff-cover can compute a merge base with origin/main
             fetch-depth: 0
@@ -42,7 +42,7 @@ jobs:
             python-version: ${{ matrix.python_version }}
             activate-environment: true
         - name: Setup node
-          uses: actions/setup-node@v6
+          uses: actions/setup-node@v7
           with:
             node-version: ${{ matrix.node_version }}
         - name: Build frontend
